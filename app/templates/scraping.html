@@ -1,0 +1,468 @@
+{% extends "base.html" %}
+{% block title %}Scraping & Index - florianmatthias{% endblock %}
+
+{% block content %}
+<div id="root"></div>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+    const { useEffect, useRef, useState } = React;
+    const h = React.createElement;
+
+    const Icon = ({ name }) => {
+        const props = { viewBox: "0 0 24 24", "aria-hidden": "true" };
+        switch (name) {
+            case "dashboard":
+                return h("svg", props, [
+                    h("rect", { x: 3, y: 3, width: 8, height: 8, rx: 2 }),
+                    h("rect", { x: 13, y: 3, width: 8, height: 5, rx: 2 }),
+                    h("rect", { x: 13, y: 10, width: 8, height: 11, rx: 2 }),
+                    h("rect", { x: 3, y: 13, width: 8, height: 8, rx: 2 }),
+                ]);
+            case "stats":
+                return h("svg", props, [
+                    h("path", { d: "M3 19h18" }),
+                    h("path", { d: "M6 16v-5" }),
+                    h("path", { d: "M12 16v-8" }),
+                    h("path", { d: "M18 16v-3" }),
+                ]);
+            case "scraping":
+                return h("svg", props, [
+                    h("path", { d: "M21 12a9 9 0 1 1-3-6.7" }),
+                    h("polyline", { points: "21 3 21 9 15 9" }),
+                ]);
+            case "chat":
+                return h("svg", props, [
+                    h("path", { d: "M6 6h12a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H10l-4 3v-3H6a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z" }),
+                ]);
+            case "memory":
+                return h("svg", props, [
+                    h("ellipse", { cx: 12, cy: 6, rx: 7, ry: 3 }),
+                    h("path", { d: "M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" }),
+                    h("path", { d: "M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" }),
+                ]);
+            case "faqs":
+                return h("svg", props, [
+                    h("circle", { cx: 12, cy: 12, r: 9 }),
+                    h("path", { d: "M9.5 9a2.5 2.5 0 0 1 5 0c0 1.6-2.5 1.9-2.5 4" }),
+                    h("path", { d: "M12 17h.01" }),
+                ]);
+            case "pdf":
+                return h("svg", props, [
+                    h("path", { d: "M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" }),
+                    h("path", { d: "M14 3v5h5" }),
+                    h("path", { d: "M9 13h6" }),
+                    h("path", { d: "M9 17h6" }),
+                ]);
+            case "widget":
+                return h("svg", props, [
+                    h("path", { d: "M4 6h16" }),
+                    h("circle", { cx: 9, cy: 6, r: 2 }),
+                    h("path", { d: "M4 12h16" }),
+                    h("circle", { cx: 15, cy: 12, r: 2 }),
+                    h("path", { d: "M4 18h16" }),
+                    h("circle", { cx: 7, cy: 18, r: 2 }),
+                ]);
+            case "integrate":
+                return h("svg", props, [
+                    h("path", { d: "M10 13a3 3 0 0 0 4 0l3-3a3 3 0 0 0-4-4l-1 1" }),
+                    h("path", { d: "M14 11a3 3 0 0 0-4 0l-3 3a3 3 0 0 0 4 4l1-1" }),
+                ]);
+            case "usage":
+                return h("svg", props, [
+                    h("rect", { x: 3, y: 5, width: 18, height: 14, rx: 2 }),
+                    h("path", { d: "M3 10h18" }),
+                    h("path", { d: "M7 15h5" }),
+                ]);
+            case "logout":
+                return h("svg", props, [
+                    h("path", { d: "M4 5h7a2 2 0 0 1 2 2v3" }),
+                    h("path", { d: "M13 14v3a2 2 0 0 1-2 2H4" }),
+                    h("path", { d: "M10 12h10" }),
+                    h("polyline", { points: "16 8 20 12 16 16" }),
+                ]);
+
+            default:
+                return h("svg", props);
+        }
+    };
+
+    const Badge = ({ tone, children }) =>
+        h("span", { className: "badge " + (tone || "ok") }, children);
+
+    const StatusPill = ({ status }) => {
+        const key = status === "ok" ? "ok" : status === "error" ? "error" : "other";
+        return h("span", { className: "status-pill " + key }, status || "n/a");
+    };
+
+    const Logs = ({ lines }) => {
+        if (!lines || !lines.length) return h("div", { className: "muted" }, "Keine Logs vorhanden.");
+        return h("div", { className: "logs" },
+            lines.map((line, idx) => h("div", { key: idx, className: "log-line" }, line))
+        );
+    };
+
+    const Summary = ({ summary }) => {
+        if (!summary || !summary.length) {
+            return h("div", { className: "muted" }, "Noch keine Zusammenfassung vorhanden.");
+        }
+        return h("div", { className: "summary-list" }, [
+            h("div", { key: "head", className: "summary-row" }, [
+                h("span", null, "URL"),
+                h("span", null, "Status"),
+                h("span", null, "Datei"),
+            ]),
+            ...summary.slice(0, 8).map((row, idx) =>
+                h("div", { key: idx, className: "summary-row" }, [
+                    h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, row.url || "—"),
+                    h(StatusPill, { status: row.status }),
+                    h("span", { style: { color: "var(--text-muted)" } }, row.file || "–"),
+                ])
+            ),
+        ]);
+    };
+
+    function Sidebar({ activePage }) {
+        const navItems = [
+            { href: "/dashboard", label: "Dashboard", id: "dashboard", icon: "dashboard" },
+            { href: "/stats", label: "Statistiken", id: "stats", icon: "stats" },
+            { href: "/scraping", label: "Scraping & Index", id: "scraping", icon: "scraping" },
+            { href: "/chat", label: "Chat", id: "chat", icon: "chat" },
+            { href: "/memory", label: "Memory bearbeiten", id: "memory", icon: "memory" },
+            { href: "/faqs", label: "FAQs", id: "faqs", icon: "faqs" },
+            { href: "/pdf-upload", label: "PDF Upload", id: "pdf-upload", icon: "pdf" },
+            { href: "/widget-design", label: "Widget Design", id: "widget-design", icon: "widget" },
+            { href: "/integrate", label: "Integrieren", id: "integrate", icon: "integrate" },
+            { href: "/usage", label: "Kosten", id: "usage", icon: "usage" },
+            { href: "/login/", label: "Logout", id: "logout", icon: "logout", onClick: () => AuthState.logout() },
+        ];
+
+        return h("aside", { className: "sidebar" }, [
+            h("div", { key: "header", className: "sidebar-header" }, [
+                h("div", { className: "sidebar-title" }, "florianmatthias"),
+            ]),
+            h("ul", { key: "nav", className: "nav-list" },
+                navItems.map(item =>
+                    h("li", { key: item.id },
+                        h("a", {
+                            href: item.href,
+                            className: "nav-item" + (activePage === item.id ? " active" : ""),
+                            onClick: item.onClick ? (event) => { event.preventDefault(); item.onClick(); } : undefined,
+                        }, [
+                            h("span", { key: "icon", className: "nav-icon" }, h(Icon, { name: item.icon })),
+                            item.label
+                        ])
+                    )
+                )
+            ),
+        ]);
+    }
+
+    function ScrapingPage() {
+        const [botSlug] = useState(AuthState.getBotSlug());
+        const [sitemapUrl, setSitemapUrl] = useState("");
+        const sitemapInputRef = useRef(null);
+        const [status, setStatus] = useState(null);
+        const [statusError, setStatusError] = useState("");
+        const [runResult, setRunResult] = useState(null);
+        const [isRunning, setIsRunning] = useState(false);
+        const [runLoading, setRunLoading] = useState(false);
+        const [schedule, setSchedule] = useState({ enabled: false, frequency: "weekly", minutes: 0, sitemap_url: "" });
+        const [scheduleStatus, setScheduleStatus] = useState("");
+
+        const refreshStatus = async () => {
+            try {
+                setStatusError("");
+                if (!botSlug.trim()) return;
+                const res = await fetch("/api/admin/status?bot_slug=" + encodeURIComponent(botSlug.trim()), {
+                    headers: AuthState.buildHeaders(),
+                });
+                const data = await res.json();
+                setStatus(data);
+                const runningNow = Boolean(data.running);
+                setIsRunning(runningNow);
+                if (!runningNow && data.last_run) {
+                    setRunResult(data.last_run);
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        };
+
+        useEffect(() => {
+            if (botSlug.trim()) refreshStatus();
+            if (botSlug.trim()) loadSchedule();
+        }, []);
+
+        useEffect(() => {
+            if (!isRunning || !botSlug.trim()) return;
+            const timer = setInterval(() => {
+                refreshStatus();
+            }, 5000);
+            return () => clearInterval(timer);
+        }, [isRunning, botSlug]);
+
+        const handleRun = async (indexOnly = false) => {
+            const effectiveSitemapUrl = (
+                (sitemapInputRef.current && sitemapInputRef.current.value) || sitemapUrl || ""
+            ).trim();
+            if (!botSlug.trim()) {
+                setStatusError("Bitte Bot-Slug auf Dashboard eintragen.");
+                return;
+            }
+            if (!indexOnly && !effectiveSitemapUrl) {
+                setStatusError("Bitte eine Sitemap-URL eintragen.");
+                return;
+            }
+            if (!indexOnly && effectiveSitemapUrl !== sitemapUrl.trim()) {
+                setSitemapUrl(effectiveSitemapUrl);
+            }
+            setRunLoading(true);
+            setRunResult(null);
+            setStatusError("");
+            try {
+                const res = await fetch("/api/admin/run", {
+                    method: "POST",
+                    headers: AuthState.buildHeaders(true),
+                    body: JSON.stringify(
+                        indexOnly
+                            ? { index_only: true, bot_slug: botSlug.trim(), async: true }
+                            : { sitemap_url: effectiveSitemapUrl, bot_slug: botSlug.trim(), async: true }
+                    ),
+                });
+                const data = await res.json();
+                setRunResult(data);
+                setIsRunning(Boolean(data.running));
+                if (!res.ok) setStatusError(data.error || "Job fehlgeschlagen.");
+            } catch (err) {
+                console.error(err);
+                setStatusError("Netzwerkfehler.");
+            } finally {
+                setRunLoading(false);
+                refreshStatus();
+            }
+        };
+
+        const loadSchedule = async () => {
+            try {
+                if (!botSlug.trim()) {
+                    setScheduleStatus("Bitte Bot-Slug auf dem Dashboard eintragen.");
+                    return;
+                }
+                const params = new URLSearchParams();
+                params.set("bot_slug", botSlug);
+                const res = await fetch(`/api/admin/schedule?${params.toString()}`, {
+                    headers: AuthState.buildHeaders(),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    const storedSitemapUrl = data.sitemap_url || "";
+                    setSchedule({
+                        enabled: !!data.enabled,
+                        frequency: data.frequency || "weekly",
+                        minutes: data.minutes || 0,
+                        sitemap_url: storedSitemapUrl,
+                    });
+                    if (storedSitemapUrl && !sitemapUrl.trim()) {
+                        setSitemapUrl(storedSitemapUrl);
+                    }
+                    setScheduleStatus("");
+                } else {
+                    setScheduleStatus(data.error || "Schedule konnte nicht geladen werden.");
+                }
+            } catch (err) {
+                console.error(err);
+                setScheduleStatus("Schedule konnte nicht geladen werden.");
+            }
+        };
+
+        const saveSchedule = async () => {
+            setScheduleStatus("Speichere...");
+            try {
+                if (!botSlug.trim()) {
+                    setScheduleStatus("Bitte Bot-Slug auf dem Dashboard eintragen.");
+                    return;
+                }
+                const payload = {
+                    bot_slug: botSlug,
+                    enabled: schedule.enabled,
+                    sitemap_url: schedule.sitemap_url || sitemapUrl,
+                    frequency: schedule.frequency,
+                    minutes: schedule.minutes,
+                };
+                const res = await fetch("/api/admin/schedule", {
+                    method: "POST",
+                    headers: AuthState.buildHeaders(true),
+                    body: JSON.stringify(payload),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setScheduleStatus(data.error || "Konnte Schedule nicht speichern.");
+                    return;
+                }
+                if (data.schedule) {
+                    const savedSitemapUrl = data.schedule.sitemap_url || "";
+                    setSchedule({
+                        enabled: !!data.schedule.enabled,
+                        frequency: data.schedule.frequency || "weekly",
+                        minutes: data.schedule.minutes || 0,
+                        sitemap_url: savedSitemapUrl,
+                    });
+                    if (savedSitemapUrl) {
+                        setSitemapUrl(savedSitemapUrl);
+                    }
+                }
+                setScheduleStatus("Gespeichert.");
+            } catch (err) {
+                console.error(err);
+                setScheduleStatus("Netzwerkfehler beim Speichern.");
+            }
+        };
+
+        if (!AuthState.isLoggedIn()) {
+            window.location.href = "/login";
+            return null;
+        }
+
+        return h("div", { className: "layout" }, [
+            h(Sidebar, { key: "sidebar", activePage: "scraping" }),
+            h("div", { key: "content", className: "content" }, [
+                h("div", { key: "hero", className: "hero" }, [
+                    h("div", { className: "hero-badge" }, [
+                        h("span", { className: "hero-badge-dot" }),
+                        "Scraping & Index"
+                    ]),
+                    h("h1", { className: "title" }, "Website Scraping"),
+                    h("p", { className: "subtitle" }, "Scrappe Websites über ihre Sitemap und baue einen intelligenten FAISS-Suchindex."),
+                ]),
+                statusError ? h("div", { key: "error", className: "notice error", style: { marginBottom: 16 } }, statusError) : null,
+
+                h("div", { key: "main", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "🔄"), "Scraping starten"]),
+                    h("p", { className: "muted" }, "Gib eine Sitemap-URL ein, um die Website sequentiell zu scrapen und zu indexieren. URLs mit /en/... werden dabei automatisch übersprungen."),
+                    h("div", { className: "control" }, [
+                        h("input", {
+                            ref: sitemapInputRef,
+                            type: "url",
+                            placeholder: "https://example.com/sitemap.xml",
+                            value: sitemapUrl,
+                            onChange: (e) => setSitemapUrl(e.target.value),
+                        }),
+                    ]),
+                    h("div", { style: { display: "flex", gap: 12, flexWrap: "wrap" } }, [
+                        h("button", {
+                            onClick: () => handleRun(false),
+                            disabled: runLoading || isRunning,
+                        }, h("span", null, runLoading ? "⏳ Läuft..." : "🚀 Scrape & Index starten")),
+                        h("button", {
+                            className: "ghost-btn",
+                            onClick: () => handleRun(true),
+                            disabled: runLoading || isRunning,
+                        }, "🔄 Nur Index neu bauen"),
+                    ]),
+                    isRunning ? h("div", { className: "pill", style: { marginTop: 16 } }, "⏳ Aktiver Job läuft...") : null,
+                ]),
+
+                h("div", { key: "schedule", className: "card" }, [
+                    h("div", { className: "chart-header" }, [
+                        h("div", null, [
+                            h("h2", null, [h("span", { className: "card-icon" }, "⏰"), "Automatisches Scraping"]),
+                            h("p", { className: "muted" }, "Plane wiederkehrendes Scraping und Re-Indexing."),
+                        ]),
+                        h("label", { className: "switch" }, [
+                            h("input", {
+                                type: "checkbox",
+                                checked: schedule.enabled,
+                                onChange: (e) => setSchedule((prev) => ({ ...prev, enabled: e.target.checked })),
+                            }),
+                            h("span", { className: "switch-track" }, h("span", { className: "switch-thumb" })),
+                            h("span", null, "Automatik aktivieren"),
+                        ]),
+                    ]),
+                    h("div", { className: "form-grid", style: { marginTop: 16 } }, [
+                        h("div", { className: "form-field" }, [
+                            h("span", { className: "field-label" }, "Frequenz"),
+                            h("div", { className: "control", style: { marginBottom: 0 } }, [
+                                h("select", {
+                                    value: schedule.frequency,
+                                    onChange: (e) => setSchedule((prev) => {
+                                        const next = { ...prev, frequency: e.target.value };
+                                        if (e.target.value === "custom" && (!prev.minutes || prev.minutes < 30)) {
+                                            next.minutes = 60;
+                                        }
+                                        return next;
+                                    }),
+                                }, [
+                                    h("option", { value: "weekly" }, "Wöchentlich"),
+                                    h("option", { value: "daily" }, "Täglich"),
+                                    h("option", { value: "monthly" }, "Monatlich"),
+                                    h("option", { value: "custom" }, "Benutzerdefiniert (Minuten)"),
+                                ]),
+                                schedule.frequency === "custom" ? h("input", {
+                                    type: "number",
+                                    min: 30,
+                                    placeholder: "Intervall in Minuten",
+                                    value: schedule.minutes || "",
+                                    onChange: (e) => setSchedule((prev) => ({ ...prev, minutes: parseInt(e.target.value || "0", 10) })),
+                                    style: { maxWidth: 200 }
+                                }) : null,
+                            ]),
+                            h("span", { className: "helper-text" }, "Täglich = 24h, wöchentlich = 7 Tage, monatlich = 30 Tage."),
+                        ]),
+                        h("div", { className: "form-field" }, [
+                            h("span", { className: "field-label" }, "Sitemap URL"),
+                            h("input", {
+                                type: "url",
+                                placeholder: "https://example.com/sitemap.xml",
+                                value: schedule.sitemap_url || sitemapUrl,
+                                onChange: (e) => setSchedule((prev) => ({ ...prev, sitemap_url: e.target.value })),
+                            }),
+                            h("span", { className: "helper-text" }, "Diese URL wird für den Auto-Run verwendet."),
+                        ]),
+                    ]),
+                    h("div", { className: "control", style: { marginTop: 16, marginBottom: 0 } }, [
+                        h("button", { onClick: saveSchedule, style: { minWidth: 200 } }, "💾 Zeitplan speichern"),
+                        scheduleStatus
+                            ? h("span", {
+                                className: "notice " + (scheduleStatus === "Gespeichert." ? "success" : scheduleStatus === "Speichere..." ? "warn" : "error"),
+                                style: { marginLeft: 4 }
+                            }, scheduleStatus)
+                            : null,
+                    ]),
+                ]),
+
+                runResult ? h("div", { key: "result", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "📋"), "Ergebnis"]),
+                    h("div", { className: "chips", style: { marginBottom: 16 } }, [
+                        h(Badge, {
+                            tone: runResult.status === "ok"
+                                ? "ok"
+                                : runResult.status === "warn" || runResult.status === "started"
+                                    ? "warn"
+                                    : "error"
+                        },
+                            runResult.status === "ok"
+                                ? "✅ Erfolgreich"
+                                : runResult.status === "warn"
+                                    ? "⚠️ Warnung"
+                                    : runResult.status === "started"
+                                        ? "⏳ Gestartet"
+                                        : "❌ Fehler"
+                        ),
+                        h("span", { className: "pill" }, "🕐 " + (runResult.started_at || "–")),
+                        h("span", { className: "pill" }, "🏁 " + (runResult.finished_at || "–")),
+                    ]),
+                    runResult.error ? h("div", {
+                        className: "notice error",
+                        style: { marginBottom: 16 }
+                    }, runResult.error) : null,
+                    h(Summary, { summary: runResult.summary }),
+                    h("div", { style: { marginTop: 16 } }, h(Logs, { lines: runResult.logs })),
+                ]) : null,
+            ]),
+        ]);
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(h(ScrapingPage));
+</script>
+{% endblock %}

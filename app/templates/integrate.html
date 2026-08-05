@@ -1,0 +1,922 @@
+{% extends "base.html" %}
+{% block title %}Integrieren - florianmatthias{% endblock %}
+
+{% block content %}
+<div id="root"></div>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+    const { useEffect, useState, useMemo, useRef } = React;
+    const h = React.createElement;
+
+    const Icon = ({ name }) => {
+        const props = { viewBox: "0 0 24 24", "aria-hidden": "true" };
+        switch (name) {
+            case "dashboard":
+                return h("svg", props, [
+                    h("rect", { x: 3, y: 3, width: 8, height: 8, rx: 2 }),
+                    h("rect", { x: 13, y: 3, width: 8, height: 5, rx: 2 }),
+                    h("rect", { x: 13, y: 10, width: 8, height: 11, rx: 2 }),
+                    h("rect", { x: 3, y: 13, width: 8, height: 8, rx: 2 }),
+                ]);
+            case "stats":
+                return h("svg", props, [
+                    h("path", { d: "M3 19h18" }),
+                    h("path", { d: "M6 16v-5" }),
+                    h("path", { d: "M12 16v-8" }),
+                    h("path", { d: "M18 16v-3" }),
+                ]);
+            case "scraping":
+                return h("svg", props, [
+                    h("path", { d: "M21 12a9 9 0 1 1-3-6.7" }),
+                    h("polyline", { points: "21 3 21 9 15 9" }),
+                ]);
+            case "chat":
+                return h("svg", props, [
+                    h("path", { d: "M6 6h12a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H10l-4 3v-3H6a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z" }),
+                ]);
+            case "memory":
+                return h("svg", props, [
+                    h("ellipse", { cx: 12, cy: 6, rx: 7, ry: 3 }),
+                    h("path", { d: "M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" }),
+                    h("path", { d: "M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" }),
+                ]);
+            case "faqs":
+                return h("svg", props, [
+                    h("circle", { cx: 12, cy: 12, r: 9 }),
+                    h("path", { d: "M9.5 9a2.5 2.5 0 0 1 5 0c0 1.6-2.5 1.9-2.5 4" }),
+                    h("path", { d: "M12 17h.01" }),
+                ]);
+            case "pdf":
+                return h("svg", props, [
+                    h("path", { d: "M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" }),
+                    h("path", { d: "M14 3v5h5" }),
+                    h("path", { d: "M9 13h6" }),
+                    h("path", { d: "M9 17h6" }),
+                ]);
+            case "widget":
+                return h("svg", props, [
+                    h("path", { d: "M4 6h16" }),
+                    h("circle", { cx: 9, cy: 6, r: 2 }),
+                    h("path", { d: "M4 12h16" }),
+                    h("circle", { cx: 15, cy: 12, r: 2 }),
+                    h("path", { d: "M4 18h16" }),
+                    h("circle", { cx: 7, cy: 18, r: 2 }),
+                ]);
+            case "integrate":
+                return h("svg", props, [
+                    h("path", { d: "M10 13a3 3 0 0 0 4 0l3-3a3 3 0 0 0-4-4l-1 1" }),
+                    h("path", { d: "M14 11a3 3 0 0 0-4 0l-3 3a3 3 0 0 0 4 4l1-1" }),
+                ]);
+            case "usage":
+                return h("svg", props, [
+                    h("rect", { x: 3, y: 5, width: 18, height: 14, rx: 2 }),
+                    h("path", { d: "M3 10h18" }),
+                    h("path", { d: "M7 15h5" }),
+                ]);
+            case "logout":
+                return h("svg", props, [
+                    h("path", { d: "M4 5h7a2 2 0 0 1 2 2v3" }),
+                    h("path", { d: "M13 14v3a2 2 0 0 1-2 2H4" }),
+                    h("path", { d: "M10 12h10" }),
+                    h("polyline", { points: "16 8 20 12 16 16" }),
+                ]);
+
+            default:
+                return h("svg", props);
+        }
+    };
+
+    const DEFAULT_THEME = {
+        accent: "#8c8875",
+        accentStrong: "#756f5f",
+        avatarBg: "#e6e0d6",
+        launcherBg: "#8c8875",
+        bg: "#f4f1eb",
+        panel: "#ffffff",
+        border: "#e4ded5",
+        text: "#3d3a34",
+        userBubble: "#f2ede6",
+        userText: "#3d3a34",
+        botBubble: "#ffffff",
+        botText: "#3d3a34",
+    };
+    const DEFAULT_COPY = {
+        de: {
+            title: "Haben Sie Fragen?",
+            subtitle: "",
+            intro1: "Hallo! Schoen, dass du da bist. Ich bin XY und finde gerne eine direkte Antwort fuer dich - stelle mir dazu eine Frage.",
+        },
+        en: {
+            title: "Any questions?",
+            subtitle: "",
+            intro1: "Hi! Nice to have you here. I am XY and I am happy to help you find a direct answer - just ask a question.",
+        },
+    };
+
+    function Sidebar({ activePage }) {
+        const navItems = [
+            { href: "/dashboard", label: "Dashboard", id: "dashboard", icon: "dashboard" },
+            { href: "/stats", label: "Statistiken", id: "stats", icon: "stats" },
+            { href: "/scraping", label: "Scraping & Index", id: "scraping", icon: "scraping" },
+            { href: "/chat", label: "Chat", id: "chat", icon: "chat" },
+            { href: "/memory", label: "Memory bearbeiten", id: "memory", icon: "memory" },
+            { href: "/faqs", label: "FAQs", id: "faqs", icon: "faqs" },
+            { href: "/pdf-upload", label: "PDF Upload", id: "pdf-upload", icon: "pdf" },
+            { href: "/widget-design", label: "Widget Design", id: "widget-design", icon: "widget" },
+            { href: "/integrate", label: "Integrieren", id: "integrate", icon: "integrate" },
+            { href: "/usage", label: "Kosten", id: "usage", icon: "usage" },
+            { href: "/login/", label: "Logout", id: "logout", icon: "logout", onClick: () => AuthState.logout() },
+        ];
+
+        return h("aside", { className: "sidebar" }, [
+            h("div", { key: "header", className: "sidebar-header" }, [
+                h("div", { className: "sidebar-title" }, "florianmatthias"),
+            ]),
+            h("ul", { key: "nav", className: "nav-list" },
+                navItems.map(item =>
+                    h("li", { key: item.id },
+                        h("a", {
+                            href: item.href,
+                            className: "nav-item" + (activePage === item.id ? " active" : ""),
+                            onClick: item.onClick ? (event) => { event.preventDefault(); item.onClick(); } : undefined,
+                        }, [
+                            h("span", { key: "icon", className: "nav-icon" }, h(Icon, { name: item.icon })),
+                            item.label
+                        ])
+                    )
+                )
+            ),
+        ]);
+    }
+
+    function IntegratePage() {
+        const [botSlug] = useState(AuthState.getBotSlug());
+        const [copied, setCopied] = useState(false);
+        const [copiedUrl, setCopiedUrl] = useState(false);
+        const codeRef = useRef(null);
+
+        // Load saved theme settings from localStorage
+        const [config, setConfig] = useState(() => {
+            const saved = AuthState.getScopedItem("widget_theme_cfg", AuthState.getBotSlug()) || "";
+            if (saved) {
+                try {
+                    return JSON.parse(saved);
+                } catch (e) { }
+            }
+            return {
+                title: DEFAULT_COPY.de.title,
+                subtitle: DEFAULT_COPY.de.subtitle,
+                titleEn: DEFAULT_COPY.en.title,
+                subtitleEn: DEFAULT_COPY.en.subtitle,
+                icon: "💬",
+                intro1: DEFAULT_COPY.de.intro1,
+                intro1En: DEFAULT_COPY.en.intro1,
+                theme: DEFAULT_THEME
+            };
+        });
+        const [heroToggleEnabled, setHeroToggleEnabled] = useState(() => {
+            const saved = AuthState.getScopedItem("widget_integrate_cfg", AuthState.getBotSlug()) || "";
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    if (typeof parsed.showHeroToggle === "boolean") {
+                        return parsed.showHeroToggle;
+                    }
+                } catch (e) { }
+            }
+            return false;
+        });
+
+        useEffect(() => {
+            AuthState.setScopedItem("widget_integrate_cfg", JSON.stringify({
+                showHeroToggle: heroToggleEnabled
+            }), botSlug);
+        }, [botSlug, heroToggleEnabled]);
+
+        const resolveLauncherBg = (theme = {}) => {
+            const accent = theme.accent;
+            const accentStrong = theme.accentStrong;
+            return (
+                theme.launcherBg ||
+                (accent && accentStrong ? `linear-gradient(135deg, ${accent} 0%, ${accentStrong} 100%)` : accent) ||
+                "#8c8875"
+            );
+        };
+
+        const embedSrc = useMemo(() => {
+            const params = new URLSearchParams();
+            const showPoweredBy = typeof config.showPoweredBy === "boolean" ? config.showPoweredBy : true;
+            const trimmedTitle = (config.title || "").trim();
+            const trimmedSubtitle = (config.subtitle || "").trim();
+            const trimmedTitleEn = (config.titleEn || config.title_en || "").trim();
+            const trimmedSubtitleEn = (config.subtitleEn || config.subtitle_en || "").trim();
+            const trimmedIcon = (config.icon || "").trim();
+            const trimmedIntro1 = (config.intro1 || "").trim();
+            const trimmedIntro1En = (config.intro1En || config.intro1_en || "").trim();
+            const customerId = (AuthState.getUserId && AuthState.getUserId()) || "";
+            if (botSlug.trim()) params.set("bot_slug", botSlug.trim());
+            if (AuthState.getToken()) params.set("token", AuthState.getToken());
+            if (customerId) params.set("customer_id", customerId);
+            if (trimmedTitle && trimmedTitle !== DEFAULT_COPY.de.title) params.set("title_de", trimmedTitle);
+            if (trimmedSubtitle) params.set("subtitle_de", trimmedSubtitle);
+            if (trimmedIcon) params.set("icon", trimmedIcon);
+            if (trimmedIntro1 && trimmedIntro1 !== DEFAULT_COPY.de.intro1) params.set("intro1_de", trimmedIntro1);
+            if (trimmedTitleEn && trimmedTitleEn !== DEFAULT_COPY.en.title) params.set("title_en", trimmedTitleEn);
+            if (trimmedSubtitleEn) params.set("subtitle_en", trimmedSubtitleEn);
+            if (trimmedIntro1En && trimmedIntro1En !== DEFAULT_COPY.en.intro1) params.set("intro1_en", trimmedIntro1En);
+            if (!showPoweredBy) params.set("show_powered_by", "0");
+            if (config.theme) {
+                Object.entries(config.theme).forEach(([key, value]) => {
+                    if (key === "border") return;
+                    if (value) params.set(`theme_${key}`, value);
+                });
+            }
+            return "/embed" + (params.toString() ? "?" + params.toString() : "");
+        }, [botSlug, config]);
+
+        const fullEmbedUrl = useMemo(() => {
+            return window.location.origin + embedSrc;
+        }, [embedSrc]);
+
+        const iframeCode = useMemo(() => {
+            return `<iframe
+  id="ai-chat-embed"
+  src="about:blank"
+  data-src="${fullEmbedUrl}"
+  width="400"
+  height="600"
+  style="border: none; border-radius: 0; box-shadow: 0 25px 50px rgba(0,0,0,0.3);"
+  title="AI Chat Widget"
+  sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+></iframe>
+<script>
+(function() {
+  function resolveAiChatLang() {
+    var lang = (document.documentElement.getAttribute('lang') || navigator.language || '').toLowerCase();
+    return lang ? lang.split('-')[0] : '';
+  }
+  function withLangParam(url) {
+    if (!url) return url;
+    var lang = resolveAiChatLang();
+    if (!lang) return url;
+    try {
+      var parsed = new URL(url, window.location.origin);
+      if (!parsed.searchParams.has('lang')) parsed.searchParams.set('lang', lang);
+      return parsed.toString();
+    } catch (e) {
+      return url;
+    }
+  }
+  var iframe = document.getElementById('ai-chat-embed');
+  if (!iframe) return;
+  var baseUrl = iframe.getAttribute('data-src') || '';
+  var nextUrl = withLangParam(baseUrl);
+  iframe.src = nextUrl || baseUrl;
+})();
+<\/script>`;
+        }, [fullEmbedUrl]);
+
+        const floatingWidgetCode = useMemo(() => {
+            const launcherBg = resolveLauncherBg(config.theme || {});
+            return `<!-- Chat Widget Button & Panel -->
+<style>
+  #ai-chat-widget {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(8px);
+    transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s ease;
+  }
+  #ai-chat-widget.ai-chat-visible {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+  #ai-chat-toggle {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+  }
+  #ai-chat-toggle svg {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+    display: block;
+  }
+  .ai-chat-hero-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 0;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+    margin-top: 16px;
+  }
+  .ai-chat-hero-toggle {
+    border: none;
+    background: #0f766e;
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 0;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+  }
+</style>
+<div id="ai-chat-widget" style="position: fixed; bottom: 24px; right: 24px; z-index: 9999;">
+  <button id="ai-chat-toggle" onclick="toggleAIChat()" style="
+    width: var(--icon-size-md, 64px); height: var(--icon-size-md, 64px); border-radius: 50%; border: none;
+    background: ${launcherBg};
+    color: white; font-size: 24px; cursor: pointer;
+    box-shadow: 0 8px 32px rgba(139, 92, 246, 0.4);
+  ">${config.icon || "💬"}</button>
+  <div id="ai-chat-panel" style="
+    display: none; position: absolute; bottom: 80px; right: 0;
+    width: 400px; height: 550px; border-radius: 0;
+    box-shadow: 0 25px 80px rgba(0,0,0,0.5); overflow: hidden;
+  ">
+    <iframe id="ai-chat-embed" src="about:blank" data-src="${fullEmbedUrl}"
+      width="100%" height="100%" style="border: none;"
+      sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"></iframe>
+  </div>
+</div>
+<script>
+function resolveAiChatLang() {
+  var lang = (document.documentElement.getAttribute('lang') || navigator.language || '').toLowerCase();
+  return lang ? lang.split('-')[0] : '';
+}
+
+function withLangParam(url) {
+  if (!url) return url;
+  var lang = resolveAiChatLang();
+  if (!lang) return url;
+  try {
+    var parsed = new URL(url, window.location.origin);
+    if (!parsed.searchParams.has('lang')) parsed.searchParams.set('lang', lang);
+    return parsed.toString();
+  } catch (e) {
+    return url;
+  }
+}
+
+function setAiChatEmbedSrc() {
+  var iframe = document.getElementById('ai-chat-embed');
+  if (!iframe) return;
+  var baseUrl = iframe.getAttribute('data-src') || iframe.src || '';
+  var nextUrl = withLangParam(baseUrl);
+  if (nextUrl) iframe.src = nextUrl;
+}
+
+setAiChatEmbedSrc();
+
+window.AIChatWidgetConfig = window.AIChatWidgetConfig || {};
+window.AIChatWidgetConfig.defaultShowHeroToggle = ${heroToggleEnabled ? "true" : "false"};
+if (typeof window.AIChatWidgetConfig.showHeroToggle === 'undefined') {
+  window.AIChatWidgetConfig.showHeroToggle = window.AIChatWidgetConfig.defaultShowHeroToggle;
+}
+
+function openAIChatPanel() {
+  var panel = document.getElementById('ai-chat-panel');
+  if (panel) panel.style.display = 'block';
+}
+
+function closeAIChatPanel() {
+  var panel = document.getElementById('ai-chat-panel');
+  if (panel) panel.style.display = 'none';
+}
+
+function toggleAIChat() {
+  var panel = document.getElementById('ai-chat-panel');
+  if (!panel) return;
+  if (panel.style.display === 'block') {
+    closeAIChatPanel();
+  } else {
+    openAIChatPanel();
+  }
+}
+
+	(function () {
+	  var widget = document.getElementById('ai-chat-widget');
+	  if (!widget) return;
+	  var config = window.AIChatWidgetConfig || {};
+	  var parseBool = function(value, fallback) {
+	    if (typeof value === 'boolean') return value;
+	    if (typeof value === 'number') return value !== 0;
+	    if (typeof value === 'string') {
+	      var normalized = value.trim().toLowerCase();
+	      if (/^(1|true|yes|on)$/.test(normalized)) return true;
+	      if (/^(0|false|no|off)$/.test(normalized)) return false;
+	    }
+	    return fallback;
+	  };
+	  var collectHeroSelectors = function(cfg) {
+	    var selectors = [];
+	    if (cfg && typeof cfg.heroSelector === 'string' && cfg.heroSelector.trim()) {
+	      selectors.push(cfg.heroSelector.trim());
+	    }
+	    selectors.push('[data-ai-chat-hero]', '.block-home-hero', '.block-home-hero-mobile', '.home-hero');
+	    return selectors;
+	  };
+	  var isHeroCandidateVisible = function(el) {
+	    if (!el) return false;
+	    var style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+	    if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
+	    var rect = el.getBoundingClientRect();
+	    return rect.width > 0 && rect.height > 0;
+	  };
+	  var resolveHeroElement = function(cfg) {
+	    var selectors = collectHeroSelectors(cfg);
+	    var fallback = null;
+	    for (var i = 0; i < selectors.length; i++) {
+	      var selector = selectors[i];
+	      if (!selector) continue;
+	      var matches = document.querySelectorAll(selector);
+	      for (var j = 0; j < matches.length; j++) {
+	        var candidate = matches[j];
+	        if (!fallback) fallback = candidate;
+	        if (isHeroCandidateVisible(candidate)) return candidate;
+	      }
+	    }
+	    return fallback;
+	  };
+	  var computeHeroVisible = function(targetHero) {
+	    if (!targetHero) return false;
+	    var rect = targetHero.getBoundingClientRect();
+	    return rect.bottom > 0 && rect.top < window.innerHeight;
+	  };
+	  var isMobileViewport = function() {
+	    return window.matchMedia ? window.matchMedia('(max-width: 767px)').matches : window.innerWidth <= 767;
+	  };
+	  var shouldShowImmediatelyAfterHero = function(targetHero) {
+	    if (heroToggleEnabled || !targetHero || !isMobileViewport()) return false;
+	    var rect = targetHero.getBoundingClientRect();
+	    return window.scrollY > 8 && rect.bottom <= window.innerHeight + 24;
+	  };
+	  var collectBookingBarSelectors = function(cfg) {
+	    var selectors = [];
+	    if (cfg && typeof cfg.bookingBarSelector === 'string' && cfg.bookingBarSelector.trim()) {
+	      selectors.push(cfg.bookingBarSelector.trim());
+	    }
+	    selectors.push(
+	      '[data-booking-bar]',
+	      '[data-booking-widget]',
+	      '.booking-bar',
+	      '.bookingbar',
+	      '.booking-widget',
+	      '.booking-form',
+	      '.block-booking-bar',
+	      '.block-booking-widget',
+	      '.reservation-bar',
+	      '.reservation-widget'
+	    );
+	    return selectors;
+	  };
+	  var findVisibleBookingBar = function(cfg) {
+	    var selectors = collectBookingBarSelectors(cfg);
+	    for (var i = 0; i < selectors.length; i++) {
+	      var matches = document.querySelectorAll(selectors[i]);
+	      for (var j = 0; j < matches.length; j++) {
+	        var el = matches[j];
+	        var style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+	        if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) continue;
+	        var rect = el.getBoundingClientRect();
+	        if (rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight) return el;
+	      }
+	    }
+	    return null;
+	  };
+	  var isBookingBarCompact = function(el) {
+	    if (!el) return false;
+	    var rect = el.getBoundingClientRect();
+	    var className = (el.className || '').toString().toLowerCase();
+	    if (/(compact|collapsed|minimized|scrolled|sticky|is-small|is-compact)/.test(className)) return true;
+	    var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+	    var compactHeight = Math.max(72, Math.min(112, viewportHeight * 0.14));
+	    return window.scrollY > 32 && rect.height <= compactHeight;
+	  };
+	  var shouldShowForCompactMobileBookingBar = function() {
+	    if (heroToggleEnabled || !isMobileViewport()) return false;
+	    return isBookingBarCompact(findVisibleBookingBar(config));
+	  };
+	  var removeHeroToggle = function() {
+	    var existingHeroToggle = document.getElementById('ai-chat-hero-toggle');
+	    if (!existingHeroToggle) return;
+	    var existingBox = existingHeroToggle.closest('.ai-chat-hero-box');
+	    if (existingBox && existingBox.parentNode) {
+	      existingBox.parentNode.removeChild(existingBox);
+	    } else if (existingHeroToggle.parentNode) {
+	      existingHeroToggle.parentNode.removeChild(existingHeroToggle);
+	    }
+	  };
+	  var baseHeroToggleEnabled = parseBool(config.showHeroToggle, parseBool(config.defaultShowHeroToggle, false));
+	  var hero = null;
+	  var heroToggleEnabled = baseHeroToggleEnabled;
+	  var heroToggle = null;
+	  var heroObserver = null;
+	  var scrollFallback = null;
+	  var domObserver = null;
+	  var refreshTimer = null;
+	  var refreshFollowUps = [];
+	  var forceVisible = false;
+	  var heroVisible = false;
+
+	  var setWidgetVisible = function(visible) {
+	    if (visible) {
+      widget.classList.add('ai-chat-visible');
+      widget.setAttribute('aria-hidden', 'false');
+    } else {
+      widget.classList.remove('ai-chat-visible');
+      widget.setAttribute('aria-hidden', 'true');
+      closeAIChatPanel();
+    }
+  };
+
+	  var updateVisibility = function() {
+	    var shouldShow = forceVisible || !hero || !heroVisible || shouldShowImmediatelyAfterHero(hero) || shouldShowForCompactMobileBookingBar();
+	    setWidgetVisible(shouldShow);
+	  };
+
+	  var clearRefreshFollowUps = function() {
+	    while (refreshFollowUps.length) {
+	      window.clearTimeout(refreshFollowUps.pop());
+	    }
+	  };
+
+	  var scheduleRefreshHero = function() {
+	    if (refreshTimer) {
+	      window.clearTimeout(refreshTimer);
+	    }
+	    clearRefreshFollowUps();
+	    refreshTimer = window.setTimeout(function() {
+	      refreshTimer = null;
+	      refreshHero();
+	      refreshFollowUps.push(window.setTimeout(refreshHero, 120));
+	      refreshFollowUps.push(window.setTimeout(refreshHero, 400));
+	    }, 0);
+	  };
+
+	  var stopHeroObserver = function() {
+	    if (heroObserver && typeof heroObserver.disconnect === 'function') {
+	      heroObserver.disconnect();
+	    }
+	    heroObserver = null;
+	    if (scrollFallback) {
+	      window.removeEventListener('scroll', scrollFallback);
+	      window.removeEventListener('resize', scrollFallback);
+	      scrollFallback = null;
+	    }
+	  };
+
+	  var observeDomChanges = function() {
+	    if (!('MutationObserver' in window)) return;
+	    if (domObserver && typeof domObserver.disconnect === 'function') {
+	      domObserver.disconnect();
+	    }
+	    domObserver = new MutationObserver(function(mutations) {
+	      for (var i = 0; i < mutations.length; i++) {
+	        var mutation = mutations[i];
+	        if (mutation.type === 'childList' && (mutation.addedNodes.length || mutation.removedNodes.length)) {
+	          scheduleRefreshHero();
+	          return;
+	        }
+	      }
+	    });
+	    domObserver.observe(document.documentElement, { childList: true, subtree: true });
+	  };
+
+	  var installNavigationHooks = function() {
+	    if (window.__aiChatNavigationHooksInstalled) return;
+	    window.__aiChatNavigationHooksInstalled = true;
+	    var dispatchRouteChange = function() {
+	      window.dispatchEvent(new Event('ai-chat-route-change'));
+	    };
+	    var wrapHistoryMethod = function(methodName) {
+	      if (!window.history || typeof window.history[methodName] !== 'function') return;
+	      var original = window.history[methodName];
+	      window.history[methodName] = function() {
+	        var result = original.apply(this, arguments);
+	        dispatchRouteChange();
+	        return result;
+	      };
+	    };
+	    wrapHistoryMethod('pushState');
+	    wrapHistoryMethod('replaceState');
+	    window.addEventListener('popstate', dispatchRouteChange);
+	    window.addEventListener('hashchange', dispatchRouteChange);
+	  };
+	  var installVisibilityRefreshHooks = function() {
+	    var ticking = false;
+	    var refresh = function() {
+	      if (ticking) return;
+	      ticking = true;
+	      window.requestAnimationFrame(function() {
+	        ticking = false;
+	        if (hero) heroVisible = computeHeroVisible(hero);
+	        updateVisibility();
+	      });
+	    };
+	    window.addEventListener('scroll', refresh, { passive: true });
+	    window.addEventListener('resize', refresh);
+	  };
+
+	  var syncHeroToggle = function() {
+	    if (!hero || !heroToggleEnabled) {
+	      removeHeroToggle();
+	      heroToggle = null;
+	      return;
+	    }
+	    heroToggle = document.getElementById('ai-chat-hero-toggle');
+	    if (heroToggle && !hero.contains(heroToggle)) {
+	      removeHeroToggle();
+	      heroToggle = null;
+	    }
+	    if (heroToggle) return;
+	    var box = document.createElement('div');
+	    box.className = 'ai-chat-hero-box';
+	    heroToggle = document.createElement('button');
+	    heroToggle.id = 'ai-chat-hero-toggle';
+	    heroToggle.type = 'button';
+    heroToggle.className = 'ai-chat-hero-toggle';
+	    heroToggle.textContent = 'Chat starten';
+	    heroToggle.setAttribute('aria-pressed', 'false');
+	    box.appendChild(heroToggle);
+	    hero.appendChild(box);
+	    heroToggle.addEventListener('click', function() {
+	      forceVisible = !forceVisible;
+	      heroToggle.setAttribute('aria-pressed', forceVisible ? 'true' : 'false');
+	      if (forceVisible) {
+	        setWidgetVisible(true);
+        openAIChatPanel();
+      } else {
+        updateVisibility();
+	      }
+	    });
+	  };
+
+	  var observeHero = function() {
+	    stopHeroObserver();
+	    if (!hero) {
+	      heroVisible = false;
+	      updateVisibility();
+	      return;
+	    }
+	    heroVisible = computeHeroVisible(hero);
+	    updateVisibility();
+	    if ('IntersectionObserver' in window) {
+	      heroObserver = new IntersectionObserver(function(entries) {
+	        if (entries && entries[0]) {
+	          heroVisible = entries[0].isIntersecting && entries[0].intersectionRatio > 0;
+	          updateVisibility();
+	        }
+	      }, { threshold: 0 });
+	      heroObserver.observe(hero);
+	    } else {
+	      scrollFallback = function() {
+	        heroVisible = computeHeroVisible(hero);
+	        updateVisibility();
+	      };
+	      window.addEventListener('scroll', scrollFallback, { passive: true });
+	      window.addEventListener('resize', scrollFallback);
+	    }
+	  };
+
+	  var refreshHero = function() {
+	    var nextHero = resolveHeroElement(config);
+	    var heroChanged = nextHero !== hero;
+	    hero = nextHero;
+	    heroToggleEnabled = baseHeroToggleEnabled;
+	    if (hero) {
+	      var heroToggleAttr = hero.getAttribute('data-ai-chat-hero-toggle');
+	      if (heroToggleAttr) {
+	        heroToggleEnabled = parseBool(heroToggleAttr, heroToggleEnabled);
+	      }
+	    }
+	    syncHeroToggle();
+	    if (heroChanged) {
+	      observeHero();
+	    } else {
+	      heroVisible = computeHeroVisible(hero);
+	      updateVisibility();
+	    }
+	  };
+
+	  installNavigationHooks();
+	  installVisibilityRefreshHooks();
+	  observeDomChanges();
+	  scheduleRefreshHero();
+	  window.addEventListener('load', scheduleRefreshHero);
+	  window.addEventListener('resize', scheduleRefreshHero);
+	  window.addEventListener('ai-chat-route-change', scheduleRefreshHero);
+	})();
+	<\/script>`;
+        }, [fullEmbedUrl, config.icon, config.theme, heroToggleEnabled]);
+
+        const downloadWpPlugin = async () => {
+            try {
+                const res = await fetch("/api/download-wp-plugin", {
+                    method: "POST",
+                    headers: AuthState.buildHeaders(true),
+                    body: JSON.stringify({
+                        embed_url: fullEmbedUrl,
+                        icon: config.icon || "💬",
+                        launcher_bg: resolveLauncherBg(config.theme || {}),
+                        show_hero_toggle: heroToggleEnabled,
+                    }),
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    const message = data.error || "Plugin konnte nicht erstellt werden.";
+                    alert(message);
+                    return;
+                }
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = "ai-chat-widget.zip";
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                window.URL.revokeObjectURL(url);
+            } catch (err) {
+                console.error(err);
+                alert("Plugin-Download fehlgeschlagen.");
+            }
+        };
+
+        const copyCode = async (code, type) => {
+            try {
+                await navigator.clipboard.writeText(code);
+                if (type === 'url') {
+                    setCopiedUrl(true);
+                    setTimeout(() => setCopiedUrl(false), 2000);
+                } else {
+                    setCopied(type);
+                    setTimeout(() => setCopied(false), 2000);
+                }
+            } catch (err) {
+                console.error("Kopieren fehlgeschlagen:", err);
+            }
+        };
+
+        if (!AuthState.isLoggedIn()) {
+            window.location.href = "/login";
+            return null;
+        }
+
+        return h("div", { className: "layout" }, [
+            h(Sidebar, { key: "sidebar", activePage: "integrate" }),
+            h("div", { key: "content", className: "content" }, [
+                h("div", { key: "hero", className: "hero" }, [
+                    h("div", { className: "hero-badge" }, [
+                        h("span", { className: "hero-badge-dot" }),
+                        "Integration"
+                    ]),
+                    h("h1", { className: "title" }, "Integrieren"),
+                    h("p", { className: "subtitle" }, "Kopiere den Embed-Code, um das Chat-Widget auf deiner Website einzubinden."),
+                ]),
+
+                // Hero Toggle Card
+                h("div", { key: "hero-toggle", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "🧩"), "Hero-Option"]),
+                    h("p", { className: "muted" }, "Bestimme, ob im Hero ein Button angezeigt wird, mit dem der Chat im Hero sichtbar gemacht werden kann."),
+                    h("label", { style: { display: "flex", alignItems: "center", gap: 10, cursor: "pointer" } }, [
+                        h("input", {
+                            type: "checkbox",
+                            checked: heroToggleEnabled,
+                            onChange: (e) => setHeroToggleEnabled(e.target.checked)
+                        }),
+                        h("span", null, "Button im Hero anzeigen (optional)"),
+                    ]),
+                ]),
+
+                // Embed URL Card
+                h("div", { key: "url", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "🔗"), "Embed URL"]),
+                    h("p", { className: "muted" }, "Die vollständige URL zum Einbetten des Widgets."),
+                    h("div", { style: { display: "flex", gap: 12, alignItems: "center" } }, [
+                        h("input", {
+                            className: "embed-url",
+                            style: { flex: 1 },
+                            readOnly: true,
+                            value: fullEmbedUrl,
+                            onFocus: (e) => e.target.select(),
+                            onClick: (e) => e.target.select(),
+                        }),
+                        h("button", {
+                            onClick: () => copyCode(fullEmbedUrl, 'url'),
+                            style: { whiteSpace: "nowrap" }
+                        }, h("span", null, copiedUrl ? "✅ Kopiert!" : "📋 Kopieren")),
+                    ]),
+                ]),
+
+                // Simple iFrame Card
+                h("div", { key: "iframe", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "📋"), "Einfacher iFrame"]),
+                    h("p", { className: "muted" }, "Füge diesen Code in den HTML-Bereich deiner Seite ein, um das Widget als festes Element einzubinden."),
+                    h("pre", {
+                        ref: codeRef,
+                        style: {
+                            background: "var(--bg-primary)",
+                            border: "1px solid var(--border-subtle)",
+                            borderRadius: 12,
+                            padding: 16,
+                            fontSize: 12,
+                            fontFamily: "'JetBrains Mono', monospace",
+                            color: "var(--text-secondary)",
+                            overflow: "auto",
+                            maxHeight: 200,
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-all"
+                        }
+                    }, iframeCode),
+                    h("div", { style: { display: "flex", gap: 12, marginTop: 16 } }, [
+                        h("button", {
+                            onClick: () => copyCode(iframeCode, 'iframe')
+                        }, h("span", null, copied === 'iframe' ? "✅ Kopiert!" : "📋 Code kopieren")),
+                    ]),
+                ]),
+
+                // Floating Widget Code Card
+                h("div", { key: "floating", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "💬"), "Floating Chat Button"]),
+                    h("p", { className: "muted" }, "Ein schwebender Button unten rechts, der das Chat-Widget bei Klick öffnet. Perfekt für den Einsatz auf der ganzen Website."),
+                    h("pre", {
+                        style: {
+                            background: "var(--bg-primary)",
+                            border: "1px solid var(--border-subtle)",
+                            borderRadius: 12,
+                            padding: 16,
+                            fontSize: 12,
+                            fontFamily: "'JetBrains Mono', monospace",
+                            color: "var(--text-secondary)",
+                            overflow: "auto",
+                            maxHeight: 300,
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-all"
+                        }
+                    }, floatingWidgetCode),
+                    h("div", { style: { display: "flex", gap: 12, marginTop: 16 } }, [
+                        h("button", {
+                            onClick: () => copyCode(floatingWidgetCode, 'floating')
+                        }, h("span", null, copied === 'floating' ? "✅ Kopiert!" : "📋 Code kopieren")),
+                    ]),
+                ]),
+
+                // WordPress Plugin Download Card
+                h("div", { key: "wordpress", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "📦"), "WordPress Plugin"]),
+                    h("p", { className: "muted" }, "Lade ein fertiges WordPress-Plugin herunter. Einfach in WordPress hochladen und aktivieren - der Chat erscheint automatisch auf allen Seiten."),
+                    h("div", {
+                        style: {
+                            background: "linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(6, 182, 212, 0.1))",
+                            border: "1px solid var(--border-accent)",
+                            borderRadius: 12,
+                            padding: 20,
+                            marginBottom: 16
+                        }
+                    }, [
+                        h("div", { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 12 } }, [
+                            h("span", { style: { fontSize: 32 } }, "🔌"),
+                            h("div", null, [
+                                h("div", { style: { fontWeight: 700, color: "var(--text-primary)" } }, "AI Chat Widget"),
+                                h("div", { style: { fontSize: 13, color: "var(--text-secondary)" } }, "WordPress Plugin v1.0.3"),
+                            ])
+                        ]),
+                        h("ul", { style: { fontSize: 13, color: "var(--text-secondary)", margin: "12px 0", paddingLeft: 20 } }, [
+                            h("li", { key: 1 }, "Enthält alle aktuellen Design-Einstellungen"),
+                            h("li", { key: 2 }, "Zeigt Chat-Button auf allen Seiten"),
+                            h("li", { key: 3 }, "Einfache Installation per ZIP-Upload"),
+                        ]),
+                    ]),
+                    h("div", { style: { display: "flex", gap: 12 } }, [
+                        h("button", {
+                            onClick: downloadWpPlugin
+                        }, h("span", null, "📥 Plugin herunterladen (.zip)")),
+                    ]),
+                ]),
+
+                // Preview hint
+                h("div", { key: "preview", className: "card" }, [
+                    h("div", { className: "pill" }, "💡 Das Widget unten rechts zeigt eine Live-Vorschau deines aktuellen Designs."),
+                    h("p", { className: "muted", style: { marginTop: 12, marginBottom: 0 } },
+                        "Passe das Design unter "
+                    ),
+                    h("a", {
+                        href: "/widget-design",
+                        style: { color: "var(--accent-primary)", textDecoration: "underline" }
+                    }, "Widget Design"),
+                    h("span", { className: "muted" }, " an und komme hierher zurück, um den aktualisierten Code zu kopieren."),
+                ]),
+            ]),
+        ]);
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(h(IntegratePage));
+</script>
+{% endblock %}

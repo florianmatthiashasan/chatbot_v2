@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat Embed</title>
+  <style>
+    :root {
+      --ink: #3d3a34;
+      --text-muted: rgba(61, 58, 52, 0.6);
+      --text-soft: rgba(61, 58, 52, 0.78);
+      --bg: #f4f1eb;
+      --panel: #ffffff;
+      --panel-soft: #f7f3ee;
+      --shell-border: transparent;
+      --composer-bg: #f7f3ee;
+      --composer-border: var(--border);
+      --composer-text: var(--ink);
+      --composer-btn-bg: #756f5f;
+      --composer-btn-text: #f8f6f1;
+      --border: var(--panel);
+      --accent: #8c8875;
+      --accent-strong: #756f5f;
+      --avatar-bg: #e6e0d6;
+      --bubble-user: #f2ede6;
+      --bubble-user-text: #3d3a34;
+      --bubble-bot: #ffffff;
+      --bubble-bot-text: #3d3a34;
+      --shadow: 0 18px 40px rgba(17, 16, 13, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      height: 100vh;
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    .shell {
+      width: 100%;
+      height: 100%;
+      border-radius: 0;
+      border: none;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      display: grid;
+      grid-template-rows: auto 1fr auto auto;
+      overflow: hidden;
+    }
+
+    header {
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--accent);
+      color: #f8f6f1;
+    }
+
+    header .avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 0;
+      display: grid;
+      place-items: center;
+      background: var(--avatar-bg);
+      color: #f8f6f1;
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+
+    header .avatar svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+    }
+
+    header .meta {
+      display: grid;
+      gap: 2px;
+    }
+
+    header h1 {
+      font-size: 16px;
+      margin: 0;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    header .subtitle {
+      margin: 0;
+      color: rgba(248, 246, 241, 0.72);
+      font-size: 12px;
+    }
+
+    .header-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 6px;
+    }
+
+    .icon-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 0;
+      border: none;
+      background: rgba(255, 255, 255, 0.12);
+      color: #f8f6f1;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+    }
+
+    .icon-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .icon-btn svg {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+    }
+
+    .messages {
+      padding: 16px;
+      overflow-y: auto;
+      background: var(--bg);
+      display: grid;
+      gap: 14px;
+    }
+
+    .intro {
+      display: grid;
+      gap: 12px;
+    }
+
+    .bubble {
+      padding: 12px 14px;
+      border-radius: 0;
+      display: inline-block;
+      width: fit-content !important;
+      max-width: 90% !important;
+      line-height: 1.5;
+      font-size: 14px;
+      white-space: pre-wrap;
+      background: var(--bubble-bot);
+      color: var(--bubble-bot-text);
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 18px rgba(17, 16, 13, 0.06);
+    }
+
+    .bubble.bot {
+      align-self: flex-start !important;
+    }
+
+    .bubble.user {
+      align-self: flex-end !important;
+      background: var(--bubble-user);
+      color: var(--bubble-user-text);
+      border-color: transparent;
+      box-shadow: none;
+    }
+
+    .bubble.typing {
+      opacity: 0.75;
+      font-style: italic;
+    }
+
+    .bubble .bubble-body {
+      white-space: pre-wrap;
+    }
+
+    .bubble strong {
+      font-weight: 700;
+    }
+
+    .bubble em {
+      font-style: italic;
+    }
+
+    .bubble code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+      background: rgba(61, 58, 52, 0.08);
+      padding: 1px 4px;
+    }
+
+    .bubble .sources {
+      margin-top: 10px;
+      padding-top: 7px;
+      border-top: 1px solid rgba(61, 58, 52, 0.14);
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--text-muted);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .bubble .sources-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+      opacity: 0.85;
+    }
+
+    .bubble .sources a {
+      color: inherit;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    #message-list {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 10px;
+    }
+
+    .message-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .input {
+      border-top: 1px solid var(--border);
+      padding: 12px 16px 16px;
+      background: var(--panel);
+    }
+
+    .composer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--composer-bg);
+      border: 1px solid var(--composer-border);
+      border-radius: 0;
+      padding: 6px 10px;
+    }
+
+    .composer textarea {
+      flex: 1;
+      resize: none;
+      min-height: 38px;
+      max-height: 120px;
+      padding: 6px 4px;
+      border: none;
+      background: transparent;
+      color: var(--composer-text);
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+    }
+
+    .composer button {
+      width: 40px;
+      height: 40px;
+      border-radius: 0;
+      border: none;
+      background: var(--composer-btn-bg);
+      color: var(--composer-btn-text);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+    }
+
+    .composer button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .composer button svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+    }
+
+    .footer {
+      text-align: center;
+      padding: 8px 12px 10px;
+      font-size: 12px;
+      color: var(--text-muted);
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+    }
+
+    .footer strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .footer a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="shell">
+    <header>
+      <div class="avatar" id="chat-avatar" aria-hidden="true">💬</div>
+      <div class="meta">
+        <h1 id="chat-title">Haben Sie Fragen?</h1>
+        <p class="subtitle" id="chat-subtitle"></p>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="clearBtn" aria-label="Chat leeren">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 6h18" />
+            <path d="M8 6V4h8v2" />
+            <path d="M6 6l1 14h10l1-14" />
+          </svg>
+        </button>
+        <button class="icon-btn" id="closeBtn" aria-label="Chat schliessen">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 6l12 12" />
+            <path d="M18 6l-12 12" />
+          </svg>
+        </button>
+      </div>
+    </header>
+    <div class="messages" id="messages">
+      <div class="intro" id="intro">
+        <div class="bubble bot" id="intro-line-1">
+          Hallo! Schoen, dass du da bist. Ich bin XY und finde gerne eine direkte Antwort fuer dich - stelle mir dazu
+          eine Frage.
+        </div>
+      </div>
+      <div id="message-list" class="message-list"></div>
+    </div>
+    <div class="input">
+      <div class="composer">
+        <textarea id="question" placeholder="Nachricht eingeben" rows="1"></textarea>
+        <button id="sendBtn" aria-label="Nachricht senden">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+            aria-hidden="true">
+            <path
+              d="M22.0003 12C22.0003 12.0947 21.9734 12.1875 21.9227 12.2675C21.872 12.3475 21.7996 12.4115 21.714 12.452L3.71402 20.952C3.62412 20.9956 3.52318 21.0111 3.42434 20.9966C3.32549 20.982 3.2333 20.9381 3.15974 20.8705C3.08619 20.8028 3.03468 20.7147 3.0119 20.6174C2.98913 20.5201 2.99614 20.4182 3.03202 20.325L5.87402 12.698C6.0417 12.2477 6.0417 11.7522 5.87402 11.302L3.03102 3.67498C2.99495 3.58162 2.98785 3.47956 3.01064 3.3821C3.03343 3.28465 3.08505 3.19632 3.15878 3.12864C3.23251 3.06096 3.32492 3.01706 3.42396 3.00267C3.523 2.98828 3.62409 3.00407 3.71402 3.04798L21.714 11.548C21.7996 11.5885 21.872 11.6525 21.9227 11.7325C21.9734 11.8125 22.0003 11.9053 22.0003 12ZM22.0003 12H6.00002"
+              stroke="#1B1C1E" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="footer" id="powered-by">Powered by <a href="https://www.florianmatthias.com/" target="_blank"
+        rel="noreferrer"><strong>florianmatthias</strong></a></div>
+  </div>
+  <script>
+    const messagesWrapEl = document.getElementById("messages");
+    const messageListEl = document.getElementById("message-list");
+    const introEl = document.getElementById("intro");
+    const questionEl = document.getElementById("question");
+    const sendBtn = document.getElementById("sendBtn");
+    const titleEl = document.getElementById("chat-title");
+    const subtitleEl = document.getElementById("chat-subtitle");
+    const avatarEl = document.getElementById("chat-avatar");
+    const introLine1El = document.getElementById("intro-line-1");
+    const clearBtn = document.getElementById("clearBtn");
+    const closeBtn = document.getElementById("closeBtn");
+    const poweredByEl = document.getElementById("powered-by");
+    const history = [];
+    const placeholderTimers = new Map();
+    const params = new URLSearchParams(window.location.search);
+    const botSlug = (params.get("bot_slug") || "").trim();
+    const customerIdParam = (params.get("customer_id") || params.get("customer") || "").trim();
+    const authToken = (params.get("token") || "").trim();
+    let resolvedCustomerId = customerIdParam;
+    let botLookupPromise = null;
+    let botLookupError = "";
+    const DEFAULT_THEME = {
+      accent: "#8c8875",
+      accentStrong: "#756f5f",
+      avatarBg: "#e6e0d6",
+      bg: "#f4f1eb",
+      panel: "#ffffff",
+      shellBorder: "transparent",
+      text: "#3d3a34",
+      userBubble: "#f2ede6",
+      userText: "#3d3a34",
+      botBubble: "#ffffff",
+      botText: "#3d3a34",
+      composerBg: "#f7f3ee",
+      composerBorder: "var(--border)",
+      composerText: "#3d3a34",
+      composerButtonBg: "#756f5f",
+      composerButtonText: "#f8f6f1",
+    };
+    const DEFAULT_COPY = {
+      de: {
+        title: "Haben Sie Fragen?",
+        subtitle: "",
+        intro1: "Hallo! Schoen, dass du da bist. Ich bin XY und finde gerne eine direkte Antwort fuer dich - stelle mir dazu eine Frage.",
+      },
+      en: {
+        title: "Any questions?",
+        subtitle: "",
+        intro1: "Hi! Nice to have you here. I am XY and I am happy to help you find a direct answer - just ask a question.",
+      },
+    };
+    const BASE_DEFAULTS = {
+      icon: "💬",
+      theme: DEFAULT_THEME,
+    };
+
+    function parseColorToRgb(input) {
+      if (!input || typeof input !== "string") return null;
+      const hex = input.replace("#", "");
+      if ([3, 6].includes(hex.length)) {
+        const chunk = hex.length === 3 ? hex.split("").map((c) => c + c) : hex.match(/.{2}/g);
+        if (!chunk) return null;
+        const [r, g, b] = chunk.map((c) => parseInt(c, 16));
+        if ([r, g, b].some((n) => Number.isNaN(n))) return null;
+        return { r, g, b };
+      }
+
+      const rgbMatch = input.trim().match(/^rgba?\(\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)(?:\s*,\s*([0-9.]+))?\s*\)$/i);
+      if (rgbMatch) {
+        const [r, g, b] = rgbMatch.slice(1, 4).map((v) => parseInt(v, 10));
+        if ([r, g, b].some((n) => Number.isNaN(n))) return null;
+        return { r, g, b };
+      }
+
+      return null;
+    }
+
+    function withAlpha(color, alpha) {
+      const rgb = parseColorToRgb(color);
+      return rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})` : null;
+    }
+
+    function isCssColor(value) {
+      if (!value) return false;
+      const el = document.createElement("option");
+      el.style.color = "";
+      el.style.color = value;
+      return !!el.style.color;
+    }
+
+    function parseBoolParam(value, fallback) {
+      if (value === null || value === undefined) return fallback;
+      if (typeof value === "boolean") return value;
+      if (typeof value === "number") return value !== 0;
+      if (typeof value === "string") {
+        const cleaned = value.trim().toLowerCase();
+        if (["1", "true", "yes", "on"].includes(cleaned)) return true;
+        if (["0", "false", "no", "off"].includes(cleaned)) return false;
+      }
+      return fallback;
+    }
+
+    function normalizeLang(value) {
+      if (!value) return "";
+      const cleaned = value.toString().trim().toLowerCase();
+      if (!cleaned) return "";
+      return cleaned.split("-")[0];
+    }
+
+    function resolveLang() {
+      const fromParams = params.get("lang") || params.get("locale");
+      const fromDoc = document.documentElement ? document.documentElement.lang : "";
+      const fromNavigator = navigator.language || "";
+      return normalizeLang(fromParams || fromDoc || fromNavigator) || "de";
+    }
+
+    function resolveDefaults() {
+      const lang = resolveLang();
+      const copyDefaults = DEFAULT_COPY[lang] || DEFAULT_COPY.de;
+      return { ...BASE_DEFAULTS, ...copyDefaults };
+    }
+
+    function sanitizeSvg(markup) {
+      if (!markup || typeof markup !== "string") return null;
+      const trimmed = markup.trim();
+      if (!trimmed.toLowerCase().startsWith("<svg")) return null;
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(trimmed, "image/svg+xml");
+        if (doc.querySelector("parsererror")) return null;
+        const svg = doc.documentElement;
+        if (!svg || svg.nodeName.toLowerCase() !== "svg") return null;
+        const blocked = ["script", "foreignObject", "iframe", "object", "embed", "link", "style"];
+        blocked.forEach((tag) => {
+          doc.querySelectorAll(tag).forEach((el) => el.remove());
+        });
+        doc.querySelectorAll("*").forEach((el) => {
+          Array.from(el.attributes).forEach((attr) => {
+            const name = attr.name.toLowerCase();
+            const value = (attr.value || "").trim();
+            if (name.startsWith("on")) {
+              el.removeAttribute(attr.name);
+              return;
+            }
+            if (name === "href" || name === "xlink:href") {
+              if (value && !value.startsWith("#")) {
+                el.removeAttribute(attr.name);
+              }
+            }
+          });
+        });
+        return svg;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function parseViewBox(svgEl) {
+      if (!svgEl) return null;
+      const vb = svgEl.getAttribute("viewBox");
+      if (!vb) return null;
+      const parts = vb.trim().split(/[ ,]+/).map(Number);
+      if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return null;
+      return { x: parts[0], y: parts[1], width: parts[2], height: parts[3] };
+    }
+
+    function normalizeSvg(svgEl) {
+      if (!svgEl || !svgEl.getBBox) return;
+      svgEl.removeAttribute("width");
+      svgEl.removeAttribute("height");
+      svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      try {
+        const box = svgEl.getBBox();
+        if (!box || !box.width || !box.height) return;
+        const vb = parseViewBox(svgEl);
+        if (vb) {
+          const widthRatio = box.width / vb.width;
+          const heightRatio = box.height / vb.height;
+          const offsetRatio = Math.max(
+            Math.abs(box.x - vb.x) / vb.width,
+            Math.abs(box.y - vb.y) / vb.height
+          );
+          const needsFit = widthRatio < 0.7 || heightRatio < 0.7 || offsetRatio > 0.15;
+          if (!needsFit) return;
+        }
+        const pad = Math.max(box.width, box.height) * 0.08;
+        const x = box.x - pad;
+        const y = box.y - pad;
+        const w = box.width + pad * 2;
+        const h = box.height + pad * 2;
+        svgEl.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+      } catch (err) { }
+    }
+
+    function setAvatarContent(iconValue) {
+      if (!avatarEl) return;
+      const trimmed = (iconValue || "").trim();
+      avatarEl.innerHTML = "";
+      if (!trimmed) {
+        avatarEl.style.display = "none";
+        return;
+      }
+      if (trimmed.toLowerCase().startsWith("<svg")) {
+        const safeSvg = sanitizeSvg(trimmed);
+        if (safeSvg) {
+          avatarEl.appendChild(safeSvg);
+          normalizeSvg(safeSvg);
+          avatarEl.style.display = "grid";
+          return;
+        }
+      }
+      avatarEl.textContent = trimmed;
+      avatarEl.style.display = "grid";
+    }
+
+    function applyThemeFromParams() {
+      const defaults = resolveDefaults();
+      const theme = { ...defaults.theme };
+      const themeKeys = {
+        accent: "--accent",
+        accentStrong: "--accent-strong",
+        avatarBg: "--avatar-bg",
+        bg: "--bg",
+        panel: "--panel",
+        text: "--ink",
+        userBubble: "--bubble-user",
+        userText: "--bubble-user-text",
+        botBubble: "--bubble-bot",
+        botText: "--bubble-bot-text",
+        shellBorder: "--shell-border",
+        composerBg: "--composer-bg",
+        composerBorder: "--composer-border",
+        composerText: "--composer-text",
+        composerButtonBg: "--composer-btn-bg",
+        composerButtonText: "--composer-btn-text",
+      };
+
+      Object.keys(themeKeys).forEach((key) => {
+        const val = params.get(`theme_${key}`) || params.get(key);
+        if (val) theme[key] = val;
+      });
+
+      const root = document.documentElement;
+      Object.entries(themeKeys).forEach(([key, cssVar]) => {
+        const val = theme[key];
+        if (val && isCssColor(val)) root.style.setProperty(cssVar, val);
+      });
+      if (theme.panel && isCssColor(theme.panel)) {
+        root.style.setProperty("--border", theme.panel);
+      }
+
+      const panelSoft = withAlpha(theme.panel, 0.85);
+      const textMuted = withAlpha(theme.text, 0.6);
+      const textSoft = withAlpha(theme.text, 0.78);
+
+      if (panelSoft) root.style.setProperty("--panel-soft", panelSoft);
+      if (textMuted) root.style.setProperty("--text-muted", textMuted);
+      if (textSoft) root.style.setProperty("--text-soft", textSoft);
+
+      const langKey = resolveLang() === "en" ? "en" : "de";
+      const hasLangParams = [
+        "title_de",
+        "title_en",
+        "subtitle_de",
+        "subtitle_en",
+        "intro1_de",
+        "intro1_en",
+      ].some((key) => params.has(key));
+      const titleParam = hasLangParams ? params.get(`title_${langKey}`) : params.get("title");
+      const subtitleParam = hasLangParams ? params.get(`subtitle_${langKey}`) : params.get("subtitle");
+      const intro1Param = hasLangParams ? params.get(`intro1_${langKey}`) : params.get("intro1");
+      const title = (titleParam || defaults.title).trim();
+      const subtitle = (subtitleParam || defaults.subtitle).trim();
+      const icon = (params.get("icon") || params.get("emoji") || defaults.icon).trim();
+      const intro1 = intro1Param;
+      titleEl.textContent = title || defaults.title;
+      subtitleEl.textContent = subtitle || defaults.subtitle;
+      subtitleEl.style.display = subtitle ? "block" : "none";
+      setAvatarContent(icon || defaults.icon);
+      if (introLine1El) {
+        const intro1Text = (intro1 !== null ? intro1 : defaults.intro1).trim();
+        introLine1El.textContent = intro1Text;
+        introLine1El.style.display = intro1Text ? "block" : "none";
+      }
+      if (poweredByEl) {
+        const showPoweredBy = parseBoolParam(params.get("show_powered_by"), true);
+        poweredByEl.classList.toggle("hidden", !showPoweredBy);
+      }
+    }
+
+    function scrollToBottom() {
+      messagesWrapEl.scrollTop = messagesWrapEl.scrollHeight;
+    }
+
+    function showIntro() {
+      if (introEl) introEl.classList.remove("hidden");
+    }
+
+    function hideIntro() {
+      if (introEl) introEl.classList.add("hidden");
+    }
+
+    function addMessage(text, sender) {
+      const div = document.createElement("div");
+      div.className = "bubble " + sender;
+      setBubbleContent(div, text, { plain: sender === "user" });
+      messageListEl.appendChild(div);
+      scrollToBottom();
+    }
+
+    function startPlaceholder() {
+      const id = `ph-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
+      const lang = resolveLang() === "en" ? "en" : "de";
+      const steps = lang === "en"
+        ? ["Thinking ...", "Searching index ...", "Drafting answer ..."]
+        : ["Denke nach ...", "Suche im Index ...", "Formuliere Antwort ..."];
+      const div = document.createElement("div");
+      div.className = "bubble bot typing";
+      setBubbleContent(div, steps[0]);
+      div.dataset.placeholderId = id;
+      messageListEl.appendChild(div);
+      scrollToBottom();
+      const timers = steps.slice(1).map((txt, idx) =>
+        setTimeout(() => {
+          if (div.dataset.placeholderId === id) {
+            setBubbleContent(div, txt);
+          }
+        }, (idx + 1) * 1200)
+      );
+      placeholderTimers.set(id, { div, timers });
+      return id;
+    }
+
+    function finishPlaceholder(id, finalText) {
+      const entry = placeholderTimers.get(id);
+      if (!entry) {
+        if (finalText) addMessage(finalText, "bot");
+        return;
+      }
+      entry.timers.forEach(clearTimeout);
+      placeholderTimers.delete(id);
+      entry.div.classList.remove("typing");
+      entry.div.removeAttribute("data-placeholder-id");
+      setBubbleContent(entry.div, finalText || "");
+      scrollToBottom();
+    }
+
+    // Frische Regex-Objekte pro Aufruf, damit verschachtelte Aufrufe kein lastIndex teilen.
+    function urlRegex() {
+      return /\b(?:https?:\/\/|www\.)[^\s<>()]+/gi;
+    }
+
+    function inlineMarkdownRegex() {
+      return /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|\*\*(\S(?:[^\n]*?\S)?)\*\*|__(\S(?:[^\n]*?\S)?)__|`([^`\n]+)`|\*(\S(?:[^*\n]*?\S)?)\*/g;
+    }
+
+    const SOURCES_HEADING_PATTERN = /^\s*(Quellen|Quelle|Sources|Source)\s*:\s*(.*)$/i;
+
+    function createLinkifiedFragment(input) {
+      const text = (input || "").toString();
+      const fragment = document.createDocumentFragment();
+      const pattern = urlRegex();
+      let lastIndex = 0;
+      let match;
+
+      while ((match = pattern.exec(text)) !== null) {
+        const start = match.index;
+        const url = match[0];
+        if (start > lastIndex) {
+          fragment.appendChild(document.createTextNode(text.slice(lastIndex, start)));
+        }
+        const anchor = document.createElement("a");
+        anchor.href = url.startsWith("http") ? url : `https://${url}`;
+        anchor.textContent = url;
+        anchor.target = "_blank";
+        anchor.rel = "noreferrer noopener";
+        fragment.appendChild(anchor);
+        lastIndex = pattern.lastIndex;
+      }
+
+      if (lastIndex < text.length) {
+        fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+      }
+
+      return fragment;
+    }
+
+    function createExternalLink(label, href) {
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.textContent = label;
+      anchor.target = "_blank";
+      anchor.rel = "noreferrer noopener";
+      return anchor;
+    }
+
+    // Rendert **fett**, __fett__, *kursiv*, `code` und Markdown-Links als echte Elemente.
+    function appendInlineMarkdown(target, input, depth) {
+      const level = depth || 0;
+      const text = (input || "").toString();
+      if (level > 3) {
+        target.appendChild(createLinkifiedFragment(text));
+        return;
+      }
+
+      const pattern = inlineMarkdownRegex();
+      let lastIndex = 0;
+      let match;
+
+      while ((match = pattern.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+          target.appendChild(createLinkifiedFragment(text.slice(lastIndex, match.index)));
+        }
+        if (match[2]) {
+          target.appendChild(createExternalLink(match[1], match[2]));
+        } else if (match[3] || match[4]) {
+          const strong = document.createElement("strong");
+          appendInlineMarkdown(strong, match[3] || match[4], level + 1);
+          target.appendChild(strong);
+        } else if (match[5]) {
+          const code = document.createElement("code");
+          code.textContent = match[5];
+          target.appendChild(code);
+        } else if (match[6]) {
+          const em = document.createElement("em");
+          appendInlineMarkdown(em, match[6], level + 1);
+          target.appendChild(em);
+        }
+        lastIndex = pattern.lastIndex;
+      }
+
+      if (lastIndex < text.length) {
+        target.appendChild(createLinkifiedFragment(text.slice(lastIndex)));
+      }
+    }
+
+    function appendRichText(target, input) {
+      const lines = (input || "").toString().split("\n");
+      lines.forEach((line, idx) => {
+        if (idx > 0) target.appendChild(document.createTextNode("\n"));
+        const heading = line.match(/^\s{0,3}(#{1,6})\s+(.*)$/);
+        if (heading) {
+          const strong = document.createElement("strong");
+          appendInlineMarkdown(strong, heading[2], 0);
+          target.appendChild(strong);
+          return;
+        }
+        appendInlineMarkdown(target, line, 0);
+      });
+    }
+
+    // Trennt einen abschliessenden "Quellen:"-Block vom Antworttext ab.
+    function splitSourcesBlock(input) {
+      const text = (input || "").toString();
+      const lines = text.split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const match = lines[i].match(SOURCES_HEADING_PATTERN);
+        if (!match) continue;
+        const rest = [match[2]].concat(lines.slice(i + 1)).join("\n").trim();
+        if (!/https?:\/\/|www\./i.test(rest)) break;
+        return {
+          body: lines.slice(0, i).join("\n").replace(/\s+$/, ""),
+          label: match[1],
+          sources: rest,
+        };
+      }
+      return { body: text, label: "", sources: "" };
+    }
+
+    function setBubbleContent(ele, text, options) {
+      ele.innerHTML = "";
+      // Nutzertext wird nicht als Markdown interpretiert.
+      if (options && options.plain) {
+        ele.appendChild(createLinkifiedFragment(text));
+        return;
+      }
+      const parts = splitSourcesBlock(text);
+
+      if (parts.body.trim()) {
+        const body = document.createElement("div");
+        body.className = "bubble-body";
+        appendRichText(body, parts.body);
+        ele.appendChild(body);
+      }
+
+      if (parts.sources) {
+        const wrap = document.createElement("div");
+        wrap.className = "sources";
+        const label = document.createElement("div");
+        label.className = "sources-label";
+        label.textContent = `${parts.label || "Quellen"}:`;
+        wrap.appendChild(label);
+        const list = document.createElement("div");
+        list.className = "sources-list";
+        appendRichText(list, parts.sources);
+        wrap.appendChild(list);
+        ele.appendChild(wrap);
+      }
+    }
+
+    function buildHeaders(isJson = false) {
+      const headers = isJson ? { "Content-Type": "application/json" } : {};
+      if (authToken) headers["Authorization"] = "Bearer " + authToken;
+      return headers;
+    }
+
+    function botLookupUrl() {
+      return `/api/public/bot_lookup?bot_slug=${encodeURIComponent(botSlug)}`;
+    }
+
+    async function resolveCustomerId() {
+      if (resolvedCustomerId || !botSlug) return resolvedCustomerId || "";
+      if (botLookupPromise) return botLookupPromise;
+      botLookupPromise = fetch(botLookupUrl())
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(data.error || "Bot konnte nicht aufgeloest werden.");
+          }
+          resolvedCustomerId = (data.customer_id || "").toString().trim();
+          if (!resolvedCustomerId) {
+            throw new Error("customer_id fehlt fuer diesen Bot.");
+          }
+          return resolvedCustomerId;
+        })
+        .catch((err) => {
+          botLookupError = (err && err.message) ? err.message : "Bot konnte nicht aufgeloest werden.";
+          return "";
+        });
+      return botLookupPromise;
+    }
+
+    function clearConversation() {
+      history.length = 0;
+      messageListEl.innerHTML = "";
+      placeholderTimers.forEach((entry) => entry.timers.forEach(clearTimeout));
+      placeholderTimers.clear();
+      showIntro();
+    }
+
+    async function sendMessage(textOverride) {
+      const text = (textOverride !== undefined ? textOverride : questionEl.value).trim();
+      if (!text) return;
+      if (!botSlug) {
+        hideIntro();
+        addMessage("Bitte bot_slug als Query-Parameter setzen (?bot_slug=...).", "bot");
+        return;
+      }
+      hideIntro();
+      const historyPayload = history.slice(-8);
+      addMessage(text, "user");
+      questionEl.value = "";
+      questionEl.focus();
+      sendBtn.disabled = true;
+      const placeholderId = startPlaceholder();
+      try {
+        const lookupId = await resolveCustomerId();
+        if (!lookupId && botLookupError) {
+          finishPlaceholder(placeholderId, botLookupError);
+          return;
+        }
+        const payload = {
+          question: text,
+          history: historyPayload,
+          bot_slug: botSlug,
+          lang: resolveLang(),
+        };
+        if (lookupId) payload.customer_id = lookupId;
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: buildHeaders(true),
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        const reply = res.ok ? data.answer : data.error || "Fehler im Backend.";
+        finishPlaceholder(placeholderId, reply);
+        history.push({ role: "user", content: text });
+        history.push({ role: "assistant", content: reply });
+      } catch (err) {
+        console.error(err);
+        finishPlaceholder(placeholderId, "Netzwerkfehler oder Server nicht erreichbar.");
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    sendBtn.addEventListener("click", () => sendMessage());
+    questionEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+    if (clearBtn) clearBtn.addEventListener("click", clearConversation);
+    if (closeBtn) {
+      closeBtn.addEventListener("click", () => {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: "chat-close" }, "*");
+        }
+      });
+    }
+
+    applyThemeFromParams();
+
+    if (!botSlug) {
+      hideIntro();
+      addMessage("Bitte bot_slug als Query-Parameter setzen (?bot_slug=...).", "bot");
+    } else if (!resolvedCustomerId) {
+      resolveCustomerId().then((id) => {
+        if (!id && botLookupError) {
+          hideIntro();
+          addMessage(botLookupError, "bot");
+        }
+      });
+    }
+
+    // User requested removal logic
+    try {
+      const elementToRemove = document.querySelector('div#chat-avatar');
+      let data = {};
+      if (elementToRemove) {
+        elementToRemove.remove();
+        data = { success: true };
+      } else {
+        data = { success: false, error: "Element not found" };
+      }
+    } catch (e) {
+      console.warn("Avatar removal script failed", e);
+    }
+  </script>
+</body>
+
+</html>

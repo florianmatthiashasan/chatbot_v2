@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+{% block title %}FAQs - florianmatthias{% endblock %}
+
+{% block content %}
+<div id="root"></div>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+    const { useEffect, useState } = React;
+    const h = React.createElement;
+
+    const Icon = ({ name }) => {
+        const props = { viewBox: "0 0 24 24", "aria-hidden": "true" };
+        switch (name) {
+            case "dashboard":
+                return h("svg", props, [
+                    h("rect", { x: 3, y: 3, width: 8, height: 8, rx: 2 }),
+                    h("rect", { x: 13, y: 3, width: 8, height: 5, rx: 2 }),
+                    h("rect", { x: 13, y: 10, width: 8, height: 11, rx: 2 }),
+                    h("rect", { x: 3, y: 13, width: 8, height: 8, rx: 2 }),
+                ]);
+            case "stats":
+                return h("svg", props, [
+                    h("path", { d: "M3 19h18" }),
+                    h("path", { d: "M6 16v-5" }),
+                    h("path", { d: "M12 16v-8" }),
+                    h("path", { d: "M18 16v-3" }),
+                ]);
+            case "scraping":
+                return h("svg", props, [
+                    h("path", { d: "M21 12a9 9 0 1 1-3-6.7" }),
+                    h("polyline", { points: "21 3 21 9 15 9" }),
+                ]);
+            case "chat":
+                return h("svg", props, [
+                    h("path", { d: "M6 6h12a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H10l-4 3v-3H6a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z" }),
+                ]);
+            case "memory":
+                return h("svg", props, [
+                    h("ellipse", { cx: 12, cy: 6, rx: 7, ry: 3 }),
+                    h("path", { d: "M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" }),
+                    h("path", { d: "M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" }),
+                ]);
+            case "faqs":
+                return h("svg", props, [
+                    h("circle", { cx: 12, cy: 12, r: 9 }),
+                    h("path", { d: "M9.5 9a2.5 2.5 0 0 1 5 0c0 1.6-2.5 1.9-2.5 4" }),
+                    h("path", { d: "M12 17h.01" }),
+                ]);
+            case "pdf":
+                return h("svg", props, [
+                    h("path", { d: "M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" }),
+                    h("path", { d: "M14 3v5h5" }),
+                    h("path", { d: "M9 13h6" }),
+                    h("path", { d: "M9 17h6" }),
+                ]);
+            case "widget":
+                return h("svg", props, [
+                    h("path", { d: "M4 6h16" }),
+                    h("circle", { cx: 9, cy: 6, r: 2 }),
+                    h("path", { d: "M4 12h16" }),
+                    h("circle", { cx: 15, cy: 12, r: 2 }),
+                    h("path", { d: "M4 18h16" }),
+                    h("circle", { cx: 7, cy: 18, r: 2 }),
+                ]);
+            case "integrate":
+                return h("svg", props, [
+                    h("path", { d: "M10 13a3 3 0 0 0 4 0l3-3a3 3 0 0 0-4-4l-1 1" }),
+                    h("path", { d: "M14 11a3 3 0 0 0-4 0l-3 3a3 3 0 0 0 4 4l1-1" }),
+                ]);
+            case "usage":
+                return h("svg", props, [
+                    h("rect", { x: 3, y: 5, width: 18, height: 14, rx: 2 }),
+                    h("path", { d: "M3 10h18" }),
+                    h("path", { d: "M7 15h5" }),
+                ]);
+            case "logout":
+                return h("svg", props, [
+                    h("path", { d: "M4 5h7a2 2 0 0 1 2 2v3" }),
+                    h("path", { d: "M13 14v3a2 2 0 0 1-2 2H4" }),
+                    h("path", { d: "M10 12h10" }),
+                    h("polyline", { points: "16 8 20 12 16 16" }),
+                ]);
+
+            default:
+                return h("svg", props);
+        }
+    };
+
+    function Sidebar({ activePage }) {
+        const navItems = [
+            { href: "/dashboard", label: "Dashboard", id: "dashboard", icon: "dashboard" },
+            { href: "/stats", label: "Statistiken", id: "stats", icon: "stats" },
+            { href: "/scraping", label: "Scraping & Index", id: "scraping", icon: "scraping" },
+            { href: "/chat", label: "Chat", id: "chat", icon: "chat" },
+            { href: "/memory", label: "Memory bearbeiten", id: "memory", icon: "memory" },
+            { href: "/faqs", label: "FAQs", id: "faqs", icon: "faqs" },
+            { href: "/pdf-upload", label: "PDF Upload", id: "pdf-upload", icon: "pdf" },
+            { href: "/widget-design", label: "Widget Design", id: "widget-design", icon: "widget" },
+            { href: "/integrate", label: "Integrieren", id: "integrate", icon: "integrate" },
+            { href: "/usage", label: "Kosten", id: "usage", icon: "usage" },
+            { href: "/login/", label: "Logout", id: "logout", icon: "logout", onClick: () => AuthState.logout() },
+        ];
+
+        return h("aside", { className: "sidebar" }, [
+            h("div", { key: "header", className: "sidebar-header" }, [
+                h("div", { className: "sidebar-title" }, "florianmatthias"),
+            ]),
+            h("ul", { key: "nav", className: "nav-list" },
+                navItems.map(item =>
+                    h("li", { key: item.id },
+                        h("a", {
+                            href: item.href,
+                            className: "nav-item" + (activePage === item.id ? " active" : ""),
+                            onClick: item.onClick ? (event) => { event.preventDefault(); item.onClick(); } : undefined,
+                        }, [
+                            h("span", { key: "icon", className: "nav-icon" }, h(Icon, { name: item.icon })),
+                            item.label
+                        ])
+                    )
+                )
+            ),
+        ]);
+    }
+
+    function FaqsPage() {
+        const [botSlug] = useState(AuthState.getBotSlug());
+        const [faqs, setFaqs] = useState([]);
+        const [faqLoading, setFaqLoading] = useState(true);
+        const [faqSaving, setFaqSaving] = useState(false);
+        const [faqError, setFaqError] = useState("");
+        const [faqSaved, setFaqSaved] = useState("");
+        const [rebuildLoading, setRebuildLoading] = useState(false);
+        const [rebuildInfo, setRebuildInfo] = useState("");
+
+        const loadFaqs = async () => {
+            setFaqError("");
+            setFaqSaved("");
+            setFaqLoading(true);
+            try {
+                if (!botSlug.trim()) {
+                    setFaqError("Bitte Bot-Slug auf Dashboard eintragen.");
+                    setFaqLoading(false);
+                    return;
+                }
+                const res = await fetch("/api/admin/faqs?bot_slug=" + encodeURIComponent(botSlug.trim()), {
+                    headers: AuthState.buildHeaders(),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                setFaqs(Array.isArray(data.faqs) ? data.faqs : []);
+            } catch (err) {
+                console.error(err);
+                setFaqError("FAQs konnten nicht geladen werden.");
+            } finally {
+                setFaqLoading(false);
+            }
+        };
+
+        useEffect(() => {
+            if (botSlug.trim()) loadFaqs();
+            else setFaqLoading(false);
+        }, []);
+
+        const addFaq = () => {
+            setFaqSaved("");
+            setFaqs((prev) => [...prev, { question: "", answer: "" }]);
+        };
+
+        const updateFaq = (idx, key, value) => {
+            setFaqSaved("");
+            setFaqs((prev) => prev.map((item, i) => (i === idx ? { ...item, [key]: value } : item)));
+        };
+
+        const removeFaq = (idx) => {
+            setFaqSaved("");
+            setFaqs((prev) => prev.filter((_, i) => i !== idx));
+        };
+
+        const saveFaqs = async () => {
+            setFaqSaving(true);
+            setFaqError("");
+            setFaqSaved("");
+            try {
+                const res = await fetch("/api/admin/faqs", {
+                    method: "POST",
+                    headers: AuthState.buildHeaders(true),
+                    body: JSON.stringify({
+                        bot_slug: botSlug.trim(),
+                        faqs: faqs.map((item) => ({
+                            question: (item.question || "").trim(),
+                            answer: (item.answer || "").trim(),
+                        })),
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setFaqError(data.error || "Speichern fehlgeschlagen.");
+                    return;
+                }
+                setFaqs(data.faqs || []);
+                setFaqSaved("✅ FAQs gespeichert! Vergiss nicht, den Index neu zu bauen.");
+            } catch (err) {
+                console.error(err);
+                setFaqError("Netzwerkfehler beim Speichern.");
+            } finally {
+                setFaqSaving(false);
+            }
+        };
+
+        const rebuildIndex = async () => {
+            setFaqError("");
+            setRebuildInfo("");
+            if (!botSlug.trim()) {
+                setFaqError("Bitte Bot-Slug auf Dashboard eintragen.");
+                return;
+            }
+            setRebuildLoading(true);
+            try {
+                const res = await fetch("/api/admin/run", {
+                    method: "POST",
+                    headers: AuthState.buildHeaders(true),
+                    body: JSON.stringify({ index_only: true, bot_slug: botSlug.trim() }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setFaqError(data.error || "Index-Neubau fehlgeschlagen.");
+                    return;
+                }
+                setRebuildInfo("Index-Job gestartet. Fortschritt unter \"Scraping & Index\" prüfen.");
+            } catch (err) {
+                console.error(err);
+                setFaqError("Netzwerkfehler beim Index-Neubau.");
+            } finally {
+                setRebuildLoading(false);
+            }
+        };
+
+        if (!AuthState.isLoggedIn()) {
+            window.location.href = "/login";
+            return null;
+        }
+
+        return h("div", { className: "layout" }, [
+            h(Sidebar, { key: "sidebar", activePage: "faqs" }),
+            h("div", { key: "content", className: "content" }, [
+                h("div", { key: "hero", className: "hero" }, [
+                    h("div", { className: "hero-badge" }, [
+                        h("span", { className: "hero-badge-dot" }),
+                        "FAQ Management"
+                    ]),
+                    h("h1", { className: "title" }, "FAQs verwalten"),
+                    h("p", { className: "subtitle" }, "Füge häufig gestellte Fragen hinzu, um deinen Chatbot zu verbessern."),
+                ]),
+
+                faqError ? h("div", {
+                    key: "error", style: {
+                        background: "var(--error-bg)", color: "var(--error)",
+                        padding: "12px 16px", borderRadius: 12, marginBottom: 16
+                    }
+                }, faqError) : null,
+                faqSaved ? h("div", {
+                    key: "saved", style: {
+                        background: "var(--success-bg)", color: "var(--success)",
+                        padding: "12px 16px", borderRadius: 12, marginBottom: 16
+                    }
+                }, faqSaved) : null,
+                rebuildInfo ? h("div", {
+                    key: "rebuild", style: {
+                        background: "var(--bg-tertiary)", color: "var(--text-primary)",
+                        padding: "12px 16px", borderRadius: 12, marginBottom: 16,
+                        border: "1px solid var(--border-subtle)"
+                    }
+                }, rebuildInfo) : null,
+
+                h("div", { key: "faqs", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "❓"), "FAQs"]),
+                    h("p", { className: "muted" }, "Nach dem Speichern direkt hier \"Index neu bauen\" klicken oder auf der Scraping-Seite anstoßen."),
+                    faqLoading
+                        ? h("div", { className: "muted" }, "⏳ FAQs werden geladen...")
+                        : h("div", { className: "stack" }, [
+                            h("div", { key: "list", className: "faq-list" },
+                                faqs && faqs.length
+                                    ? faqs.map((item, idx) =>
+                                        h("div", { key: idx, className: "faq-item" }, [
+                                            h("div", { className: "faq-header" }, [
+                                                h("strong", null, `FAQ #${idx + 1}`),
+                                                h("button", {
+                                                    className: "ghost-btn",
+                                                    onClick: () => removeFaq(idx),
+                                                    style: { padding: "8px 12px", fontSize: 12 }
+                                                }, "🗑️ Entfernen"),
+                                            ]),
+                                            h("input", {
+                                                placeholder: "Frage eingeben...",
+                                                value: item.question || "",
+                                                onChange: (e) => updateFaq(idx, "question", e.target.value),
+                                            }),
+                                            h("textarea", {
+                                                placeholder: "Antwort eingeben...",
+                                                value: item.answer || "",
+                                                onChange: (e) => updateFaq(idx, "answer", e.target.value),
+                                            }),
+                                        ])
+                                    )
+                                    : [h("div", { key: "empty", className: "muted", style: { textAlign: "center", padding: 32 } }, "Noch keine FAQs angelegt. Klicke auf 'FAQ hinzufügen'.")]
+                            ),
+                            h("div", { key: "buttons", style: { display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" } }, [
+                                h("button", {
+                                    className: "ghost-btn",
+                                    onClick: addFaq,
+                                }, "➕ FAQ hinzufügen"),
+                                h("button", {
+                                    onClick: saveFaqs,
+                                    disabled: faqSaving,
+                                }, h("span", null, faqSaving ? "⏳ Speichert..." : "💾 FAQs speichern")),
+                                h("button", {
+                                    onClick: rebuildIndex,
+                                    disabled: rebuildLoading,
+                                }, h("span", null, rebuildLoading ? "⏳ Index läuft..." : "🔄 Index neu bauen")),
+                            ]),
+                        ]),
+                ]),
+            ]),
+        ]);
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(h(FaqsPage));
+</script>
+{% endblock %}

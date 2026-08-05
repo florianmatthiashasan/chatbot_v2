@@ -1,0 +1,402 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - florianmatthias{% endblock %}
+
+{% block content %}
+<div id="root"></div>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+    const { useEffect, useState } = React;
+    const h = React.createElement;
+
+    const Icon = ({ name }) => {
+        const props = { viewBox: "0 0 24 24", "aria-hidden": "true" };
+        switch (name) {
+            case "dashboard":
+                return h("svg", props, [
+                    h("rect", { x: 3, y: 3, width: 8, height: 8, rx: 2 }),
+                    h("rect", { x: 13, y: 3, width: 8, height: 5, rx: 2 }),
+                    h("rect", { x: 13, y: 10, width: 8, height: 11, rx: 2 }),
+                    h("rect", { x: 3, y: 13, width: 8, height: 8, rx: 2 }),
+                ]);
+            case "stats":
+                return h("svg", props, [
+                    h("path", { d: "M3 19h18" }),
+                    h("path", { d: "M6 16v-5" }),
+                    h("path", { d: "M12 16v-8" }),
+                    h("path", { d: "M18 16v-3" }),
+                ]);
+            case "scraping":
+                return h("svg", props, [
+                    h("path", { d: "M21 12a9 9 0 1 1-3-6.7" }),
+                    h("polyline", { points: "21 3 21 9 15 9" }),
+                ]);
+            case "chat":
+                return h("svg", props, [
+                    h("path", { d: "M6 6h12a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H10l-4 3v-3H6a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z" }),
+                ]);
+            case "memory":
+                return h("svg", props, [
+                    h("ellipse", { cx: 12, cy: 6, rx: 7, ry: 3 }),
+                    h("path", { d: "M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" }),
+                    h("path", { d: "M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" }),
+                ]);
+            case "faqs":
+                return h("svg", props, [
+                    h("circle", { cx: 12, cy: 12, r: 9 }),
+                    h("path", { d: "M9.5 9a2.5 2.5 0 0 1 5 0c0 1.6-2.5 1.9-2.5 4" }),
+                    h("path", { d: "M12 17h.01" }),
+                ]);
+            case "pdf":
+                return h("svg", props, [
+                    h("path", { d: "M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" }),
+                    h("path", { d: "M14 3v5h5" }),
+                    h("path", { d: "M9 13h6" }),
+                    h("path", { d: "M9 17h6" }),
+                ]);
+            case "widget":
+                return h("svg", props, [
+                    h("path", { d: "M4 6h16" }),
+                    h("circle", { cx: 9, cy: 6, r: 2 }),
+                    h("path", { d: "M4 12h16" }),
+                    h("circle", { cx: 15, cy: 12, r: 2 }),
+                    h("path", { d: "M4 18h16" }),
+                    h("circle", { cx: 7, cy: 18, r: 2 }),
+                ]);
+            case "integrate":
+                return h("svg", props, [
+                    h("path", { d: "M10 13a3 3 0 0 0 4 0l3-3a3 3 0 0 0-4-4l-1 1" }),
+                    h("path", { d: "M14 11a3 3 0 0 0-4 0l-3 3a3 3 0 0 0 4 4l1-1" }),
+                ]);
+            case "usage":
+                return h("svg", props, [
+                    h("rect", { x: 3, y: 5, width: 18, height: 14, rx: 2 }),
+                    h("path", { d: "M3 10h18" }),
+                    h("path", { d: "M7 15h5" }),
+                ]);
+            case "logout":
+                return h("svg", props, [
+                    h("path", { d: "M4 5h7a2 2 0 0 1 2 2v3" }),
+                    h("path", { d: "M13 14v3a2 2 0 0 1-2 2H4" }),
+                    h("path", { d: "M10 12h10" }),
+                    h("polyline", { points: "16 8 20 12 16 16" }),
+                ]);
+
+            default:
+                return h("svg", props);
+        }
+    };
+
+    const Badge = ({ tone, children }) =>
+        h("span", { className: "badge " + (tone || "ok") }, children);
+
+    function LoginForm({ onLogin }) {
+        const [mode, setMode] = useState("login");
+        const [email, setEmail] = useState("");
+        const [password, setPassword] = useState("");
+        const [error, setError] = useState("");
+
+        const handleAuth = async () => {
+            setError("");
+            if (!email.trim() || !password.trim()) {
+                setError("Email und Passwort ausfüllen.");
+                return;
+            }
+            try {
+                const res = await fetch(`/api/auth/${mode}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email: email.trim(), password }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setError(data.error || "Login/Register fehlgeschlagen.");
+                    return;
+                }
+                if (data.access_token) {
+                    AuthState.setToken(data.access_token);
+                }
+                if (data.user_id) {
+                    AuthState.setUserId(data.user_id);
+                }
+                if (data.default_bot_slug) {
+                    AuthState.setBotSlug(data.default_bot_slug);
+                }
+                onLogin();
+            } catch (err) {
+                console.error(err);
+                setError("Netzwerkfehler beim Auth-Request.");
+            }
+        };
+
+        return h("div", { className: "card auth-card" }, [
+            h("div", {
+                key: "logo", style: {
+                    width: 64, height: 64,
+                    background: "var(--accent-gradient)",
+                    borderRadius: 16,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    margin: "0 auto 24px",
+                    fontSize: 28,
+                    boxShadow: "var(--glow-primary)"
+                }
+            }, "🚀"),
+            h("h2", { key: "title" }, mode === "login" ? "Willkommen zurück" : "Account erstellen"),
+            h("p", { key: "desc", className: "muted" }, "Melde dich an, um fortzufahren."),
+            error ? h("div", {
+                key: "error", style: {
+                    background: "var(--error-bg)",
+                    color: "var(--error)",
+                    padding: "12px 16px",
+                    borderRadius: 12,
+                    marginBottom: 16,
+                    fontSize: 14,
+                    border: "1px solid rgba(239, 68, 68, 0.3)"
+                }
+            }, error) : null,
+            h("div", { key: "form", className: "stack" }, [
+                h("input", {
+                    key: "email",
+                    type: "email",
+                    placeholder: "Email Adresse",
+                    value: email,
+                    onChange: (e) => setEmail(e.target.value),
+                }),
+                h("input", {
+                    key: "password",
+                    type: "password",
+                    placeholder: "Passwort",
+                    value: password,
+                    onChange: (e) => setPassword(e.target.value),
+                    onKeyDown: (e) => e.key === "Enter" && handleAuth(),
+                }),
+                h("div", { key: "buttons", className: "control", style: { marginTop: 8 } }, [
+                    h("button", { key: "submit", onClick: handleAuth }, h("span", null, mode === "login" ? "Einloggen" : "Registrieren")),
+                ]),
+                h("button", {
+                    key: "toggle",
+                    className: "ghost-btn",
+                    type: "button",
+                    onClick: () => setMode(mode === "login" ? "register" : "login"),
+                    style: { marginTop: 8 }
+                }, mode === "login" ? "Noch kein Account? Registrieren" : "Bereits registriert? Einloggen"),
+            ]),
+        ]);
+    }
+
+    function Sidebar({ activePage }) {
+        const navItems = [
+            { href: "/dashboard", label: "Dashboard", id: "dashboard", icon: "dashboard" },
+            { href: "/stats", label: "Statistiken", id: "stats", icon: "stats" },
+            { href: "/scraping", label: "Scraping & Index", id: "scraping", icon: "scraping" },
+            { href: "/chat", label: "Chat", id: "chat", icon: "chat" },
+            { href: "/memory", label: "Memory bearbeiten", id: "memory", icon: "memory" },
+            { href: "/faqs", label: "FAQs", id: "faqs", icon: "faqs" },
+            { href: "/pdf-upload", label: "PDF Upload", id: "pdf-upload", icon: "pdf" },
+            { href: "/widget-design", label: "Widget Design", id: "widget-design", icon: "widget" },
+            { href: "/integrate", label: "Integrieren", id: "integrate", icon: "integrate" },
+            { href: "/usage", label: "Kosten", id: "usage", icon: "usage" },
+            { href: "/login/", label: "Logout", id: "logout", icon: "logout", onClick: () => AuthState.logout() },
+        ];
+
+        return h("aside", { className: "sidebar" }, [
+            h("div", { key: "header", className: "sidebar-header" }, [
+                h("div", { className: "sidebar-title" }, "florianmatthias"),
+            ]),
+            h("ul", { key: "nav", className: "nav-list" },
+                navItems.map(item =>
+                    h("li", { key: item.id },
+                        h("a", {
+                            href: item.href,
+                            className: "nav-item" + (activePage === item.id ? " active" : ""),
+                            onClick: item.onClick ? (event) => { event.preventDefault(); item.onClick(); } : undefined,
+                        }, [
+                            h("span", { key: "icon", className: "nav-icon" }, h(Icon, { name: item.icon })),
+                            item.label
+                        ])
+                    )
+                )
+            ),
+        ]);
+    }
+
+    function Dashboard() {
+        const [botSlug, setBotSlug] = useState(AuthState.getBotSlug());
+        const [status, setStatus] = useState(null);
+        const [statusError, setStatusError] = useState("");
+
+        const refreshStatus = async () => {
+            try {
+                setStatusError("");
+                if (!botSlug.trim()) {
+                    setStatusError("Bitte Bot-Slug eintragen.");
+                    return;
+                }
+                const res = await fetch("/api/admin/status?bot_slug=" + encodeURIComponent(botSlug.trim()), {
+                    headers: AuthState.buildHeaders(),
+                });
+                const data = await res.json();
+                setStatus(data);
+            } catch (err) {
+                console.error(err);
+                setStatusError("Status konnte nicht geladen werden.");
+            }
+        };
+
+        useEffect(() => {
+            if (botSlug.trim()) {
+                refreshStatus();
+            }
+        }, []);
+
+        // Status Row Component
+        const StatusRow = ({ icon, progress, color, label, labelClass }) =>
+            h("div", { className: "status-row" }, [
+                h("span", { key: "icon", className: "status-row-icon" }, icon),
+                h("div", { key: "bar", className: "status-progress" },
+                    h("div", { className: "status-progress-bar " + color, style: { width: progress + "%" } })
+                ),
+                h("span", { key: "label", className: "status-label " + labelClass }, label),
+            ]);
+
+        // Action Card Component
+        const ActionCard = ({ href, color, icon, title, desc }) =>
+            h("a", { href, className: "action-card " + color }, [
+                h("div", { key: "icon", className: "action-card-icon" }, icon),
+                h("div", { key: "title", className: "action-card-title" }, title),
+                h("div", { key: "desc", className: "action-card-desc" }, desc),
+            ]);
+
+        return h("div", { className: "layout" }, [
+            h(Sidebar, { key: "sidebar", activePage: "dashboard" }),
+            h("div", { key: "content", className: "content" }, [
+                h("div", { key: "hero", className: "hero" }, [
+                    h("div", { key: "badge", className: "hero-badge" }, [
+                        h("span", { className: "hero-badge-dot" }),
+                        "Dashboard"
+                    ]),
+                    h("h1", { key: "title", className: "title" }, "Premium Dashboard"),
+                    h("p", { key: "subtitle", className: "subtitle" }, "Verwalte deine AI-Chatbots, scrappe Websites und baue intelligente Suchindizes."),
+                ]),
+                statusError ? h("div", {
+                    key: "error", style: {
+                        background: "var(--error-bg)",
+                        color: "var(--error)",
+                        padding: "12px 16px",
+                        borderRadius: 12,
+                        marginBottom: 16,
+                        fontSize: 14
+                    }
+                }, statusError) : null,
+
+                h("div", { key: "cards", className: "grid" }, [
+                    h("div", { key: "auth", className: "card" }, [
+                        h("h2", { key: "title" }, [h("span", { className: "card-icon" }, "🤖"), "Bot Konfiguration"]),
+                        h("p", { key: "desc", className: "muted" }, "Wähle oder erstelle einen Bot-Slug für dein Projekt."),
+                        h("div", { key: "control", className: "control" }, [
+                            h("input", {
+                                key: "slug",
+                                placeholder: "default",
+                                value: botSlug,
+                                onChange: (e) => {
+                                    setBotSlug(e.target.value);
+                                    AuthState.setBotSlug(e.target.value);
+                                },
+                            }),
+                        ]),
+                        h("div", { key: "actions", style: { display: "flex", gap: 12 } }, [
+                            h("button", {
+                                key: "load",
+                                onClick: refreshStatus,
+                                disabled: !botSlug.trim(),
+                            }, h("span", null, "Bot laden")),
+                            h("button", {
+                                key: "logout",
+                                className: "ghost-btn",
+                                type: "button",
+                                onClick: AuthState.logout,
+                            }, "Logout"),
+                        ]),
+                    ]),
+
+                    h("div", { key: "status", className: "card" }, [
+                        h("h2", { key: "title" }, [h("span", { className: "card-icon" }, "📊"), "Systemstatus"]),
+                        h("p", { key: "desc", className: "muted" }, "Aktueller Status deines Bots und Index."),
+                        status
+                            ? h("div", { key: "rows", className: "status-rows" }, [
+                                h(StatusRow, {
+                                    key: "running",
+                                    icon: "⚡",
+                                    progress: status.running ? 60 : 100,
+                                    color: status.running ? "orange" : "green",
+                                    label: status.running ? "⏳ Job läuft" : "✅ Bereit",
+                                    labelClass: status.running ? "warning" : "success"
+                                }),
+                                h(StatusRow, {
+                                    key: "index",
+                                    icon: "🗂️",
+                                    progress: status.index_exists ? 100 : 40,
+                                    color: status.index_exists ? "green" : "orange",
+                                    label: status.index_exists ? "✅ Index vorhanden" : "⚠️ Index fehlt",
+                                    labelClass: status.index_exists ? "success" : "warning"
+                                }),
+                                h(StatusRow, {
+                                    key: "lastrun",
+                                    icon: "🕐",
+                                    progress: status.last_run ? 100 : 20,
+                                    color: status.last_run ? "green" : "gray",
+                                    label: status.last_run ? (status.last_run.finished_at || status.last_run.started_at) : "Noch kein Lauf",
+                                    labelClass: status.last_run ? "success" : "muted"
+                                }),
+                            ])
+                            : h("span", { key: "loading", className: "muted" }, "Status wird geladen..."),
+                    ]),
+                ]),
+
+                h("div", { key: "quicklinks", className: "card" }, [
+                    h("h2", { key: "title" }, [h("span", { className: "card-icon" }, "⚡"), "Schnellzugriff"]),
+                    h("p", { key: "desc", className: "muted" }, "Springe direkt zu den wichtigsten Funktionen."),
+                    h("div", { key: "cards", className: "action-cards" }, [
+                        h(ActionCard, {
+                            key: "scraping",
+                            href: "/scraping",
+                            color: "purple",
+                            icon: "🔄",
+                            title: "Scraping starten",
+                            desc: "Springe direkt zu den scraping starten."
+                        }),
+                        h(ActionCard, {
+                            key: "pdf",
+                            href: "/pdf-upload",
+                            color: "cyan",
+                            icon: "📄",
+                            title: "PDF hochladen",
+                            desc: "Wähle oder zu den PDF hochladen."
+                        }),
+                        h(ActionCard, {
+                            key: "faqs",
+                            href: "/faqs",
+                            color: "orange",
+                            icon: "❓",
+                            title: "FAQs verwalten",
+                            desc: "Springe direktzogen FAQs verwalten."
+                        }),
+                    ]),
+                ]),
+            ]),
+        ]);
+    }
+
+    function App() {
+        const [isLoggedIn, setIsLoggedIn] = useState(AuthState.isLoggedIn());
+
+        if (!isLoggedIn) {
+            return h(LoginForm, { onLogin: () => setIsLoggedIn(true) });
+        }
+
+        return h(Dashboard);
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+</script>
+{% endblock %}

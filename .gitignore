@@ -1,0 +1,57 @@
+# Secrets / Konfiguration
+.env
+.env.*
+!.env.example
+app/.env
+*.pem
+*.key
+
+# Kundendaten (Prompts, gescrapte Inhalte, FAISS-Indizes, Uploads)
+app/kunden/
+kunden/
+
+# Laufzeit-State (enthaelt Kunden-IDs, Sitemaps, Scrape-Ergebnisse)
+app/schedules.json
+app/summary.json
+app/faiss_index/
+app/output_markdown/
+app/uploads/
+
+# Virtuelle Umgebungen
+venv/
+.venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Datenbanken / Logs
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# Node (falls Tooling dazukommt)
+node_modules/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+.vscode/*
+!.vscode/settings.json

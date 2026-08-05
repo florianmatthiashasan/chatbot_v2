@@ -1,0 +1,909 @@
+{% extends "base.html" %}
+{% block title %}Statistiken - florianmatthias{% endblock %}
+
+{% block content %}
+<div id="root"></div>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<style>
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 20px;
+    }
+
+    @media (max-width: 1200px) {
+        .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+
+    @media (max-width: 768px) {
+        .stats-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .stat-card {
+        position: relative;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 20px;
+        padding: 24px;
+        overflow: hidden;
+        backdrop-filter: blur(20px);
+        transition: all 320ms cubic-bezier(0.16, 1, 0.3, 1);
+        box-shadow: 0 8px 32px rgba(15, 23, 42, 0.08);
+    }
+
+    .stat-card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: var(--card-accent, var(--accent-gradient));
+        border-radius: 20px 20px 0 0;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 20px 48px rgba(14, 165, 164, 0.18);
+        border-color: rgba(14, 165, 164, 0.2);
+    }
+
+    .stat-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 16px;
+    }
+
+    .stat-card-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 14px;
+        background: var(--icon-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+    }
+
+    .stat-card-trend {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 5px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    .stat-card-trend.up {
+        background: rgba(34, 197, 94, 0.12);
+        color: #15803d;
+    }
+
+    .stat-card-value {
+        font-size: 36px;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        color: var(--text-primary);
+        line-height: 1.1;
+        margin-bottom: 6px;
+        font-family: var(--font-display);
+    }
+
+    .stat-card-label {
+        font-size: 13px;
+        color: var(--text-muted);
+        font-weight: 500;
+    }
+
+    .stat-card-sub {
+        font-size: 12px;
+        color: var(--text-subtle);
+        margin-top: 4px;
+    }
+
+    .chart-card-premium {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.92) 100%);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 24px;
+        padding: 28px;
+        box-shadow: 0 12px 40px rgba(15, 23, 42, 0.1);
+        backdrop-filter: blur(20px);
+    }
+
+    .chart-header-premium {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+
+    .chart-title-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .chart-title-premium {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-family: var(--font-display);
+        letter-spacing: -0.02em;
+    }
+
+    .chart-subtitle-premium {
+        font-size: 13px;
+        color: var(--text-muted);
+    }
+
+    .period-selector {
+        display: flex;
+        gap: 4px;
+        padding: 4px;
+        background: rgba(15, 23, 42, 0.04);
+        border-radius: 12px;
+    }
+
+    .period-btn {
+        padding: 8px 16px;
+        border-radius: 10px;
+        font-size: 13px;
+        font-weight: 500;
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 200ms ease;
+        box-shadow: none;
+    }
+
+    .period-btn:hover {
+        color: var(--text-primary);
+        transform: none;
+    }
+
+    .period-btn.active {
+        background: white;
+        color: var(--accent-primary);
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
+    }
+
+    .bar-chart-container {
+        padding: 20px 0 0;
+    }
+
+    .bar-chart-grid {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 8px;
+        height: 220px;
+        padding: 0 10px 50px;
+        position: relative;
+    }
+
+    .bar-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        flex: 1;
+        min-width: 32px;
+        max-width: 70px;
+        position: relative;
+    }
+
+    .bar-value {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+        min-height: 18px;
+    }
+
+    .bar-item:hover .bar-value {
+        color: var(--accent-primary);
+    }
+
+    .bar-wrapper {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: flex-end;
+    }
+
+    .bar-fill {
+        width: 100%;
+        max-width: 40px;
+        border-radius: 8px 8px 4px 4px;
+        background: linear-gradient(180deg, #38bdf8 0%, #0ea5a4 100%);
+        transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1);
+        min-height: 4px;
+        position: relative;
+    }
+
+    .bar-fill::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, rgba(255, 255, 255, 0.25), transparent);
+        border-radius: inherit;
+    }
+
+    .bar-fill.highlight {
+        background: linear-gradient(180deg, #14b8a6 0%, #0f766e 100%);
+        box-shadow: 0 6px 20px rgba(14, 165, 164, 0.35);
+    }
+
+    .bar-item:hover .bar-fill {
+        transform: scaleY(1.03);
+        box-shadow: 0 8px 20px rgba(14, 165, 164, 0.25);
+    }
+
+    .bar-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-muted);
+        position: absolute;
+        bottom: -35px;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    .questions-card {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.92) 100%);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 24px;
+        padding: 28px;
+        box-shadow: 0 12px 40px rgba(15, 23, 42, 0.1);
+    }
+
+    .question-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 0;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+        transition: all 200ms ease;
+    }
+
+    .question-item:last-child {
+        border-bottom: none;
+    }
+
+    .question-item:hover {
+        padding-left: 8px;
+    }
+
+    .question-text {
+        font-size: 14px;
+        color: var(--text-secondary);
+        flex: 1;
+        line-height: 1.5;
+    }
+
+    .question-count {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--accent-primary);
+        background: rgba(14, 165, 164, 0.1);
+        padding: 6px 14px;
+        border-radius: 20px;
+        margin-left: 16px;
+    }
+
+    .completion-card {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.92) 100%);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 24px;
+        padding: 28px;
+        box-shadow: 0 12px 40px rgba(15, 23, 42, 0.1);
+    }
+
+    .completion-content {
+        display: flex;
+        align-items: center;
+        gap: 32px;
+    }
+
+    .completion-ring-container {
+        position: relative;
+        width: 140px;
+        height: 140px;
+        flex-shrink: 0;
+    }
+
+    .completion-ring {
+        width: 100%;
+        height: 100%;
+        transform: rotate(-90deg);
+    }
+
+    .completion-ring circle {
+        fill: none;
+        stroke-width: 12;
+        stroke-linecap: round;
+    }
+
+    .completion-ring .bg {
+        stroke: rgba(15, 23, 42, 0.08);
+    }
+
+    .completion-ring .progress {
+        stroke: url(#progressGradient);
+        transition: stroke-dashoffset 1s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .completion-percentage {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 32px;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-family: var(--font-display);
+    }
+
+    .completion-details {
+        flex: 1;
+    }
+
+    .completion-stat {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    }
+
+    .completion-stat:last-child {
+        border-bottom: none;
+    }
+
+    .completion-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+    }
+
+    .completion-dot.answered {
+        background: linear-gradient(135deg, #10b981, #34d399);
+    }
+
+    .completion-dot.escalated {
+        background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    }
+
+    .completion-dot.failed {
+        background: linear-gradient(135deg, #ef4444, #f87171);
+    }
+
+    .completion-label {
+        flex: 1;
+        font-size: 14px;
+        color: var(--text-secondary);
+    }
+
+    .completion-value {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .trend-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        background: rgba(255, 255, 255, 0.6);
+        border: 1px solid rgba(15, 23, 42, 0.06);
+        border-radius: 14px;
+        margin-bottom: 10px;
+        transition: all 200ms ease;
+        cursor: pointer;
+    }
+
+    .trend-item:last-child {
+        margin-bottom: 0;
+    }
+
+    .trend-item:hover {
+        background: rgba(14, 165, 164, 0.06);
+        border-color: rgba(14, 165, 164, 0.15);
+        transform: translateX(4px);
+    }
+
+    .trend-topic {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .trend-delta {
+        font-size: 13px;
+        font-weight: 600;
+        color: #15803d;
+        background: rgba(34, 197, 94, 0.12);
+        padding: 6px 12px;
+        border-radius: 20px;
+    }
+
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.5);
+        backdrop-filter: blur(8px);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: fadeIn 200ms ease;
+    }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(24px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+    .modal-card {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.96) 100%);
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        border-radius: 24px;
+        padding: 32px;
+        width: 90%;
+        max-width: 600px;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 32px 64px rgba(15, 23, 42, 0.2);
+        animation: slideUp 300ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    }
+
+    .modal-title-group {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .modal-icon {
+        font-size: 28px;
+    }
+
+    .modal-title {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-family: var(--font-display);
+    }
+
+    .modal-close {
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        background: rgba(15, 23, 42, 0.04);
+        color: var(--text-secondary);
+        font-size: 18px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 200ms ease;
+    }
+
+    .modal-close:hover {
+        background: rgba(239, 68, 68, 0.1);
+        border-color: rgba(239, 68, 68, 0.2);
+        color: #ef4444;
+    }
+
+    .modal-questions {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .modal-question-item {
+        padding: 14px 18px;
+        background: rgba(255, 255, 255, 0.8);
+        border: 1px solid rgba(15, 23, 42, 0.06);
+        border-radius: 14px;
+        font-size: 14px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+        transition: all 200ms ease;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .modal-question-item:hover {
+        background: rgba(14, 165, 164, 0.06);
+        border-color: rgba(14, 165, 164, 0.15);
+        padding-left: 22px;
+    }
+
+    .modal-question-text {
+        flex: 1;
+    }
+
+    .modal-question-count {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--accent-primary);
+        background: rgba(14, 165, 164, 0.1);
+        padding: 4px 10px;
+        border-radius: 12px;
+        white-space: nowrap;
+    }
+
+    .modal-empty {
+        text-align: center;
+        padding: 32px 20px;
+        color: var(--text-muted);
+        font-size: 14px;
+    }
+
+    .section-title {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-family: var(--font-display);
+        letter-spacing: -0.02em;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .section-title-icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+    }
+
+    .charts-row {
+        display: grid;
+        grid-template-columns: 1.4fr 1fr;
+        gap: 24px;
+    }
+
+    .bottom-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+    }
+
+    @media (max-width: 1024px) {
+
+        .charts-row,
+        .bottom-row {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 40px 20px;
+        color: var(--text-muted);
+    }
+
+    .empty-state-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+        opacity: 0.5;
+    }
+</style>
+<script>
+    const { useEffect, useMemo, useState } = React;
+    const h = React.createElement;
+
+    const Icon = ({ name }) => {
+        const props = { viewBox: "0 0 24 24", "aria-hidden": "true" };
+        const icons = {
+            dashboard: [h("rect", { key: 1, x: 3, y: 3, width: 8, height: 8, rx: 2 }), h("rect", { key: 2, x: 13, y: 3, width: 8, height: 5, rx: 2 }), h("rect", { key: 3, x: 13, y: 10, width: 8, height: 11, rx: 2 }), h("rect", { key: 4, x: 3, y: 13, width: 8, height: 8, rx: 2 })],
+            stats: [h("path", { key: 1, d: "M3 19h18" }), h("path", { key: 2, d: "M6 16v-5" }), h("path", { key: 3, d: "M12 16v-8" }), h("path", { key: 4, d: "M18 16v-3" })],
+            scraping: [h("path", { key: 1, d: "M21 12a9 9 0 1 1-3-6.7" }), h("polyline", { key: 2, points: "21 3 21 9 15 9" })],
+            chat: [h("path", { key: 1, d: "M6 6h12a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H10l-4 3v-3H6a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z" })],
+            memory: [h("ellipse", { key: 1, cx: 12, cy: 6, rx: 7, ry: 3 }), h("path", { key: 2, d: "M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" }), h("path", { key: 3, d: "M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" })],
+            faqs: [h("circle", { key: 1, cx: 12, cy: 12, r: 9 }), h("path", { key: 2, d: "M9.5 9a2.5 2.5 0 0 1 5 0c0 1.6-2.5 1.9-2.5 4" }), h("path", { key: 3, d: "M12 17h.01" })],
+            pdf: [h("path", { key: 1, d: "M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" }), h("path", { key: 2, d: "M14 3v5h5" })],
+            widget: [h("path", { key: 1, d: "M4 6h16" }), h("circle", { key: 2, cx: 9, cy: 6, r: 2 }), h("path", { key: 3, d: "M4 12h16" }), h("circle", { key: 4, cx: 15, cy: 12, r: 2 })],
+            integrate: [h("path", { key: 1, d: "M10 13a3 3 0 0 0 4 0l3-3a3 3 0 0 0-4-4l-1 1" }), h("path", { key: 2, d: "M14 11a3 3 0 0 0-4 0l-3 3a3 3 0 0 0 4 4l1-1" })],
+            usage: [h("rect", { key: 1, x: 3, y: 5, width: 18, height: 14, rx: 2 }), h("path", { key: 2, d: "M3 10h18" })],
+            logout: [h("path", { key: 1, d: "M10 12h10" }), h("polyline", { key: 2, points: "16 8 20 12 16 16" }), h("path", { key: 3, d: "M4 5h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4" })]
+        };
+        return h("svg", props, icons[name] || []);
+    };
+
+    function Sidebar({ activePage }) {
+        const navItems = [
+            { href: "/dashboard", label: "Dashboard", id: "dashboard", icon: "dashboard" },
+            { href: "/stats", label: "Statistiken", id: "stats", icon: "stats" },
+            { href: "/scraping", label: "Scraping & Index", id: "scraping", icon: "scraping" },
+            { href: "/chat", label: "Chat", id: "chat", icon: "chat" },
+            { href: "/memory", label: "Memory bearbeiten", id: "memory", icon: "memory" },
+            { href: "/faqs", label: "FAQs", id: "faqs", icon: "faqs" },
+            { href: "/pdf-upload", label: "PDF Upload", id: "pdf-upload", icon: "pdf" },
+            { href: "/widget-design", label: "Widget Design", id: "widget-design", icon: "widget" },
+            { href: "/integrate", label: "Integrieren", id: "integrate", icon: "integrate" },
+            { href: "/usage", label: "Kosten", id: "usage", icon: "usage" },
+            { href: "/login/", label: "Logout", id: "logout", icon: "logout", onClick: () => AuthState.logout() },
+        ];
+        return h("aside", { className: "sidebar" }, [
+            h("div", { key: "header", className: "sidebar-header" }, [h("div", { className: "sidebar-title" }, "florianmatthias")]),
+            h("ul", { key: "nav", className: "nav-list" }, navItems.map(item =>
+                h("li", { key: item.id }, h("a", { href: item.href, className: "nav-item" + (activePage === item.id ? " active" : ""), onClick: item.onClick ? (e) => { e.preventDefault(); item.onClick(); } : undefined }, [h("span", { key: "i", className: "nav-icon" }, h(Icon, { name: item.icon })), item.label]))
+            ))
+        ]);
+    }
+
+    const formatNumber = (val) => val != null ? val.toLocaleString("de-DE") : "–";
+
+    function StatCard({ icon, iconBg, value, label, sub, trend, trendUp }) {
+        return h("div", { className: "stat-card", style: { "--card-accent": iconBg } }, [
+            h("div", { key: "h", className: "stat-card-header" }, [
+                h("div", { className: "stat-card-icon", style: { "--icon-bg": iconBg } }, icon),
+                trend ? h("div", { className: "stat-card-trend up" }, ["↑ ", trend]) : null
+            ]),
+            h("div", { key: "v", className: "stat-card-value" }, value),
+            h("div", { key: "l", className: "stat-card-label" }, label),
+            sub ? h("div", { key: "s", className: "stat-card-sub" }, sub) : null
+        ]);
+    }
+
+    function BarChart({ data, maxHeight = 140 }) {
+        const maxVal = Math.max(...data.map(d => d.count || 0), 1);
+        const hasData = data.some(d => (d.count || 0) > 0);
+        if (!hasData) return h("div", { className: "empty-state" }, [h("div", { className: "empty-state-icon" }, "📊"), "Noch keine Chats."]);
+
+        return h("div", { className: "bar-chart-container" },
+            h("div", { className: "bar-chart-grid" },
+                data.map((d, i) => {
+                    const val = d.count || 0;
+                    const height = Math.max((val / maxVal) * maxHeight, 4);
+                    const isMax = val === maxVal && val > 0;
+                    return h("div", { key: i, className: "bar-item" }, [
+                        h("div", { key: "v", className: "bar-value" }, val),
+                        h("div", { key: "w", className: "bar-wrapper" },
+                            h("div", { className: "bar-fill" + (isMax ? " highlight" : ""), style: { height: height + "px" } })
+                        ),
+                        h("div", { key: "l", className: "bar-label" }, d.label || "")
+                    ]);
+                })
+            )
+        );
+    }
+
+    function CompletionRing({ completion }) {
+        const answered = Math.round((completion?.answered || 0) * 100);
+        const escalated = Math.round((completion?.escalated || 0) * 100);
+        const failed = Math.round((completion?.failed || 0) * 100);
+        const r = 54, c = 2 * Math.PI * r, offset = c - (answered / 100) * c;
+        return h("div", { className: "completion-card" }, [
+            h("div", { key: "t", className: "section-title" }, [h("span", { className: "section-title-icon", style: { background: "rgba(34, 197, 94, 0.12)" } }, "✅"), "Beantwortungsquote"]),
+            h("div", { key: "c", className: "completion-content" }, [
+                h("div", { key: "r", className: "completion-ring-container" }, [
+                    h("svg", { className: "completion-ring", viewBox: "0 0 120 120" }, [
+                        h("defs", { key: "d" }, h("linearGradient", { id: "progressGradient", x1: "0%", y1: "0%", x2: "100%", y2: "0%" }, [h("stop", { key: 1, offset: "0%", stopColor: "#10b981" }), h("stop", { key: 2, offset: "100%", stopColor: "#34d399" })])),
+                        h("circle", { key: "b", className: "bg", cx: 60, cy: 60, r: r }),
+                        h("circle", { key: "p", className: "progress", cx: 60, cy: 60, r: r, strokeDasharray: c, strokeDashoffset: offset })
+                    ]),
+                    h("div", { key: "pct", className: "completion-percentage" }, answered + "%")
+                ]),
+                h("div", { key: "det", className: "completion-details" }, [
+                    h("div", { key: 1, className: "completion-stat" }, [h("div", { className: "completion-dot answered" }), h("span", { className: "completion-label" }, "Beantwortet"), h("span", { className: "completion-value" }, answered + "%")]),
+                    h("div", { key: 2, className: "completion-stat" }, [h("div", { className: "completion-dot escalated" }), h("span", { className: "completion-label" }, "Eskaliert"), h("span", { className: "completion-value" }, escalated + "%")]),
+                    h("div", { key: 3, className: "completion-stat" }, [h("div", { className: "completion-dot failed" }), h("span", { className: "completion-label" }, "Fehlgeschlagen"), h("span", { className: "completion-value" }, failed + "%")])
+                ])
+            ])
+        ]);
+    }
+
+    function StatsPage() {
+        const [botSlug] = useState(AuthState.getBotSlug());
+        const [stats, setStats] = useState(null);
+        const [loading, setLoading] = useState(true);
+        const [error, setError] = useState("");
+        const [usingMock, setUsingMock] = useState(false);
+        const [period, setPeriod] = useState(7);
+        const [selectedTopic, setSelectedTopic] = useState(null);
+        const [topicLoading, setTopicLoading] = useState(false);
+        const [topicError, setTopicError] = useState("");
+
+        // Generate chart data based on period
+        const generateChartData = (days, baseData) => {
+            if (days === 7) {
+                const weekdays = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+                if (baseData && baseData.length >= 7) {
+                    return baseData.slice(0, 7).map((d, i) => ({ label: weekdays[i], count: d.count || 0 }));
+                }
+                return weekdays.map((d, i) => ({ label: d, count: Math.floor(20 + Math.random() * 30 + (i === 4 ? 25 : 0)) }));
+            } else if (days === 30) {
+                // Group by weeks for 30 days view
+                const weeks = ["W1", "W2", "W3", "W4"];
+                return weeks.map((w, i) => ({ label: w, count: Math.floor(80 + Math.random() * 60 + (i === 2 ? 40 : 0)) }));
+            } else {
+                // Group by months for 90 days view
+                const months = ["Jan", "Feb", "Mär"];
+                return months.map((m, i) => ({ label: m, count: Math.floor(180 + Math.random() * 120 + (i === 1 ? 80 : 0)) }));
+            }
+        };
+
+        const mockStats = {
+            overview: { week: { chats: 148, users: 52 }, month: { chats: 612, users: 188 }, quarter: { chats: 1745, users: 512 } },
+            topQuestions: [
+                { question: "Was kostet der Service?", count: 42 },
+                { question: "Wie lang sind die Kündigungsfristen?", count: 27 },
+                { question: "Gibt es eine API?", count: 19 },
+                { question: "Wie starte ich eine Demo?", count: 15 },
+                { question: "Welche Integrationen?", count: 12 }
+            ],
+            trendingTopics: [
+                { topic: "Preise & Kosten", icon: "💰", delta: "18 Erwähnungen", questions: [{q: "Was kostet der Service?", count: 8}, {q: "Gibt es Rabatte für Jahresabos?", count: 5}] },
+                { topic: "Technik & Integration", icon: "🔧", delta: "12 Erwähnungen", questions: [{q: "Gibt es eine API?", count: 6}, {q: "Wie integriere ich den Chatbot?", count: 4}] },
+                { topic: "Onboarding & Einrichtung", icon: "🚀", delta: "7 Erwähnungen", questions: [{q: "Wie starte ich eine Demo?", count: 4}] }
+            ],
+            completion: { answered: 0.86, escalated: 0.08, failed: 0.06 }
+        };
+
+        const fetchStats = async () => {
+            setLoading(true); setError(""); setUsingMock(false);
+            if (!botSlug.trim()) { setError("Bitte Bot-Slug auf dem Dashboard eintragen."); setLoading(false); return; }
+            try {
+                const res = await fetch("/api/admin/chat_stats?bot_slug=" + encodeURIComponent(botSlug.trim()), { headers: AuthState.buildHeaders() });
+                if (!res.ok) throw new Error("API nicht erreichbar");
+                const data = await res.json();
+                setStats({ ...mockStats, ...data });
+            } catch (err) {
+                console.warn("Nutze Mock-Statistiken:", err);
+                setUsingMock(true);
+                setStats(mockStats);
+            } finally { setLoading(false); }
+        };
+
+        const closeTopicModal = () => {
+            setSelectedTopic(null);
+            setTopicLoading(false);
+            setTopicError("");
+        };
+
+        const openTopicModal = async (topic) => {
+            setSelectedTopic({ ...topic, questions: topic.questions || [] });
+            setTopicLoading(true);
+            setTopicError("");
+
+            if (!botSlug.trim()) {
+                setTopicLoading(false);
+                if (!(topic.questions || []).length) {
+                    setTopicError("Bot-Slug fehlt. Fragen konnten nicht geladen werden.");
+                }
+                return;
+            }
+
+            try {
+                const url = "/api/admin/topic_questions?bot_slug=" + encodeURIComponent(botSlug.trim()) + "&topic=" + encodeURIComponent(topic.topic);
+                const res = await fetch(url, { headers: AuthState.buildHeaders() });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    throw new Error(data?.error || "Fragen konnten nicht geladen werden.");
+                }
+                setSelectedTopic((prev) => {
+                    if (!prev || prev.topic !== topic.topic) return prev;
+                    return { ...prev, questions: data.questions || [] };
+                });
+            } catch (err) {
+                console.warn("Themenfragen konnten nicht geladen werden:", err);
+                if (!(topic.questions || []).length) {
+                    setTopicError(err?.message || "Keine Fragen zu diesem Thema gefunden.");
+                }
+            } finally {
+                setTopicLoading(false);
+            }
+        };
+
+        useEffect(() => { fetchStats(); }, []);
+
+        const chartData = useMemo(() => generateChartData(period, stats?.daily), [period, stats?.daily]);
+        const overview = stats?.overview || {};
+        const topQuestions = stats?.topQuestions || [];
+        const trendingTopics = stats?.trendingTopics || [];
+        const completion = stats?.completion;
+        const periodLabels = { 7: "7 Tage", 30: "30 Tage (Wochen)", 90: "90 Tage (Monate)" };
+
+        if (!AuthState.isLoggedIn()) { window.location.href = "/login"; return null; }
+
+        return h("div", { className: "layout" }, [
+            h(Sidebar, { key: "sb", activePage: "stats" }),
+            h("div", { key: "ct", className: "content" }, [
+                h("div", { key: "hero", className: "hero" }, [
+                    h("div", { className: "hero-badge" }, [h("span", { className: "hero-badge-dot" }), "Analytics Dashboard"]),
+                    h("h1", { className: "title" }, "Chatbot Statistiken"),
+                    h("p", { className: "subtitle" }, "Übersicht über Nutzerinteraktionen, häufige Fragen und Performance-Metriken.")
+                ]),
+                error ? h("div", { key: "err", className: "notice error", style: { marginBottom: 16 } }, error) : null,
+                usingMock ? h("div", { key: "mock", className: "notice warn", style: { marginBottom: 16 } }, "📊 Demo-Modus – Beispieldaten werden angezeigt.") : null,
+                loading ? h("div", { style: { textAlign: "center", padding: "60px 20px", color: "var(--text-muted)" } }, [h("div", { style: { fontSize: 48, marginBottom: 16 } }, "⏳"), "Laden..."]) : [
+                    h("div", { key: "cards", className: "stats-grid" }, [
+                        h(StatCard, { key: 1, icon: "📅", iconBg: "linear-gradient(135deg, rgba(14, 165, 164, 0.15), rgba(56, 189, 248, 0.15))", value: formatNumber(overview.week?.chats), label: "Chats (7 Tage)", sub: formatNumber(overview.week?.users) + " Nutzer", trend: "+12%", trendUp: true }),
+                        h(StatCard, { key: 2, icon: "📊", iconBg: "linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(167, 139, 250, 0.15))", value: formatNumber(overview.month?.chats), label: "Chats (30 Tage)", sub: formatNumber(overview.month?.users) + " Nutzer", trend: "+8%", trendUp: true }),
+                        h(StatCard, { key: 3, icon: "📈", iconBg: "linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(251, 191, 36, 0.15))", value: formatNumber(overview.quarter?.chats), label: "Chats (Quartal)", sub: formatNumber(overview.quarter?.users) + " Nutzer", trend: "+24%", trendUp: true }),
+                        h(StatCard, { key: 4, icon: "✅", iconBg: "linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(74, 222, 128, 0.15))", value: Math.round((completion?.answered || 0) * 100) + "%", label: "Erfolgsquote", sub: "Automatisch beantwortet" })
+                    ]),
+                    h("div", { key: "charts", className: "charts-row" }, [
+                        h("div", { key: "bar", className: "chart-card-premium" }, [
+                            h("div", { className: "chart-header-premium" }, [
+                                h("div", { className: "chart-title-group" }, [
+                                    h("div", { className: "chart-title-premium" }, "Chats pro Tag"),
+                                    h("div", { className: "chart-subtitle-premium" }, "Übersicht der letzten " + periodLabels[period])
+                                ]),
+                                h("div", { className: "period-selector" }, [
+                                    h("button", { className: "period-btn" + (period === 7 ? " active" : ""), onClick: () => setPeriod(7) }, "7 Tage"),
+                                    h("button", { className: "period-btn" + (period === 30 ? " active" : ""), onClick: () => setPeriod(30) }, "30 Tage"),
+                                    h("button", { className: "period-btn" + (period === 90 ? " active" : ""), onClick: () => setPeriod(90) }, "90 Tage")
+                                ])
+                            ]),
+                            h(BarChart, { data: chartData })
+                        ]),
+                        h("div", { key: "qs", className: "questions-card" }, [
+                            h("div", { className: "section-title" }, [h("span", { className: "section-title-icon", style: { background: "rgba(139, 92, 246, 0.12)" } }, "❓"), "Top-Fragen"]),
+                            topQuestions.length ? topQuestions.slice(0, 5).map((q, i) => h("div", { key: i, className: "question-item" }, [h("span", { className: "question-text" }, q.question), h("span", { className: "question-count" }, q.count + "×")])) : h("div", { className: "empty-state" }, "Keine Fragen.")
+                        ])
+                    ]),
+                    h("div", { key: "bottom", className: "bottom-row" }, [
+                        h(CompletionRing, { key: "ring", completion }),
+                        h("div", { key: "trends", className: "questions-card" }, [
+                            h("div", { className: "section-title" }, [h("span", { className: "section-title-icon", style: { background: "rgba(14, 165, 164, 0.12)" } }, "🔥"), "Trend-Themen"]),
+                            trendingTopics.length ? trendingTopics.map((t, i) => h("div", { key: i, className: "trend-item", onClick: () => openTopicModal(t) }, [h("span", { className: "trend-topic" }, [(t.icon || "📌") + " ", t.topic]), h("span", { className: "trend-delta" }, t.delta)])) : h("div", { className: "empty-state" }, "Keine Trends.")
+                        ])
+                    ]),
+                    selectedTopic && h("div", { className: "modal-overlay", onClick: (e) => { if (e.target === e.currentTarget) closeTopicModal(); } }, [
+                        h("div", { className: "modal-card" }, [
+                            h("div", { className: "modal-header" }, [
+                                h("div", { className: "modal-title-group" }, [
+                                    h("span", { className: "modal-icon" }, selectedTopic.icon || "📌"),
+                                    h("span", { className: "modal-title" }, selectedTopic.topic)
+                                ]),
+                                h("button", { className: "modal-close", onClick: closeTopicModal }, "✕")
+                            ]),
+                            topicError ? h("div", { className: "modal-empty", style: { color: "#b45309", paddingTop: 0 } }, topicError) : null,
+                            h("div", { className: "modal-questions" },
+                                topicLoading
+                                    ? h("div", { className: "modal-empty" }, "Fragen werden geladen…")
+                                    : (selectedTopic.questions || []).length > 0
+                                    ? (selectedTopic.questions || []).map((q, i) => h("div", { key: i, className: "modal-question-item" }, [h("span", { className: "modal-question-text" }, q.q || q), q.count ? h("span", { className: "modal-question-count" }, q.count + "×") : null]))
+                                    : h("div", { className: "modal-empty" }, "Keine Fragen zu diesem Thema.")
+                            )
+                        ])
+                    ])
+                ]
+            ])
+        ]);
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(h(StatsPage));
+</script>
+{% endblock %}

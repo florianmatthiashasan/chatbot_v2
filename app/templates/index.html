@@ -1,0 +1,1651 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>florianmatthias</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Sora:wght@500;600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --font-body: "Manrope", "Segoe UI", sans-serif;
+      --font-display: "Sora", "Manrope", sans-serif;
+
+      --bg-primary: #f6f8fb;
+      --bg-secondary: #eef2f7;
+      --bg-tertiary: #e5ecf4;
+      --bg-card: #ffffff;
+      --bg-elevated: rgba(255, 255, 255, 0.92);
+      --bg-hover: rgba(14, 165, 164, 0.08);
+
+      --accent-primary: #0ea5a4;
+      --accent-hover: #0f766e;
+      --accent-strong: #0284c7;
+      --accent-light: rgba(14, 165, 164, 0.14);
+      --accent-subtle: rgba(14, 165, 164, 0.2);
+      --accent-gradient: linear-gradient(135deg, #0ea5a4 0%, #38bdf8 52%, #14b8a6 100%);
+      --accent-gradient-soft: linear-gradient(135deg, rgba(14, 165, 164, 0.16), rgba(56, 189, 248, 0.16));
+      --glow-primary: 0 18px 45px rgba(14, 165, 164, 0.28);
+
+      --text-primary: #0b1424;
+      --text-secondary: #2a3a52;
+      --text-muted: #5b6b86;
+      --text-subtle: #8a97ab;
+
+      --border-color: rgba(15, 23, 42, 0.08);
+      --border-hover: rgba(15, 23, 42, 0.16);
+
+      --success: #15803d;
+      --success-bg: rgba(34, 197, 94, 0.12);
+      --warning: #b45309;
+      --warning-bg: rgba(245, 158, 11, 0.12);
+      --error: #dc2626;
+      --error-bg: rgba(239, 68, 68, 0.12);
+
+      --shadow-sm: 0 10px 24px rgba(15, 23, 42, 0.08);
+      --shadow-md: 0 18px 36px rgba(15, 23, 42, 0.12);
+      --shadow-lg: 0 28px 64px rgba(15, 23, 42, 0.14);
+
+      --radius-sm: 10px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-full: 9999px;
+
+      --sidebar-width: 264px;
+
+      --transition-fast: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      font-family: var(--font-body);
+      color: var(--text-primary);
+      background:
+        radial-gradient(1100px 520px at -10% -10%, rgba(56, 189, 248, 0.2), transparent 60%),
+        radial-gradient(900px 520px at 90% -10%, rgba(14, 165, 164, 0.18), transparent 55%),
+        radial-gradient(700px 480px at 95% 85%, rgba(245, 158, 11, 0.12), transparent 60%),
+        linear-gradient(180deg, #f7f9fc 0%, #eef2f7 60%, #f8f5ef 100%);
+      line-height: 1.7;
+      letter-spacing: -0.01em;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .page {
+      max-width: none;
+      width: 100%;
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+      gap: 0;
+      min-height: 100vh;
+      align-items: stretch;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      align-self: stretch;
+      background: var(--bg-elevated);
+      border-right: 1px solid var(--border-color);
+      border-radius: 0 20px 20px 0;
+      padding: 28px 20px 24px;
+      box-shadow: 18px 0 50px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(18px);
+      overflow: hidden;
+      z-index: 2;
+    }
+
+    .sidebar::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(320px 180px at 20% 10%, rgba(14, 165, 164, 0.16), transparent 70%);
+      pointer-events: none;
+    }
+
+    .nav-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .nav-item {
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-weight: 500;
+      font-size: 14px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all var(--transition-fast);
+    }
+
+    .nav-item:hover {
+      background: rgba(14, 165, 164, 0.1);
+      color: var(--text-primary);
+      border-color: rgba(14, 165, 164, 0.2);
+    }
+
+    .content {
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+      padding: 40px 56px 64px;
+      min-height: 100vh;
+    }
+
+    .hero {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+
+    .title {
+      font-size: clamp(28px, 2.6vw, 40px);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--text-primary);
+      font-family: var(--font-display);
+    }
+
+    .hero .title {
+      background: linear-gradient(120deg, #0b1424 20%, #0ea5a4 55%, #0284c7 85%);
+      -webkit-background-clip: text;
+      color: transparent;
+    }
+
+    .subtitle {
+      margin: 4px 0 0;
+      color: var(--text-muted);
+      max-width: 600px;
+      line-height: 1.7;
+      font-size: 15px;
+    }
+
+    .badge {
+      padding: 6px 12px;
+      border-radius: var(--radius-full);
+      font-size: 12px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+    }
+
+    .badge.ok {
+      color: var(--success);
+      background: var(--success-bg);
+    }
+
+    .badge.warn {
+      color: var(--warning);
+      background: var(--warning-bg);
+    }
+
+    .badge.error {
+      color: var(--error);
+      background: var(--error-bg);
+    }
+
+    @keyframes floatIn {
+      from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.98);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .content>* {
+      animation: floatIn 700ms var(--ease-out) both;
+    }
+
+    .content>*:nth-child(1) {
+      animation-delay: 60ms;
+    }
+
+    .content>*:nth-child(2) {
+      animation-delay: 120ms;
+    }
+
+    .content>*:nth-child(3) {
+      animation-delay: 180ms;
+    }
+
+    .content>*:nth-child(4) {
+      animation-delay: 240ms;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .content>* {
+        animation: none;
+      }
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .card {
+      background: var(--bg-elevated);
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      box-shadow: var(--shadow-md);
+      backdrop-filter: blur(12px);
+    }
+
+    .card h2 {
+      margin: 0 0 8px;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-primary);
+      font-family: var(--font-display);
+    }
+
+    .muted {
+      color: var(--text-muted);
+      font-size: 14px;
+      margin: 0 0 16px;
+      line-height: 1.6;
+    }
+
+    .control {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    .control input,
+    .control textarea,
+    .control select {
+      flex: 1;
+      min-width: 200px;
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-color);
+      font-size: 14px;
+      font-family: inherit;
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--text-primary);
+      transition: all var(--transition-fast);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
+
+    .control input:focus,
+    .control textarea:focus {
+      outline: none;
+      border-color: rgba(14, 165, 164, 0.6);
+      box-shadow: 0 0 0 3px rgba(14, 165, 164, 0.18);
+    }
+
+    button {
+      background: var(--accent-gradient);
+      color: white;
+      border: none;
+      border-radius: var(--radius-md);
+      padding: 10px 16px;
+      font-weight: 500;
+      font-size: 14px;
+      font-family: inherit;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all var(--transition-fast);
+      border: 1px solid rgba(14, 165, 164, 0.25);
+      box-shadow: var(--glow-primary);
+      letter-spacing: 0.01em;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 22px 50px rgba(14, 165, 164, 0.3);
+    }
+
+    .pill {
+      padding: 4px 10px;
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.8);
+      border: 1px solid var(--border-color);
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .logs {
+      background: #1e293b;
+      color: #e2e8f0;
+      border-radius: var(--radius-md);
+      padding: 16px;
+      font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      max-height: 220px;
+      overflow: auto;
+    }
+
+    .log-line+.log-line {
+      margin-top: 4px;
+      padding-top: 4px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chip {
+      background: rgba(255, 255, 255, 0.85);
+      color: var(--text-secondary);
+      padding: 6px 12px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      border: 1px solid var(--border-color);
+    }
+
+    .summary-list {
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+
+    .summary-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .summary-row:last-child {
+      border-bottom: none;
+    }
+
+    .status-pill {
+      padding: 4px 10px;
+      border-radius: var(--radius-full);
+      font-weight: 500;
+      font-size: 12px;
+    }
+
+    .status-pill.ok {
+      background: var(--success-bg);
+      color: var(--success);
+    }
+
+    .status-pill.error {
+      background: var(--error-bg);
+      color: var(--error);
+    }
+
+    .status-pill.other {
+      background: var(--warning-bg);
+      color: var(--warning);
+    }
+
+    .chat-box {
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: rgba(255, 255, 255, 0.75);
+    }
+
+    .chat-log {
+      max-height: 300px;
+      overflow: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .bubble {
+      padding: 12px 16px;
+      border-radius: var(--radius-lg);
+      max-width: 85%;
+      line-height: 1.5;
+      font-size: 14px;
+      white-space: pre-wrap;
+    }
+
+    .bubble.user {
+      margin-left: auto;
+      background: var(--accent-gradient);
+      color: white;
+      box-shadow: 0 16px 30px rgba(14, 165, 164, 0.2);
+    }
+
+    .bubble.bot {
+      margin-right: auto;
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+    }
+
+    .bubble.typing {
+      opacity: 0.75;
+      font-style: italic;
+    }
+
+    .chat-controls {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .chat-controls textarea {
+      flex: 1;
+      min-height: 48px;
+      padding: 12px 16px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-color);
+      font-family: inherit;
+      font-size: 14px;
+      resize: vertical;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
+
+    .chat-controls textarea:focus {
+      outline: none;
+      border-color: rgba(14, 165, 164, 0.6);
+      box-shadow: 0 0 0 3px rgba(14, 165, 164, 0.18);
+    }
+
+    .faq-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .faq-item {
+      border: 1px solid var(--border-color);
+      background: var(--bg-elevated);
+      border-radius: var(--radius-md);
+      padding: 16px;
+    }
+
+    .faq-item input,
+    .faq-item textarea {
+      width: 100%;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+      font-size: 14px;
+      font-family: inherit;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
+
+    .faq-item textarea {
+      resize: vertical;
+      min-height: 80px;
+      margin-top: 10px;
+    }
+
+    .faq-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .theme-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 16px;
+    }
+
+    .theme-field {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .theme-field input {
+      width: 100%;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-color);
+      padding: 10px 12px;
+      font-size: 14px;
+      font-family: inherit;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
+
+    .theme-field input[type="color"] {
+      padding: 4px;
+      height: 40px;
+      cursor: pointer;
+    }
+
+    .embed-url {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-color);
+      background: rgba(15, 23, 42, 0.04);
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-family: 'SF Mono', monospace;
+    }
+
+    .ghost-btn {
+      background: rgba(255, 255, 255, 0.7);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-color);
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+    }
+
+    .ghost-btn:hover:not(:disabled) {
+      background: rgba(14, 165, 164, 0.1);
+      border-color: rgba(14, 165, 164, 0.3);
+      color: var(--text-primary);
+    }
+
+    .muted-note {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin: 4px 0 10px;
+    }
+
+    @media (max-width: 1024px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .control input {
+        min-width: 160px;
+      }
+
+      .sidebar {
+        position: relative;
+        top: 0;
+        height: auto;
+        border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .content {
+        padding: 32px 32px 48px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .hero {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .content {
+        padding: 24px 20px 36px;
+      }
+
+      button {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .chat-controls {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .control {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+
+    /* Chat widget */
+    #chat-widget {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 9999;
+      font-family: var(--font-body);
+    }
+
+    #chat-toggle {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: none;
+      background: var(--accent-gradient);
+      color: white;
+      font-size: 20px;
+      cursor: pointer;
+      box-shadow: var(--glow-primary);
+      transition: all var(--transition-fast);
+    }
+
+    #chat-toggle:hover {
+      transform: translateY(-1px) scale(1.05);
+      box-shadow: 0 24px 50px rgba(14, 165, 164, 0.32);
+    }
+
+    #chat-panel {
+      position: absolute;
+      bottom: 72px;
+      right: 0;
+      width: 400px;
+      max-width: calc(100vw - 48px);
+      height: 520px;
+      background: var(--bg-elevated);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-lg);
+      backdrop-filter: blur(18px);
+      display: none;
+    }
+
+    #chat-panel iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    @media (max-width: 640px) {
+      #chat-panel {
+        width: 94vw;
+        height: 70vh;
+        right: 0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script>
+    const { useEffect, useMemo, useState, useRef } = React;
+    const h = React.createElement;
+
+    const Badge = ({ tone, children }) =>
+      h("span", { className: "badge " + (tone || "ok") }, children);
+
+    const StatusPill = ({ status }) => {
+      const key = status === "ok" ? "ok" : status === "error" ? "error" : "other";
+      const label = status === "ok" ? "ok" : status;
+      return h("span", { className: "status-pill " + key }, label || "n/a");
+    };
+
+    const DEFAULT_EMBED_TITLE = "AI Chat zum Index";
+    const DEFAULT_EMBED_SUBTITLE = "Antwortet nur auf Basis des Index";
+    const DEFAULT_EMBED_ICON = "🤖";
+    const DEFAULT_EMBED_THEME = {
+      accent: "#6366f1",
+      accentStrong: "#4f46e5",
+      bg: "#ffffff",
+      panel: "#f9fafb",
+      border: "#e5e7eb",
+      text: "#111827",
+      userBubble: "#6366f1",
+      userText: "#ffffff",
+      botBubble: "#f3f4f6",
+      botText: "#111827",
+    };
+    const THEME_FIELDS = [
+      { key: "accent", label: "Accent" },
+      { key: "accentStrong", label: "Accent 2" },
+      { key: "bg", label: "Background" },
+      { key: "panel", label: "Panel" },
+      { key: "border", label: "Border" },
+      { key: "text", label: "Text" },
+      { key: "userBubble", label: "User Bubble" },
+      { key: "userText", label: "User Text" },
+      { key: "botBubble", label: "Bot Bubble" },
+      { key: "botText", label: "Bot Text" },
+    ];
+
+    const Logs = ({ lines }) => {
+      if (!lines || !lines.length) return h("div", { className: "muted" }, "Keine Logs vorhanden.");
+      return h(
+        "div",
+        { className: "logs" },
+        lines.map((line, idx) => h("div", { key: idx, className: "log-line" }, line))
+      );
+    };
+
+    const Summary = ({ summary }) => {
+      if (!summary || !summary.length) {
+        return h("div", { className: "muted" }, "Noch keine Zusammenfassung (summary.json) vorhanden.");
+      }
+      const top = summary.slice(0, 5);
+      return h(
+        "div",
+        { className: "summary-list" },
+        [
+          h("div", { key: "head", className: "summary-row", style: { fontWeight: 600, background: "var(--bg-tertiary)" } }, [
+            h("span", null, "URL"),
+            h("span", { style: { justifySelf: "end" } }, "Status"),
+            h("span", { style: { justifySelf: "end" } }, "Datei"),
+          ]),
+          ...top.map((row, idx) =>
+            h("div", { key: idx, className: "summary-row" }, [
+              h("span", { style: { overflow: "hidden", textOverflow: "ellipsis" } }, row.url || "—"),
+              h(StatusPill, { status: row.status }),
+              h("span", { style: { justifySelf: "end", color: "var(--text-muted)" } }, row.file || "–"),
+            ])
+          ),
+        ]
+      );
+    };
+
+    const Chips = ({ stats }) => {
+      if (!stats) return null;
+      return h("div", { className: "chips" }, [
+        h("span", { key: "total", className: "chip" }, "Seiten: " + stats.total),
+        h("span", { key: "ok", className: "chip" }, "OK: " + stats.ok),
+        h("span", { key: "fail", className: "chip", style: { background: "var(--error-bg)", color: "var(--error)" } }, "Fehler: " + stats.fail),
+      ]);
+    };
+
+    function App() {
+      const [sitemapUrl, setSitemapUrl] = useState("");
+      const sitemapInputRef = useRef(null);
+      const [status, setStatus] = useState(null);
+      const [statusError, setStatusError] = useState("");
+      const [runResult, setRunResult] = useState(null);
+      const [isRunning, setIsRunning] = useState(false);
+      const [chatMessages, setChatMessages] = useState([
+        { sender: "bot", text: "Hi! Starte links das Scraping & Indexing oder stell mir rechts eine Frage zum Index." },
+      ]);
+      const [question, setQuestion] = useState("");
+      const [chatLoading, setChatLoading] = useState(false);
+      const placeholderTimers = useRef({});
+      const [runLoading, setRunLoading] = useState(false);
+      const [botSlug, setBotSlug] = useState("");
+      const [authToken, setAuthToken] = useState("");
+      const [faqs, setFaqs] = useState([]);
+      const [faqLoading, setFaqLoading] = useState(true);
+      const [faqSaving, setFaqSaving] = useState(false);
+      const [faqError, setFaqError] = useState("");
+      const [faqSaved, setFaqSaved] = useState("");
+      const [pdfUploading, setPdfUploading] = useState(false);
+      const [pdfError, setPdfError] = useState("");
+      const [pdfMessage, setPdfMessage] = useState("");
+      const [pdfFileNames, setPdfFileNames] = useState([]);
+      const fileInputRef = useRef(null);
+      const [authMode, setAuthMode] = useState("login");
+      const [authEmail, setAuthEmail] = useState("");
+      const [authPassword, setAuthPassword] = useState("");
+      const [authError, setAuthError] = useState("");
+      const [embedTitle, setEmbedTitle] = useState(DEFAULT_EMBED_TITLE);
+      const [embedSubtitle, setEmbedSubtitle] = useState(DEFAULT_EMBED_SUBTITLE);
+      const [embedIcon, setEmbedIcon] = useState(DEFAULT_EMBED_ICON);
+      const [theme, setTheme] = useState(() => ({ ...DEFAULT_EMBED_THEME }));
+
+      const activeSummary = useMemo(() => {
+        return (runResult && runResult.summary) || (status && status.summary) || null;
+      }, [runResult, status]);
+
+      const summaryStats = useMemo(() => {
+        if (!activeSummary || !activeSummary.length) return null;
+        const total = activeSummary.length;
+        const ok = activeSummary.filter((x) => x.status === "ok").length;
+        const fail = total - ok;
+        return { total, ok, fail };
+      }, [activeSummary]);
+
+      const buildHeaders = (isJson = false) => {
+        const headers = isJson ? { "Content-Type": "application/json" } : {};
+        const token = authToken.trim();
+        if (token) headers["Authorization"] = "Bearer " + token;
+        return headers;
+      };
+
+      useEffect(() => {
+        const storedToken = window.localStorage.getItem("sb_token") || "";
+        const storedBot = window.localStorage.getItem("sb_bot_slug") || "";
+        const savedTheme = window.localStorage.getItem("widget_theme_cfg") || "";
+        if (storedToken) setAuthToken(storedToken);
+        if (storedBot) setBotSlug(storedBot);
+        if (savedTheme) {
+          try {
+            const parsed = JSON.parse(savedTheme);
+            if (parsed.title) setEmbedTitle(parsed.title);
+            if (parsed.subtitle) setEmbedSubtitle(parsed.subtitle);
+            if (parsed.icon) setEmbedIcon(parsed.icon);
+            if (parsed.theme) setTheme({ ...DEFAULT_EMBED_THEME, ...parsed.theme });
+          } catch (err) {
+            console.warn("Konnte Theme nicht laden:", err);
+          }
+        }
+      }, []);
+
+      const embedSrc = useMemo(() => {
+        const params = new URLSearchParams();
+        const trimmedBot = botSlug.trim();
+        const trimmedToken = authToken.trim();
+        if (trimmedBot) params.set("bot_slug", trimmedBot);
+        if (trimmedToken) params.set("token", trimmedToken);
+        if (embedTitle.trim()) params.set("title", embedTitle.trim());
+        if (embedSubtitle.trim()) params.set("subtitle", embedSubtitle.trim());
+        if (embedIcon.trim()) params.set("icon", embedIcon.trim());
+        const themeParams = {
+          accent: theme.accent,
+          accentStrong: theme.accentStrong,
+          bg: theme.bg,
+          panel: theme.panel,
+          border: theme.border,
+          text: theme.text,
+          userBubble: theme.userBubble,
+          userText: theme.userText,
+          botBubble: theme.botBubble,
+          botText: theme.botText,
+        };
+        Object.entries(themeParams).forEach(([key, value]) => {
+          if (value) params.set(`theme_${key}`, value);
+        });
+        const qs = params.toString();
+        return "/embed" + (qs ? "?" + qs : "");
+      }, [botSlug, authToken, embedTitle, embedSubtitle, embedIcon, theme]);
+
+      useEffect(() => {
+        const payload = {
+          title: embedTitle,
+          subtitle: embedSubtitle,
+          icon: embedIcon,
+          theme,
+        };
+        window.localStorage.setItem("widget_theme_cfg", JSON.stringify(payload));
+      }, [embedTitle, embedSubtitle, embedIcon, theme]);
+
+      useEffect(() => {
+        const iframe = document.getElementById("chat-embed-frame");
+        if (iframe && embedSrc) iframe.src = embedSrc;
+
+        const widget = document.getElementById("chat-widget");
+        const toggle = document.getElementById("chat-toggle");
+        const accentA = theme.accent || DEFAULT_EMBED_THEME.accent;
+        if (toggle && embedIcon) toggle.textContent = embedIcon;
+        if (toggle) {
+          toggle.style.background = accentA;
+        }
+      }, [embedSrc, embedIcon, theme]);
+
+      const updateThemeField = (key, value) => {
+        setTheme((prev) => ({ ...prev, [key]: value }));
+      };
+
+      const resetTheme = () => {
+        setTheme({ ...DEFAULT_EMBED_THEME });
+        setEmbedTitle(DEFAULT_EMBED_TITLE);
+        setEmbedSubtitle(DEFAULT_EMBED_SUBTITLE);
+        setEmbedIcon(DEFAULT_EMBED_ICON);
+      };
+
+      const scrollToId = (id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      };
+
+      const refreshStatus = async () => {
+        try {
+          setStatusError("");
+          if (!botSlug.trim()) {
+            setStatusError("Bitte Bot-Slug eintragen.");
+            return;
+          }
+          const res = await fetch("/api/admin/status?bot_slug=" + encodeURIComponent(botSlug.trim()), {
+            headers: buildHeaders(),
+          });
+          const data = await res.json();
+          setStatus(data);
+          const runningNow = Boolean(data.running);
+          setIsRunning(runningNow);
+          if (!runningNow && data.last_run) {
+            setRunResult(data.last_run);
+          }
+        } catch (err) {
+          console.error(err);
+          setStatusError("Status konnte nicht geladen werden.");
+        }
+      };
+
+      const loadFaqs = async () => {
+        setFaqError("");
+        setFaqSaved("");
+        setFaqLoading(true);
+        try {
+          if (!botSlug.trim()) {
+            setFaqError("Bitte Bot-Slug eintragen.");
+            setFaqLoading(false);
+            return;
+          }
+          const res = await fetch("/api/admin/faqs?bot_slug=" + encodeURIComponent(botSlug.trim()), {
+            headers: buildHeaders(),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Fehler beim Laden der FAQs.");
+          setFaqs(Array.isArray(data.faqs) ? data.faqs : []);
+        } catch (err) {
+          console.error(err);
+          setFaqError("FAQs konnten nicht geladen werden.");
+        } finally {
+          setFaqLoading(false);
+        }
+      };
+
+      const addFaq = () => {
+        setFaqSaved("");
+        setFaqs((prev) => [...prev, { question: "", answer: "" }]);
+      };
+
+      const updateFaq = (idx, key, value) => {
+        setFaqSaved("");
+        setFaqs((prev) => prev.map((item, i) => (i === idx ? { ...item, [key]: value } : item)));
+      };
+
+      const removeFaq = (idx) => {
+        setFaqSaved("");
+        setFaqs((prev) => prev.filter((_, i) => i !== idx));
+      };
+
+      const saveFaqs = async () => {
+        setFaqSaving(true);
+        setFaqError("");
+        setFaqSaved("");
+        try {
+          if (!botSlug.trim()) {
+            setFaqError("Bitte Bot-Slug eintragen.");
+            setFaqSaving(false);
+            return;
+          }
+          const res = await fetch("/api/admin/faqs", {
+            method: "POST",
+            headers: buildHeaders(true),
+            body: JSON.stringify({
+              bot_slug: botSlug.trim(),
+              faqs: faqs.map((item) => ({
+                question: (item.question || "").trim(),
+                answer: (item.answer || "").trim(),
+              })),
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            setFaqError(data.error || "FAQs konnten nicht gespeichert werden.");
+            return;
+          }
+          setFaqs(data.faqs || []);
+          setFaqSaved("FAQs gespeichert. Bitte danach den Index neu bauen.");
+        } catch (err) {
+          console.error(err);
+          setFaqError("Netzwerkfehler beim Speichern der FAQs.");
+        } finally {
+          setFaqSaving(false);
+        }
+      };
+
+      useEffect(() => {
+        if (!botSlug.trim()) return;
+        refreshStatus();
+        loadFaqs();
+      }, [botSlug]);
+
+      useEffect(() => {
+        if (!isRunning || !botSlug.trim()) return;
+        const timer = setInterval(() => {
+          refreshStatus();
+        }, 5000);
+        return () => clearInterval(timer);
+      }, [isRunning, botSlug]);
+
+      const handleAuth = async () => {
+        setAuthError("");
+        if (!authEmail.trim() || !authPassword.trim()) {
+          setAuthError("Email und Passwort ausfüllen.");
+          return;
+        }
+        try {
+          const res = await fetch(`/api/auth/${authMode}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: authEmail.trim(), password: authPassword }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            setAuthError(data.error || "Login/Register fehlgeschlagen.");
+            return;
+          }
+          if (data.access_token) {
+            setAuthToken(data.access_token);
+            window.localStorage.setItem("sb_token", data.access_token);
+          }
+          if (data.default_bot_slug) {
+            setBotSlug(data.default_bot_slug);
+            window.localStorage.setItem("sb_bot_slug", data.default_bot_slug);
+          }
+          refreshStatus();
+          loadFaqs();
+        } catch (err) {
+          console.error(err);
+          setAuthError("Netzwerkfehler beim Auth-Request.");
+        }
+      };
+
+      const handleLogout = () => {
+        setAuthToken("");
+        setBotSlug("");
+        window.localStorage.removeItem("sb_token");
+        window.localStorage.removeItem("sb_bot_slug");
+        window.location.href = "/login/";
+      };
+
+      const handlePdfChange = (e) => {
+        const files = Array.from(e.target.files || []);
+        setPdfMessage("");
+        setPdfError("");
+        setPdfFileNames(files.map((file) => file.name));
+      };
+
+      const uploadPdf = async () => {
+        const files = Array.from(fileInputRef.current?.files || []);
+        if (!files.length) {
+          setPdfError("Bitte mindestens eine PDF-Datei auswählen.");
+          return;
+        }
+        if (!botSlug.trim()) {
+          setPdfError("Bitte Bot-Slug eintragen.");
+          return;
+        }
+        if (!authToken.trim()) {
+          setPdfError("Bitte einloggen.");
+          return;
+        }
+        setPdfUploading(true);
+        setPdfError("");
+        setPdfMessage("");
+        try {
+          const formData = new FormData();
+          files.forEach((file) => formData.append("pdf", file));
+          formData.append("bot_slug", botSlug.trim());
+          const res = await fetch("/api/admin/upload_pdf", {
+            method: "POST",
+            body: formData,
+            headers: buildHeaders(false),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            setPdfError(data.error || "Upload fehlgeschlagen.");
+            return;
+          }
+          const prefix = data.status === "partial" ? "⚠️ " : "";
+          setPdfMessage(prefix + (data.info || "PDF gespeichert. Bitte Index neu bauen."));
+          setPdfFileNames([]);
+          if (fileInputRef.current) {
+            fileInputRef.current.value = "";
+          }
+        } catch (err) {
+          console.error(err);
+          setPdfError("Netzwerkfehler beim PDF-Upload.");
+        } finally {
+          setPdfUploading(false);
+        }
+      };
+
+      const handleRun = async (indexOnly = false) => {
+        const effectiveSitemapUrl = (
+          (sitemapInputRef.current && sitemapInputRef.current.value) || sitemapUrl || ""
+        ).trim();
+        if (!botSlug.trim()) {
+          setStatusError("Bitte Bot-Slug eintragen.");
+          return;
+        }
+        if (!indexOnly && !effectiveSitemapUrl) {
+          setStatusError("Bitte eine Sitemap-URL eintragen.");
+          return;
+        }
+        if (!indexOnly && effectiveSitemapUrl !== sitemapUrl.trim()) {
+          setSitemapUrl(effectiveSitemapUrl);
+        }
+        setRunLoading(true);
+        setRunResult(null);
+        setStatusError("");
+        try {
+          const res = await fetch("/api/admin/run", {
+            method: "POST",
+            headers: buildHeaders(true),
+            body: JSON.stringify(
+              indexOnly
+                ? { index_only: true, bot_slug: botSlug.trim(), async: true }
+                : { sitemap_url: effectiveSitemapUrl, bot_slug: botSlug.trim(), async: true }
+            ),
+          });
+          const data = await res.json();
+          setRunResult(data);
+          setIsRunning(Boolean(data.running));
+          if (!res.ok) {
+            setStatusError(data.error || "Der Admin-Job ist fehlgeschlagen.");
+          }
+        } catch (err) {
+          console.error(err);
+          setStatusError("Netzwerkfehler beim Ausführen des Jobs.");
+        } finally {
+          setRunLoading(false);
+          refreshStatus();
+        }
+      };
+
+      const startPlaceholder = () => {
+        const id = `ph-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
+        const steps = [
+          "Denke nach ...",
+          "Suche im Index ...",
+          "Formuliere Antwort ..."
+        ];
+        setChatMessages((prev) => [...prev, { sender: "bot", text: steps[0], placeholderId: id }]);
+        placeholderTimers.current[id] = steps.slice(1).map((txt, idx) =>
+          setTimeout(() => {
+            setChatMessages((prev) =>
+              prev.map((m) => (m.placeholderId === id ? { ...m, text: txt } : m))
+            );
+          }, (idx + 1) * 1200)
+        );
+        return id;
+      };
+
+      const finishPlaceholder = (id, finalText) => {
+        (placeholderTimers.current[id] || []).forEach(clearTimeout);
+        delete placeholderTimers.current[id];
+        setChatMessages((prev) => {
+          let found = false;
+          const updated = prev.map((m) => {
+            if (m.placeholderId === id) {
+              found = true;
+              return { sender: "bot", text: finalText };
+            }
+            return m;
+          });
+          if (!found && finalText) {
+            updated.push({ sender: "bot", text: finalText });
+          }
+          return updated;
+        });
+      };
+
+      const handleSend = async () => {
+        const text = question.trim();
+        if (!text) return;
+        if (!botSlug.trim()) {
+          setChatMessages((prev) => [...prev, { sender: "bot", text: "Bitte zuerst einen Bot-Slug eintragen." }]);
+          return;
+        }
+        const historyPayload = chatMessages.slice(-8).map((m) => ({
+          role: m.sender === "bot" ? "assistant" : "user",
+          content: m.text,
+        }));
+        const next = [...chatMessages, { sender: "user", text }];
+        setChatMessages(next);
+        setQuestion("");
+        setChatLoading(true);
+        const placeholderId = startPlaceholder();
+        try {
+          const res = await fetch("/api/chat", {
+            method: "POST",
+            headers: buildHeaders(true),
+            body: JSON.stringify({ question: text, history: historyPayload, bot_slug: botSlug.trim() }),
+          });
+          const data = await res.json();
+          const reply = res.ok ? data.answer : data.error || "Unbekannter Fehler beim Chat.";
+          finishPlaceholder(placeholderId, reply);
+        } catch (err) {
+          console.error(err);
+          finishPlaceholder(placeholderId, "Netzwerkfehler oder Backend nicht erreichbar.");
+        } finally {
+          setChatLoading(false);
+        }
+      };
+
+      if (!authToken.trim()) {
+        return h("div", { className: "page" }, [
+          h("div", { className: "card", style: { maxWidth: 400, margin: "80px auto" } }, [
+            h("h2", null, authMode === "login" ? "Einloggen" : "Registrieren"),
+            h("p", { className: "muted" }, "Bitte zuerst einloggen oder registrieren."),
+            authError ? h("div", { className: "muted", style: { color: "var(--error)", marginBottom: 8 } }, authError) : null,
+            h("div", { className: "stack" }, [
+              h("input", {
+                type: "email",
+                placeholder: "Email",
+                value: authEmail,
+                onChange: (e) => setAuthEmail(e.target.value),
+              }),
+              h("input", {
+                type: "password",
+                placeholder: "Passwort",
+                value: authPassword,
+                onChange: (e) => setAuthPassword(e.target.value),
+              }),
+              h("div", { className: "control" }, [
+                h(
+                  "button",
+                  { onClick: handleAuth },
+                  authMode === "login" ? "Einloggen" : "Registrieren"
+                ),
+                h(
+                  "button",
+                  {
+                    className: "ghost-btn",
+                    type: "button",
+                    onClick: () => setAuthMode(authMode === "login" ? "register" : "login"),
+                  },
+                  authMode === "login" ? "Oder registrieren" : "Zurück zum Login"
+                ),
+              ]),
+            ]),
+          ]),
+        ]);
+      }
+
+      return h("div", { className: "page" }, [
+        h("div", { className: "hero" }, [
+          h("div", null, [
+            h("h1", { className: "title" }, "florianmatthias & AI Index"),
+            h("p", { className: "subtitle" }, "Sitemap eingeben, Scraper + Index starten (sequentiell; /en-URLs werden übersprungen) und anschließend direkt über den frisch gebauten FAISS-Index chatten."),
+          ]),
+          status && status.index_exists
+            ? h(Badge, { tone: "ok" }, ["Index geladen", h("span", { className: "pill" }, status.last_run ? "zuletzt aktualisiert" : "bereit")])
+            : h(Badge, { tone: "warn" }, "Noch kein Index gefunden"),
+        ]),
+        statusError ? h("div", { className: "muted", style: { color: "var(--error)", marginBottom: 12 } }, statusError) : null,
+        h("div", { className: "layout" }, [
+          h("aside", { className: "sidebar" }, [
+            h("h3", null, "Navigation"),
+            h("ul", { className: "nav-list" }, [
+              h("li", { className: "nav-item", onClick: () => scrollToId("section-auth") }, "Bot & Auth"),
+              h("li", { className: "nav-item", onClick: () => scrollToId("section-widget") }, "Widget Design"),
+              h("li", { className: "nav-item", onClick: () => scrollToId("section-scrape") }, "Scraping & Index"),
+              h("li", { className: "nav-item", onClick: () => scrollToId("section-chat") }, "Chat"),
+              h("li", { className: "nav-item", onClick: () => scrollToId("section-faq") }, "FAQs"),
+              h("li", { className: "nav-item", onClick: () => scrollToId("section-pdf") }, "PDF Upload"),
+              h("li", { className: "nav-item", onClick: () => scrollToId("section-status") }, "Systemstatus"),
+              h("li", { className: "nav-item", onClick: handleLogout }, "Logout"),
+            ]),
+          ]),
+          h("div", { className: "content" }, [
+            h("div", { className: "card", id: "section-auth" }, [
+              h("h2", null, "Bot & Auth"),
+              h("p", { className: "muted" }, "Bot-Slug auswählen und optional Supabase JWT eintragen."),
+              h("div", { className: "control" }, [
+                h("input", {
+                  placeholder: "bot-slug (z.B. mein-bot)",
+                  value: botSlug,
+                  onChange: (e) => {
+                    setBotSlug(e.target.value);
+                    window.localStorage.setItem("sb_bot_slug", e.target.value);
+                  },
+                }),
+                h("input", {
+                  placeholder: "Supabase JWT (optional)",
+                  value: authToken,
+                  onChange: (e) => {
+                    setAuthToken(e.target.value);
+                    window.localStorage.setItem("sb_token", e.target.value);
+                  },
+                }),
+                h(
+                  "button",
+                  {
+                    onClick: () => {
+                      if (botSlug.trim()) {
+                        refreshStatus();
+                        loadFaqs();
+                      } else {
+                        setStatusError("Bitte Bot-Slug eintragen.");
+                      }
+                    },
+                    disabled: !botSlug.trim(),
+                  },
+                  "Bot laden"
+                ),
+                h(
+                  "button",
+                  { className: "ghost-btn", type: "button", onClick: handleLogout },
+                  "Logout"
+                ),
+              ]),
+            ]),
+            h("div", { className: "card", id: "section-widget" }, [
+              h("h2", null, "Chat-Widget Design"),
+              h("p", { className: "muted" }, "Titel, Icon und Farben für Embed/Widget anpassen."),
+              h("div", { className: "stack" }, [
+                h("div", { className: "control" }, [
+                  h("input", {
+                    placeholder: "Embed Titel",
+                    value: embedTitle,
+                    onChange: (e) => setEmbedTitle(e.target.value),
+                  }),
+                  h("input", {
+                    placeholder: "Untertitel",
+                    value: embedSubtitle,
+                    onChange: (e) => setEmbedSubtitle(e.target.value),
+                  }),
+                  h("input", {
+                    placeholder: "Icon / Emoji (z.B. 🤖)",
+                    value: embedIcon,
+                    onChange: (e) => setEmbedIcon(e.target.value),
+                  }),
+                ]),
+                h(
+                  "div",
+                  { className: "theme-grid" },
+                  THEME_FIELDS.map((field) =>
+                    h("label", { key: field.key, className: "theme-field" }, [
+                      h("span", null, field.label),
+                      h("input", {
+                        type: "color",
+                        value: theme[field.key] || DEFAULT_EMBED_THEME[field.key] || "#000000",
+                        onChange: (e) => updateThemeField(field.key, e.target.value),
+                      }),
+                    ])
+                  )
+                ),
+                h("input", {
+                  className: "embed-url",
+                  readOnly: true,
+                  value: embedSrc,
+                  onFocus: (e) => e.target.select(),
+                }),
+                h("div", { className: "control" }, [
+                  h(
+                    "button",
+                    { className: "ghost-btn", type: "button", onClick: resetTheme },
+                    "Auf Default zurücksetzen"
+                  ),
+                  h("span", { className: "pill" }, "Iframe unten rechts nutzt diese Einstellungen"),
+                ]),
+              ]),
+            ]),
+            h("div", { className: "grid", id: "section-scrape" }, [
+              h("div", { className: "card" }, [
+                h("h2", null, "Scraping & Indexing auslösen"),
+                h("p", { className: "muted" }, "Option A: Sitemap sequentiell scrapen und Index neu bauen (englische /en-URLs werden automatisch übersprungen). Option B: Nur den Index aus vorhandenen Markdown/FAQs neu bauen."),
+                h("div", { className: "control" }, [
+                  h("input", {
+                    ref: sitemapInputRef,
+                    type: "url",
+                    placeholder: "https://example.com/sitemap.xml",
+                    value: sitemapUrl,
+                    onChange: (e) => setSitemapUrl(e.target.value),
+                  }),
+                  h(
+                    "button",
+                    {
+                      onClick: () => handleRun(false),
+                      disabled: runLoading || isRunning,
+                    },
+                    runLoading ? "Läuft ..." : isRunning ? "Job aktiv ..." : "Scrape & Index starten"
+                  ),
+                  status && status.running ? h("span", { className: "pill" }, "Aktiver Job läuft") : null,
+                ]),
+                h("div", { className: "control", style: { marginTop: 8 } }, [
+                  h(
+                    "button",
+                    {
+                      className: "ghost-btn",
+                      onClick: () => handleRun(true),
+                      disabled: runLoading || isRunning,
+                    },
+                    runLoading ? "Läuft ..." : isRunning ? "Job aktiv ..." : "Nur Index neu bauen"
+                  ),
+                  h("span", { className: "pill" }, "Nutzt vorhandene Markdown + FAQs"),
+                ]),
+                runResult
+                  ? h("div", { className: "stack", style: { marginTop: 16 } }, [
+                    h("div", { className: "chips" }, [
+                      h(
+                        Badge,
+                        {
+                          tone:
+                            runResult.status === "ok"
+                              ? "ok"
+                              : runResult.status === "warn" || runResult.status === "started"
+                                ? "warn"
+                                : "error",
+                        },
+                        runResult.status === "started" ? "started" : (runResult.status || "status")
+                      ),
+                      h("span", { className: "pill" }, "Gestartet: " + (runResult.started_at || "–")),
+                      h("span", { className: "pill" }, "Fertig: " + (runResult.finished_at || "–")),
+                    ]),
+                    runResult.error
+                      ? h("div", { className: "muted", style: { color: "var(--error)", fontWeight: 600 } }, "Fehler: " + runResult.error)
+                      : null,
+                    h(Summary, { summary: runResult.summary }),
+                    h(Logs, { lines: runResult.logs }),
+                  ])
+                  : h("div", { className: "muted" }, "Noch kein Job gestartet."),
+              ]),
+              h("div", { className: "card", id: "section-chat" }, [
+                h("h2", null, "Chat über den Index"),
+                h("p", { className: "muted" }, "Stelle Fragen zu den gescrapten Inhalten."),
+                h(Chips, { stats: summaryStats }),
+                h("div", { className: "chat-box" }, [
+                  h("div", { className: "chat-log" }, chatMessages.map((m, idx) => h("div", { key: idx, className: "bubble " + m.sender + (m.placeholderId ? " typing" : "") }, m.text))),
+                  h("div", { className: "chat-controls" }, [
+                    h("textarea", {
+                      placeholder: "Frage eingeben ...",
+                      value: question,
+                      onChange: (e) => setQuestion(e.target.value),
+                      onKeyDown: (e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSend();
+                        }
+                      },
+                    }),
+                    h(
+                      "button",
+                      { onClick: handleSend, disabled: chatLoading },
+                      chatLoading ? "Antwortet..." : "Frage senden"
+                    ),
+                  ]),
+                ]),
+              ]),
+            ]),
+            h("div", { className: "card", style: { marginTop: 14 }, id: "section-faq" }, [
+              h("h2", null, "Manuelle FAQs für den Index"),
+              h("p", { className: "muted" }, "Eigene Fragen & Antworten hinzufügen. Nach dem Speichern den Index neu bauen."),
+              faqError ? h("div", { className: "muted", style: { color: "var(--error)" } }, faqError) : null,
+              faqSaved ? h("div", { className: "muted", style: { color: "var(--success)" } }, faqSaved) : null,
+              faqLoading
+                ? h("div", { className: "muted" }, "FAQs werden geladen ...")
+                : h("div", { className: "stack" }, [
+                  h(
+                    "div",
+                    { className: "faq-list" },
+                    faqs && faqs.length
+                      ? faqs.map((item, idx) =>
+                        h("div", { key: idx, className: "faq-item" }, [
+                          h("div", { className: "faq-header" }, [
+                            h("strong", null, "FAQ " + (idx + 1)),
+                            h(
+                              "button",
+                              { className: "ghost-btn", type: "button", onClick: () => removeFaq(idx) },
+                              "Entfernen"
+                            ),
+                          ]),
+                          h("input", {
+                            placeholder: "Frage",
+                            value: item.question || "",
+                            onChange: (e) => updateFaq(idx, "question", e.target.value),
+                          }),
+                          h("textarea", {
+                            placeholder: "Antwort",
+                            value: item.answer || "",
+                            onChange: (e) => updateFaq(idx, "answer", e.target.value),
+                          }),
+                        ])
+                      )
+                      : [h("div", { key: "empty", className: "muted" }, "Noch keine FAQs angelegt.")]
+                  ),
+                  h("div", { className: "control", style: { marginTop: 6 } }, [
+                    h(
+                      "button",
+                      { className: "ghost-btn", type: "button", onClick: addFaq },
+                      "FAQ hinzufügen"
+                    ),
+                    h(
+                      "button",
+                      { onClick: saveFaqs, disabled: faqSaving },
+                      faqSaving ? "Speichert..." : "FAQs speichern"
+                    ),
+                    h(
+                      "button",
+                      {
+                        className: "ghost-btn",
+                        onClick: () => handleRun(true),
+                        disabled: runLoading || isRunning,
+                      },
+                      runLoading ? "Index läuft ..." : isRunning ? "Job aktiv ..." : "Index neu bauen"
+                    ),
+                  ]),
+                  h("div", { className: "muted-note" }, "Nach dem Speichern hier direkt \"Index neu bauen\" klicken."),
+                ]),
+            ]),
+            h("div", { className: "card", style: { marginTop: 14 }, id: "section-pdf" }, [
+              h("h2", null, "PDF hochladen"),
+              h("p", { className: "muted" }, "PDF-Inhalte extrahieren und zum Index hinzufügen."),
+              pdfError ? h("div", { className: "muted", style: { color: "var(--error)" } }, pdfError) : null,
+              pdfMessage ? h("div", { className: "muted", style: { color: "var(--success)" } }, pdfMessage) : null,
+              h("div", { className: "stack" }, [
+                h("input", {
+                  type: "file",
+                  accept: "application/pdf",
+                  multiple: true,
+                  ref: fileInputRef,
+                  onChange: handlePdfChange,
+                }),
+                pdfFileNames.length
+                  ? h("div", { className: "pill" }, `${pdfFileNames.length} Datei(en): ${pdfFileNames.slice(0, 3).join(", ")}${pdfFileNames.length > 3 ? " ..." : ""}`)
+                  : null,
+                h("div", { className: "control" }, [
+                  h(
+                    "button",
+                    { onClick: uploadPdf, disabled: pdfUploading || !pdfFileNames.length },
+                    pdfUploading ? "Lädt hoch..." : "PDF(s) hochladen"
+                  ),
+                  h(
+                    "button",
+                    {
+                      className: "ghost-btn",
+                      onClick: () => handleRun(true),
+                      disabled: runLoading || isRunning,
+                    },
+                    runLoading ? "Index läuft ..." : isRunning ? "Job aktiv ..." : "Index neu bauen"
+                  ),
+                  h("span", { className: "muted-note" }, 'Nach Upload direkt "Index neu bauen" klicken.'),
+                ]),
+              ]),
+            ]),
+            h("div", { className: "card", style: { marginTop: 14 }, id: "section-status" }, [
+              h("div", { className: "control", style: { marginBottom: 0 } }, [
+                h("div", null, [
+                  h("strong", null, "Systemstatus"),
+                  h("p", { className: "muted", style: { margin: "2px 0 0" } }, "Letzter Lauf und Index-Status."),
+                ]),
+                status
+                  ? h("div", { className: "chips" }, [
+                    h(Badge, { tone: status.running ? "warn" : "ok" }, status.running ? "Job läuft" : "Bereit"),
+                    h("span", { className: "pill" }, "Index: " + (status.index_exists ? "vorhanden" : "fehlt")),
+                    status.last_run
+                      ? h("span", { className: "pill" }, "Letzter Lauf: " + (status.last_run.finished_at || status.last_run.started_at))
+                      : h("span", { className: "pill" }, "Noch kein Lauf"),
+                  ])
+                  : h("span", { className: "muted" }, "Status lädt ..."),
+              ]),
+            ]),
+          ]),
+        ]),
+      ]);
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+  </script>
+  <div id="chat-widget">
+    <button id="chat-toggle" aria-label="Chat öffnen/schließen">💬</button>
+    <div id="chat-panel">
+      <iframe id="chat-embed-frame" src="/embed" title="Chat Embed"
+        sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"></iframe>
+    </div>
+  </div>
+  <script>
+    (function () {
+      const toggle = document.getElementById("chat-toggle");
+      const panel = document.getElementById("chat-panel");
+      toggle.addEventListener("click", () => {
+        panel.style.display = panel.style.display === "block" ? "none" : "block";
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") panel.style.display = "none";
+      });
+    })();
+  </script>
+</body>
+
+</html>

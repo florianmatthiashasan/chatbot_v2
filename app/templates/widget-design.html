@@ -1,0 +1,564 @@
+{% extends "base.html" %}
+{% block title %}Widget Design - florianmatthias{% endblock %}
+
+{% block content %}
+<div id="root"></div>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+    const { useEffect, useState, useMemo } = React;
+    const h = React.createElement;
+
+    const Icon = ({ name }) => {
+        const props = { viewBox: "0 0 24 24", "aria-hidden": "true" };
+        switch (name) {
+            case "dashboard":
+                return h("svg", props, [
+                    h("rect", { x: 3, y: 3, width: 8, height: 8, rx: 2 }),
+                    h("rect", { x: 13, y: 3, width: 8, height: 5, rx: 2 }),
+                    h("rect", { x: 13, y: 10, width: 8, height: 11, rx: 2 }),
+                    h("rect", { x: 3, y: 13, width: 8, height: 8, rx: 2 }),
+                ]);
+            case "stats":
+                return h("svg", props, [
+                    h("path", { d: "M3 19h18" }),
+                    h("path", { d: "M6 16v-5" }),
+                    h("path", { d: "M12 16v-8" }),
+                    h("path", { d: "M18 16v-3" }),
+                ]);
+            case "scraping":
+                return h("svg", props, [
+                    h("path", { d: "M21 12a9 9 0 1 1-3-6.7" }),
+                    h("polyline", { points: "21 3 21 9 15 9" }),
+                ]);
+            case "chat":
+                return h("svg", props, [
+                    h("path", { d: "M6 6h12a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H10l-4 3v-3H6a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z" }),
+                ]);
+            case "memory":
+                return h("svg", props, [
+                    h("ellipse", { cx: 12, cy: 6, rx: 7, ry: 3 }),
+                    h("path", { d: "M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" }),
+                    h("path", { d: "M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" }),
+                ]);
+            case "faqs":
+                return h("svg", props, [
+                    h("circle", { cx: 12, cy: 12, r: 9 }),
+                    h("path", { d: "M9.5 9a2.5 2.5 0 0 1 5 0c0 1.6-2.5 1.9-2.5 4" }),
+                    h("path", { d: "M12 17h.01" }),
+                ]);
+            case "pdf":
+                return h("svg", props, [
+                    h("path", { d: "M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" }),
+                    h("path", { d: "M14 3v5h5" }),
+                    h("path", { d: "M9 13h6" }),
+                    h("path", { d: "M9 17h6" }),
+                ]);
+            case "widget":
+                return h("svg", props, [
+                    h("path", { d: "M4 6h16" }),
+                    h("circle", { cx: 9, cy: 6, r: 2 }),
+                    h("path", { d: "M4 12h16" }),
+                    h("circle", { cx: 15, cy: 12, r: 2 }),
+                    h("path", { d: "M4 18h16" }),
+                    h("circle", { cx: 7, cy: 18, r: 2 }),
+                ]);
+            case "integrate":
+                return h("svg", props, [
+                    h("path", { d: "M10 13a3 3 0 0 0 4 0l3-3a3 3 0 0 0-4-4l-1 1" }),
+                    h("path", { d: "M14 11a3 3 0 0 0-4 0l-3 3a3 3 0 0 0 4 4l1-1" }),
+                ]);
+            case "usage":
+                return h("svg", props, [
+                    h("rect", { x: 3, y: 5, width: 18, height: 14, rx: 2 }),
+                    h("path", { d: "M3 10h18" }),
+                    h("path", { d: "M7 15h5" }),
+                ]);
+            case "logout":
+                return h("svg", props, [
+                    h("path", { d: "M4 5h7a2 2 0 0 1 2 2v3" }),
+                    h("path", { d: "M13 14v3a2 2 0 0 1-2 2H4" }),
+                    h("path", { d: "M10 12h10" }),
+                    h("polyline", { points: "16 8 20 12 16 16" }),
+                ]);
+
+            default:
+                return h("svg", props);
+        }
+    };
+
+    const DEFAULT_THEME = {
+        accent: "#8c8875",
+        accentStrong: "#756f5f",
+        avatarBg: "#e6e0d6",
+        launcherBg: "#8c8875",
+        bg: "#f4f1eb",
+        panel: "#ffffff",
+        shellBorder: "transparent",
+        text: "#3d3a34",
+        userBubble: "#f2ede6",
+        userText: "#3d3a34",
+        botBubble: "#ffffff",
+        botText: "#3d3a34",
+        composerBg: "#f7f3ee",
+        composerBorder: "#ffffff",
+        composerText: "#3d3a34",
+        composerButtonBg: "#756f5f",
+        composerButtonText: "#f8f6f1",
+    };
+    const DEFAULT_COPY = {
+        de: {
+            title: "Haben Sie Fragen?",
+            subtitle: "",
+            intro1: "Hallo! Schoen, dass du da bist. Ich bin XY und finde gerne eine direkte Antwort fuer dich - stelle mir dazu eine Frage.",
+        },
+        en: {
+            title: "Any questions?",
+            subtitle: "",
+            intro1: "Hi! Nice to have you here. I am XY and I am happy to help you find a direct answer - just ask a question.",
+        },
+    };
+
+    const THEME_FIELDS = [
+        { key: "accent", label: "Akzent" },
+        { key: "accentStrong", label: "Akzent 2" },
+        { key: "avatarBg", label: "Avatar Kreis" },
+        { key: "launcherBg", label: "Chat Button" },
+        { key: "bg", label: "Hintergrund" },
+        { key: "panel", label: "Panel" },
+        { key: "shellBorder", label: "Widget Rahmen" },
+        { key: "text", label: "Text" },
+        { key: "userBubble", label: "User Bubble" },
+        { key: "userText", label: "User Text" },
+        { key: "botBubble", label: "Bot Bubble" },
+        { key: "botText", label: "Bot Text" },
+        { key: "composerBg", label: "Composer Hintergrund" },
+        { key: "composerBorder", label: "Composer Rahmen" },
+        { key: "composerText", label: "Composer Text" },
+        { key: "composerButtonBg", label: "Composer Button" },
+        { key: "composerButtonText", label: "Composer Button Text" },
+    ];
+
+    function sanitizeSvg(markup) {
+        if (!markup || typeof markup !== "string") return null;
+        const trimmed = markup.trim();
+        if (!trimmed.toLowerCase().startsWith("<svg")) return null;
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(trimmed, "image/svg+xml");
+            if (doc.querySelector("parsererror")) return null;
+            const svg = doc.documentElement;
+            if (!svg || svg.nodeName.toLowerCase() !== "svg") return null;
+            const blocked = ["script", "foreignObject", "iframe", "object", "embed", "link", "style"];
+            blocked.forEach((tag) => {
+                doc.querySelectorAll(tag).forEach((el) => el.remove());
+            });
+            doc.querySelectorAll("*").forEach((el) => {
+                Array.from(el.attributes).forEach((attr) => {
+                    const name = attr.name.toLowerCase();
+                    const value = (attr.value || "").trim();
+                    if (name.startsWith("on")) {
+                        el.removeAttribute(attr.name);
+                        return;
+                    }
+                    if (name === "href" || name === "xlink:href") {
+                        if (value && !value.startsWith("#")) {
+                            el.removeAttribute(attr.name);
+                        }
+                    }
+                });
+            });
+            return svg;
+        } catch (err) {
+            return null;
+        }
+    }
+
+    function parseViewBox(svgEl) {
+        if (!svgEl) return null;
+        const vb = svgEl.getAttribute("viewBox");
+        if (!vb) return null;
+        const parts = vb.trim().split(/[ ,]+/).map(Number);
+        if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return null;
+        return { x: parts[0], y: parts[1], width: parts[2], height: parts[3] };
+    }
+
+    function normalizeSvg(svgEl) {
+        if (!svgEl || !svgEl.getBBox) return;
+        svgEl.removeAttribute("width");
+        svgEl.removeAttribute("height");
+        svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+        try {
+            const box = svgEl.getBBox();
+            if (!box || !box.width || !box.height) return;
+            const vb = parseViewBox(svgEl);
+            if (vb) {
+                const widthRatio = box.width / vb.width;
+                const heightRatio = box.height / vb.height;
+                const offsetRatio = Math.max(
+                    Math.abs(box.x - vb.x) / vb.width,
+                    Math.abs(box.y - vb.y) / vb.height
+                );
+                const needsFit = widthRatio < 0.7 || heightRatio < 0.7 || offsetRatio > 0.15;
+                if (!needsFit) return;
+            }
+            const pad = Math.max(box.width, box.height) * 0.08;
+            const x = box.x - pad;
+            const y = box.y - pad;
+            const w = box.width + pad * 2;
+            const h = box.height + pad * 2;
+            svgEl.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+        } catch (err) { }
+    }
+
+    function setToggleIcon(toggleEl, iconValue) {
+        if (!toggleEl) return;
+        const trimmed = (iconValue || "").trim();
+        toggleEl.innerHTML = "";
+        if (!trimmed) return;
+        if (trimmed.toLowerCase().startsWith("<svg")) {
+            const safeSvg = sanitizeSvg(trimmed);
+            if (safeSvg) {
+                toggleEl.appendChild(safeSvg);
+                normalizeSvg(safeSvg);
+                return;
+            }
+        }
+        toggleEl.textContent = trimmed;
+    }
+
+    function Sidebar({ activePage }) {
+        const navItems = [
+            { href: "/dashboard", label: "Dashboard", id: "dashboard", icon: "dashboard" },
+            { href: "/stats", label: "Statistiken", id: "stats", icon: "stats" },
+            { href: "/scraping", label: "Scraping & Index", id: "scraping", icon: "scraping" },
+            { href: "/chat", label: "Chat", id: "chat", icon: "chat" },
+            { href: "/memory", label: "Memory bearbeiten", id: "memory", icon: "memory" },
+            { href: "/faqs", label: "FAQs", id: "faqs", icon: "faqs" },
+            { href: "/pdf-upload", label: "PDF Upload", id: "pdf-upload", icon: "pdf" },
+            { href: "/widget-design", label: "Widget Design", id: "widget-design", icon: "widget" },
+            { href: "/integrate", label: "Integrieren", id: "integrate", icon: "integrate" },
+            { href: "/usage", label: "Kosten", id: "usage", icon: "usage" },
+            { href: "/login/", label: "Logout", id: "logout", icon: "logout", onClick: () => AuthState.logout() },
+        ];
+
+        return h("aside", { className: "sidebar" }, [
+            h("div", { key: "header", className: "sidebar-header" }, [
+                h("div", { className: "sidebar-title" }, "florianmatthias"),
+            ]),
+            h("ul", { key: "nav", className: "nav-list" },
+                navItems.map(item =>
+                    h("li", { key: item.id },
+                        h("a", {
+                            href: item.href,
+                            className: "nav-item" + (activePage === item.id ? " active" : ""),
+                            onClick: item.onClick ? (event) => { event.preventDefault(); item.onClick(); } : undefined,
+                        }, [
+                            h("span", { key: "icon", className: "nav-icon" }, h(Icon, { name: item.icon })),
+                            item.label
+                        ])
+                    )
+                )
+            ),
+        ]);
+    }
+
+    function WidgetDesignPage() {
+        const [botSlug] = useState(AuthState.getBotSlug());
+        const [embedTitle, setEmbedTitle] = useState(DEFAULT_COPY.de.title);
+        const [embedSubtitle, setEmbedSubtitle] = useState(DEFAULT_COPY.de.subtitle);
+        const [embedIcon, setEmbedIcon] = useState("💬");
+        const [embedIntro1, setEmbedIntro1] = useState(DEFAULT_COPY.de.intro1);
+        const [embedTitleEn, setEmbedTitleEn] = useState(DEFAULT_COPY.en.title);
+        const [embedSubtitleEn, setEmbedSubtitleEn] = useState(DEFAULT_COPY.en.subtitle);
+        const [embedIntro1En, setEmbedIntro1En] = useState(DEFAULT_COPY.en.intro1);
+        const [showPoweredBy, setShowPoweredBy] = useState(true);
+        const [theme, setTheme] = useState(() => ({ ...DEFAULT_THEME }));
+        const [prompt, setPrompt] = useState("");
+        const [promptStatus, setPromptStatus] = useState("");
+
+        useEffect(() => {
+            const saved = AuthState.getScopedItem("widget_theme_cfg", botSlug) || "";
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    if (parsed.title) setEmbedTitle(parsed.title);
+                    if (parsed.subtitle) setEmbedSubtitle(parsed.subtitle);
+                    if (parsed.icon) setEmbedIcon(parsed.icon);
+                    if (parsed.intro1 !== undefined) setEmbedIntro1(parsed.intro1);
+                    if (parsed.titleEn || parsed.title_en) setEmbedTitleEn(parsed.titleEn || parsed.title_en);
+                    if (parsed.subtitleEn || parsed.subtitle_en) setEmbedSubtitleEn(parsed.subtitleEn || parsed.subtitle_en);
+                    if (parsed.intro1En || parsed.intro1_en) setEmbedIntro1En(parsed.intro1En || parsed.intro1_en);
+                    if (typeof parsed.showPoweredBy === "boolean") setShowPoweredBy(parsed.showPoweredBy);
+                    if (parsed.theme && typeof parsed.theme === "object") {
+                        const { border, ...restTheme } = parsed.theme;
+                        setTheme({ ...DEFAULT_THEME, ...restTheme });
+                    }
+                } catch (err) { }
+            }
+        }, [botSlug]);
+
+        useEffect(() => {
+            const loadPrompt = async () => {
+                if (!AuthState.isLoggedIn() || !botSlug) return;
+                try {
+                    const params = new URLSearchParams();
+                    params.set("bot_slug", botSlug);
+                    const res = await fetch(`/api/admin/prompt?${params.toString()}`, {
+                        headers: AuthState.buildHeaders(),
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.prompt !== undefined) {
+                        setPrompt(data.prompt);
+                        setPromptStatus("");
+                    } else {
+                        setPromptStatus(data.error || "Prompt konnte nicht geladen werden.");
+                    }
+                } catch (err) {
+                    console.error("Prompt laden fehlgeschlagen", err);
+                    setPromptStatus("Prompt konnte nicht geladen werden.");
+                }
+            };
+            loadPrompt();
+        }, [botSlug]);
+
+        const embedSrc = useMemo(() => {
+            const params = new URLSearchParams();
+            if (botSlug.trim()) params.set("bot_slug", botSlug.trim());
+            if (AuthState.getToken()) params.set("token", AuthState.getToken());
+            const trimmedTitle = embedTitle.trim();
+            const trimmedSubtitle = embedSubtitle.trim();
+            const trimmedIntro1 = embedIntro1.trim();
+            const trimmedTitleEn = embedTitleEn.trim();
+            const trimmedSubtitleEn = embedSubtitleEn.trim();
+            const trimmedIntro1En = embedIntro1En.trim();
+            if (trimmedTitle && trimmedTitle !== DEFAULT_COPY.de.title) {
+                params.set("title_de", trimmedTitle);
+            }
+            if (trimmedSubtitle) params.set("subtitle_de", trimmedSubtitle);
+            if (embedIcon.trim()) params.set("icon", embedIcon.trim());
+            if (trimmedIntro1 && trimmedIntro1 !== DEFAULT_COPY.de.intro1) {
+                params.set("intro1_de", trimmedIntro1);
+            }
+            if (trimmedTitleEn && trimmedTitleEn !== DEFAULT_COPY.en.title) {
+                params.set("title_en", trimmedTitleEn);
+            }
+            if (trimmedSubtitleEn) params.set("subtitle_en", trimmedSubtitleEn);
+            if (trimmedIntro1En && trimmedIntro1En !== DEFAULT_COPY.en.intro1) {
+                params.set("intro1_en", trimmedIntro1En);
+            }
+            if (!showPoweredBy) params.set("show_powered_by", "0");
+            Object.entries(theme).forEach(([key, value]) => {
+                if (key === "border") return;
+                if (value) params.set(`theme_${key}`, value);
+            });
+            return "/embed" + (params.toString() ? "?" + params.toString() : "");
+        }, [botSlug, embedTitle, embedSubtitle, embedIcon, embedIntro1, embedTitleEn, embedSubtitleEn, embedIntro1En, showPoweredBy, theme]);
+
+        useEffect(() => {
+            AuthState.setScopedItem("widget_theme_cfg", JSON.stringify({
+                title: embedTitle,
+                subtitle: embedSubtitle,
+                icon: embedIcon,
+                intro1: embedIntro1,
+                titleEn: embedTitleEn,
+                subtitleEn: embedSubtitleEn,
+                intro1En: embedIntro1En,
+                showPoweredBy,
+                theme
+            }), botSlug);
+            const iframe = document.getElementById("chat-embed-frame");
+            if (iframe) iframe.src = embedSrc;
+            const toggle = document.getElementById("chat-toggle");
+            if (toggle) {
+                setToggleIcon(toggle, embedIcon);
+                const accent = theme.accent;
+                const accentStrong = theme.accentStrong;
+                const launcherBg =
+                    theme.launcherBg ||
+                    (accent && accentStrong ? `linear-gradient(135deg, ${accent}, ${accentStrong})` : accent);
+                if (launcherBg) toggle.style.background = launcherBg;
+            }
+        }, [botSlug, embedSrc, embedIcon, embedIntro1, embedTitleEn, embedSubtitleEn, embedIntro1En, showPoweredBy, theme]);
+
+        const updateTheme = (key, value) => setTheme((prev) => ({ ...prev, [key]: value }));
+        const resetTheme = () => {
+            setTheme({ ...DEFAULT_THEME });
+            setEmbedTitle(DEFAULT_COPY.de.title);
+            setEmbedSubtitle(DEFAULT_COPY.de.subtitle);
+            setEmbedIcon("💬");
+            setEmbedIntro1(DEFAULT_COPY.de.intro1);
+            setEmbedTitleEn(DEFAULT_COPY.en.title);
+            setEmbedSubtitleEn(DEFAULT_COPY.en.subtitle);
+            setEmbedIntro1En(DEFAULT_COPY.en.intro1);
+            setShowPoweredBy(true);
+        };
+
+        const savePrompt = async () => {
+            if (!prompt.trim()) {
+                setPromptStatus("Prompt darf nicht leer sein.");
+                return;
+            }
+            setPromptStatus("Speichere...");
+            try {
+                const res = await fetch("/api/admin/prompt", {
+                    method: "POST",
+                    headers: AuthState.buildHeaders(true),
+                    body: JSON.stringify({ bot_slug: botSlug, prompt }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setPromptStatus(data.error || "Konnte Prompt nicht speichern.");
+                    return;
+                }
+                setPromptStatus("Gespeichert.");
+            } catch (err) {
+                console.error(err);
+                setPromptStatus("Netzwerkfehler beim Speichern.");
+            }
+        };
+
+        if (!AuthState.isLoggedIn()) {
+            window.location.href = "/login";
+            return null;
+        }
+
+        return h("div", { className: "layout" }, [
+            h(Sidebar, { key: "sidebar", activePage: "widget-design" }),
+            h("div", { key: "content", className: "content" }, [
+                h("div", { key: "hero", className: "hero" }, [
+                    h("div", { className: "hero-badge" }, [
+                        h("span", { className: "hero-badge-dot" }),
+                        "Widget Customization"
+                    ]),
+                    h("h1", { className: "title" }, "Widget Design"),
+                    h("p", { className: "subtitle" }, "Passe das Aussehen deines Chat-Widgets an."),
+                ]),
+
+                h("div", { key: "design", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "✏️"), "Grundeinstellungen"]),
+                    h("p", { className: "muted" }, "Titel, Untertitel und Icon für das Widget."),
+                    h("div", { className: "stack" }, [
+                        h("div", { style: { fontWeight: 600, marginBottom: 4 } }, "Deutsch"),
+                        h("div", { className: "control" }, [
+                            h("input", {
+                                placeholder: "Widget Titel (DE)",
+                                value: embedTitle,
+                                onChange: (e) => setEmbedTitle(e.target.value),
+                            }),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("input", {
+                                placeholder: "Untertitel (DE)",
+                                value: embedSubtitle,
+                                onChange: (e) => setEmbedSubtitle(e.target.value),
+                            }),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("textarea", {
+                                placeholder: "Intro Text 1 (DE)",
+                                value: embedIntro1,
+                                onChange: (e) => setEmbedIntro1(e.target.value),
+                                style: { minHeight: 90 }
+                            }),
+                        ]),
+                        h("div", { style: { fontWeight: 600, marginTop: 8, marginBottom: 4 } }, "English"),
+                        h("div", { className: "control" }, [
+                            h("input", {
+                                placeholder: "Widget Title (EN)",
+                                value: embedTitleEn,
+                                onChange: (e) => setEmbedTitleEn(e.target.value),
+                            }),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("input", {
+                                placeholder: "Subtitle (EN)",
+                                value: embedSubtitleEn,
+                                onChange: (e) => setEmbedSubtitleEn(e.target.value),
+                            }),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("textarea", {
+                                placeholder: "Intro Text 1 (EN)",
+                                value: embedIntro1En,
+                                onChange: (e) => setEmbedIntro1En(e.target.value),
+                                style: { minHeight: 90 }
+                            }),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("textarea", {
+                                placeholder: "Icon / Emoji oder SVG (z.B. <svg ...></svg>)",
+                                value: embedIcon,
+                                onChange: (e) => setEmbedIcon(e.target.value),
+                                style: { minHeight: 90 }
+                            }),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("label", { style: { display: "flex", alignItems: "center", gap: 10 } }, [
+                                h("input", {
+                                    type: "checkbox",
+                                    checked: showPoweredBy,
+                                    onChange: (e) => setShowPoweredBy(e.target.checked),
+                                }),
+                                h("span", null, "Powered by florianmatthias anzeigen"),
+                            ]),
+                        ]),
+                    ]),
+                ]),
+
+                h("div", { key: "colors", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "🎨"), "Farbschema"]),
+                    h("p", { className: "muted" }, "Passe die Farben des Widgets an."),
+                    h("div", { className: "theme-grid" },
+                        THEME_FIELDS.map((field) =>
+                            h("label", { key: field.key, className: "theme-field" }, [
+                                h("span", null, field.label),
+                                h("input", {
+                                    type: "color",
+                                    value: theme[field.key] || DEFAULT_THEME[field.key],
+                                    onChange: (e) => updateTheme(field.key, e.target.value),
+                                }),
+                            ])
+                        )
+                    ),
+                    h("div", { style: { display: "flex", gap: 12, marginTop: 20 } }, [
+                        h("button", { className: "ghost-btn", onClick: resetTheme }, "🔄 Zurücksetzen"),
+                    ]),
+                ]),
+
+                h("div", { key: "prompt", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "🧾"), "System-Prompt"]),
+                    h("p", { className: "muted" }, "Dieser Prompt steuert den Ton und die Regeln des Chatbots."),
+                    h("div", { className: "control", style: { flexDirection: "column", alignItems: "stretch" } }, [
+                        h("textarea", {
+                            value: prompt,
+                            onChange: (e) => setPrompt(e.target.value),
+                            style: { minHeight: 180 },
+                            placeholder: "System-Prompt bearbeiten..."
+                        }),
+                        h("div", { className: "control", style: { justifyContent: "flex-start" } }, [
+                            h("button", { onClick: savePrompt, style: { minWidth: 140 } }, "💾 Prompt speichern"),
+                            promptStatus ? h("span", { className: "muted" }, promptStatus) : null,
+                        ]),
+                    ]),
+                ]),
+
+                h("div", { key: "embed", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "📋"), "Embed URL"]),
+                    h("p", { className: "muted" }, "Kopiere diese URL, um das Widget einzubetten."),
+                    h("input", {
+                        className: "embed-url",
+                        readOnly: true,
+                        value: embedSrc,
+                        onFocus: (e) => e.target.select(),
+                        onClick: (e) => e.target.select(),
+                    }),
+                    h("div", { className: "pill", style: { marginTop: 12 } }, "💡 Das Widget unten rechts zeigt deine Änderungen live."),
+                ]),
+            ]),
+        ]);
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(h(WidgetDesignPage));
+</script>
+{% endblock %}

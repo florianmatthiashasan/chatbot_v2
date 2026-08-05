@@ -1,0 +1,397 @@
+{% extends "base.html" %}
+{% block title %}Memory bearbeiten - florianmatthias{% endblock %}
+
+{% block content %}
+<div id="root"></div>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+  const { useEffect, useState } = React;
+  const h = React.createElement;
+
+  const Icon = ({ name }) => {
+    const props = { viewBox: "0 0 24 24", "aria-hidden": "true" };
+    switch (name) {
+      case "dashboard":
+        return h("svg", props, [
+          h("rect", { x: 3, y: 3, width: 8, height: 8, rx: 2 }),
+          h("rect", { x: 13, y: 3, width: 8, height: 5, rx: 2 }),
+          h("rect", { x: 13, y: 10, width: 8, height: 11, rx: 2 }),
+          h("rect", { x: 3, y: 13, width: 8, height: 8, rx: 2 }),
+        ]);
+      case "stats":
+        return h("svg", props, [
+          h("path", { d: "M3 19h18" }),
+          h("path", { d: "M6 16v-5" }),
+          h("path", { d: "M12 16v-8" }),
+          h("path", { d: "M18 16v-3" }),
+        ]);
+      case "scraping":
+        return h("svg", props, [
+          h("path", { d: "M21 12a9 9 0 1 1-3-6.7" }),
+          h("polyline", { points: "21 3 21 9 15 9" }),
+        ]);
+      case "chat":
+        return h("svg", props, [
+          h("path", { d: "M6 6h12a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H10l-4 3v-3H6a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z" }),
+        ]);
+      case "memory":
+        return h("svg", props, [
+          h("ellipse", { cx: 12, cy: 6, rx: 7, ry: 3 }),
+          h("path", { d: "M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" }),
+          h("path", { d: "M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" }),
+        ]);
+      case "faqs":
+        return h("svg", props, [
+          h("circle", { cx: 12, cy: 12, r: 9 }),
+          h("path", { d: "M9.5 9a2.5 2.5 0 0 1 5 0c0 1.6-2.5 1.9-2.5 4" }),
+          h("path", { d: "M12 17h.01" }),
+        ]);
+      case "pdf":
+        return h("svg", props, [
+          h("path", { d: "M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" }),
+          h("path", { d: "M14 3v5h5" }),
+          h("path", { d: "M9 13h6" }),
+          h("path", { d: "M9 17h6" }),
+        ]);
+      case "widget":
+        return h("svg", props, [
+          h("path", { d: "M4 6h16" }),
+          h("circle", { cx: 9, cy: 6, r: 2 }),
+          h("path", { d: "M4 12h16" }),
+          h("circle", { cx: 15, cy: 12, r: 2 }),
+          h("path", { d: "M4 18h16" }),
+          h("circle", { cx: 7, cy: 18, r: 2 }),
+        ]);
+      case "integrate":
+        return h("svg", props, [
+          h("path", { d: "M10 13a3 3 0 0 0 4 0l3-3a3 3 0 0 0-4-4l-1 1" }),
+          h("path", { d: "M14 11a3 3 0 0 0-4 0l-3 3a3 3 0 0 0 4 4l1-1" }),
+        ]);
+      case "usage":
+        return h("svg", props, [
+          h("rect", { x: 3, y: 5, width: 18, height: 14, rx: 2 }),
+          h("path", { d: "M3 10h18" }),
+          h("path", { d: "M7 15h5" }),
+        ]);
+      case "logout":
+        return h("svg", props, [
+          h("path", { d: "M4 5h7a2 2 0 0 1 2 2v3" }),
+          h("path", { d: "M13 14v3a2 2 0 0 1-2 2H4" }),
+          h("path", { d: "M10 12h10" }),
+          h("polyline", { points: "16 8 20 12 16 16" }),
+        ]);
+
+      default:
+        return h("svg", props);
+    }
+  };
+
+  function Sidebar({ activePage }) {
+    const navItems = [
+      { href: "/dashboard", label: "Dashboard", id: "dashboard", icon: "dashboard" },
+      { href: "/stats", label: "Statistiken", id: "stats", icon: "stats" },
+      { href: "/scraping", label: "Scraping & Index", id: "scraping", icon: "scraping" },
+      { href: "/chat", label: "Chat", id: "chat", icon: "chat" },
+      { href: "/memory", label: "Memory bearbeiten", id: "memory", icon: "memory" },
+      { href: "/faqs", label: "FAQs", id: "faqs", icon: "faqs" },
+      { href: "/pdf-upload", label: "PDF Upload", id: "pdf-upload", icon: "pdf" },
+      { href: "/widget-design", label: "Widget Design", id: "widget-design", icon: "widget" },
+      { href: "/integrate", label: "Integrieren", id: "integrate", icon: "integrate" },
+      { href: "/usage", label: "Kosten", id: "usage", icon: "usage" },
+      { href: "/login/", label: "Logout", id: "logout", icon: "logout", onClick: () => AuthState.logout() },
+    ];
+
+            return h("aside", { className: "sidebar" }, [
+                h("div", { key: "header", className: "sidebar-header" }, [
+                    h("div", { className: "sidebar-title" }, "florianmatthias"),
+                ]),      h("ul", { key: "nav", className: "nav-list" },
+        navItems.map(item =>
+          h("li", { key: item.id },
+            h("a", {
+              href: item.href,
+              className: "nav-item" + (activePage === item.id ? " active" : ""),
+              onClick: item.onClick ? (event) => { event.preventDefault(); item.onClick(); } : undefined,
+            }, [
+              h("span", { key: "icon", className: "nav-icon" }, h(Icon, { name: item.icon })),
+              item.label
+            ])
+          )
+        )
+      ),
+    ]);
+  }
+
+  function MemoryCard({ item, onDelete, onEditStart, onEditSave, onEditCancel, editingId, editText, setEditText, busy }) {
+    const isEditing = editingId === (item.chunk_id || item.doc_id);
+    const preview = item.preview || (item.text || "").slice(0, 650);
+    return h("div", { className: "card" }, [
+      h("div", {
+        key: "meta",
+        style: { display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }
+      }, [
+        h("div", { key: "left", className: "stack" }, [
+          h("div", { className: "pill" }, item.chunk_id || item.doc_id || "Unbekannte ID"),
+          h("div", { className: "muted" }, (item.title || "Ohne Titel") + " · " + (item.source || "Quelle unbekannt")),
+        ]),
+        h("div", { key: "right", className: "chips" }, [
+          item.score !== null && item.score !== undefined ? h("span", { className: "chip" }, "Score: " + item.score.toFixed(3)) : null,
+          h("span", { className: "chip" }, "Doc-ID: " + (item.doc_id || "n/a")),
+        ].filter(Boolean)),
+      ]),
+      isEditing
+        ? h("div", { key: "edit", className: "stack", style: { marginTop: 10 } }, [
+          h("textarea", {
+            value: editText,
+            onChange: (e) => setEditText(e.target.value),
+            style: { minHeight: 140 }
+          }),
+          h("div", { className: "control" }, [
+            h("button", {
+              onClick: () => onEditSave(item, editText),
+              disabled: busy
+            }, h("span", null, busy ? "Speichert..." : "💾 Speichern")),
+            h("button", {
+              className: "ghost-btn",
+              type: "button",
+              onClick: () => onEditCancel(),
+            }, h("span", null, "Abbrechen")),
+          ])
+        ])
+        : h("p", { key: "text", className: "muted", style: { marginTop: 10, whiteSpace: "pre-wrap" } }, preview || "—"),
+      !isEditing && h("div", { key: "actions", className: "control", style: { marginTop: 12 } }, [
+        h("button", {
+          className: "ghost-btn",
+          type: "button",
+          onClick: () => {
+            try {
+              const copyText = item.chunk_id || item.doc_id || "";
+              if (copyText && navigator.clipboard) {
+                navigator.clipboard.writeText(copyText);
+              }
+            } catch (_) { }
+          }
+        }, h("span", null, "📋 Chunk-ID kopieren")),
+        h("button", {
+          className: "ghost-btn",
+          type: "button",
+          onClick: () => onEditStart(item),
+          style: { background: "#e0f2fe", borderColor: "#0ea5e9" }
+        }, h("span", null, "✏️ Bearbeiten")),
+        h("button", {
+          onClick: () => onDelete(item),
+          disabled: busy,
+          style: { background: "#ffd1d7", color: "#b91c1c" },
+        }, h("span", null, busy ? "Lösche..." : "🗑️ Löschen")),
+      ]),
+    ]);
+  }
+
+  function MemoryPage() {
+    const [botSlug] = useState(AuthState.getBotSlug());
+    const [items, setItems] = useState([]);
+    const [query, setQuery] = useState("");
+    const [total, setTotal] = useState(0);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
+    const [info, setInfo] = useState("");
+    const [deleting, setDeleting] = useState("");
+    const [editingId, setEditingId] = useState("");
+    const [editText, setEditText] = useState("");
+
+    useEffect(() => {
+      if (!AuthState.isLoggedIn()) {
+        window.location.href = "/login";
+        return;
+      }
+      if (!botSlug) {
+        setError("Bitte zuerst einen Bot-Slug auf dem Dashboard hinterlegen.");
+        return;
+      }
+      loadMemory("");
+    }, []);
+
+    const loadMemory = async (searchTerm = "") => {
+      setLoading(true);
+      setError("");
+      setInfo("");
+      try {
+        const params = new URLSearchParams();
+        params.set("bot_slug", botSlug);
+        if (searchTerm.trim()) params.set("q", searchTerm.trim());
+        const res = await fetch(`/api/admin/memory?${params.toString()}`, {
+          headers: AuthState.buildHeaders(),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Memory konnte nicht geladen werden.");
+          return;
+        }
+        setItems(data.items || []);
+        setTotal(data.total || 0);
+        setInfo(data.query ? `Suchergebnis für „${data.query}“` : "Aktuelle Einträge (Auszug)");
+      } catch (err) {
+        console.error(err);
+        setError("Netzwerkfehler beim Laden des Memory.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const handleEditStart = (item) => {
+      setEditingId(item.chunk_id || item.doc_id);
+      setEditText(item.text || "");
+    };
+
+    const handleEditCancel = () => {
+      setEditingId("");
+      setEditText("");
+    };
+
+    const handleEditSave = async (item, newText) => {
+      if (!item) return;
+      const chunkId = item.chunk_id || item.doc_id;
+      if (!chunkId) return;
+      if (!newText.trim()) {
+        setError("Neuer Text darf nicht leer sein.");
+        return;
+      }
+      setInfo("");
+      setError("");
+      setDeleting(chunkId);
+      try {
+        const res = await fetch("/api/admin/memory/update", {
+          method: "POST",
+          headers: AuthState.buildHeaders(true),
+          body: JSON.stringify({
+            bot_slug: botSlug,
+            chunk_id: item.chunk_id,
+            doc_id: item.doc_id,
+            text: newText,
+            title: item.title,
+            source: item.source,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Konnte nicht speichern.");
+          return;
+        }
+        setInfo("Eintrag gespeichert.");
+        setEditingId("");
+        setEditText("");
+        loadMemory(query);
+      } catch (err) {
+        console.error(err);
+        setError("Netzwerkfehler beim Speichern.");
+      } finally {
+        setDeleting("");
+      }
+    };
+
+    const handleDelete = async (item) => {
+      if (!item) return;
+      const chunkId = item.chunk_id || item.doc_id;
+      if (!chunkId) return;
+      if (!confirm(`Diesen Eintrag wirklich löschen?\n${chunkId}`)) return;
+
+      setDeleting(chunkId);
+      setError("");
+      try {
+        const res = await fetch("/api/admin/memory/delete", {
+          method: "POST",
+          headers: AuthState.buildHeaders(true),
+          body: JSON.stringify({
+            bot_slug: botSlug,
+            chunk_ids: item.chunk_id ? [item.chunk_id] : [],
+            ids: item.doc_id ? [item.doc_id] : [],
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Konnte nicht löschen.");
+          return;
+        }
+        setInfo(`Gelöscht (${data.deleted || 1}).`);
+        loadMemory(query);
+      } catch (err) {
+        console.error(err);
+        setError("Netzwerkfehler beim Löschen.");
+      } finally {
+        setDeleting("");
+      }
+    };
+
+    if (!AuthState.isLoggedIn()) {
+      return null;
+    }
+
+    return h("div", { className: "layout" }, [
+      h(Sidebar, { key: "sidebar", activePage: "memory" }),
+      h("div", { key: "content", className: "content" }, [
+        h("div", { key: "hero", className: "hero" }, [
+          h("div", { className: "hero-badge" }, [
+            h("span", { className: "hero-badge-dot" }),
+            "Memory Werkzeuge"
+          ]),
+          h("h1", { className: "title" }, "Memory bearbeiten"),
+          h("p", { className: "subtitle" },
+            "Finde problematische Chunks und lösche sie aus dem FAISS-Memory. Suche per Stichwort oder scrolle durch die neuesten Einträge."),
+        ]),
+
+        h("div", { key: "controls", className: "card" }, [
+          h("h2", null, [h("span", { className: "card-icon" }, "🧠"), "Memory durchsuchen"]),
+          h("p", { className: "muted" }, "Nutze Stichworte aus der falschen Aussage (z. B. „18 Uhr“) und lösche oder bearbeite den entsprechenden Chunk."),
+          h("div", { className: "control", style: { marginTop: 12 } }, [
+            h("input", {
+              placeholder: "Suchbegriff (z. B. Öffnungszeiten)",
+              value: query,
+              onChange: (e) => setQuery(e.target.value),
+              onKeyDown: (e) => {
+                if (e.key === "Enter") loadMemory(query);
+              }
+            }),
+            h("button", { onClick: () => loadMemory(query), disabled: loading }, h("span", null, loading ? "Lädt..." : "🔍 Suchen")),
+            h("button", { className: "ghost-btn", type: "button", onClick: () => { setQuery(""); loadMemory(""); } }, h("span", null, "↻ Alle laden")),
+          ]),
+          h("div", { className: "chips", style: { marginTop: 10 } }, [
+            h("span", { className: "chip" }, `Bot: ${botSlug || "n/a"}`),
+            h("span", { className: "chip" }, `Gesamt: ${total}`),
+            info ? h("span", { className: "chip" }, info) : null,
+          ].filter(Boolean)),
+          error ? h("div", {
+            className: "badge error", style: { marginTop: 12 }
+          }, error) : null,
+          !error && info ? h("div", {
+            className: "badge ok", style: { marginTop: 12 }
+          }, info) : null,
+        ]),
+
+        h("div", { key: "list", className: "grid" },
+          items.length === 0 && !loading
+            ? [h("div", { key: "empty", className: "card" }, [
+              h("h2", null, [h("span", { className: "card-icon" }, "✨"), "Keine Einträge gefunden"]),
+              h("p", { className: "muted" }, "Falls du gerade neu indexiert hast, lade die Seite neu oder starte eine Suche mit einem anderen Begriff."),
+            ])]
+            : items.map((item) =>
+              h(MemoryCard, {
+                key: item.chunk_id || item.doc_id,
+                item,
+                busy: deleting === (item.chunk_id || item.doc_id),
+                onDelete: handleDelete,
+                onEditStart: handleEditStart,
+                onEditSave: handleEditSave,
+                onEditCancel: handleEditCancel,
+                editingId,
+                editText,
+                setEditText,
+              })
+            )
+        ),
+      ]),
+    ]);
+  }
+
+  ReactDOM.createRoot(document.getElementById("root")).render(h(MemoryPage));
+</script>
+{% endblock %}
