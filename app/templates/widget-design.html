@@ -87,41 +87,74 @@
         }
     };
 
+    // Standard-Logo des Assistenten - identisch zum Widget
+    const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
+
     const DEFAULT_THEME = {
         accent: "#8c8875",
         accentStrong: "#756f5f",
-        avatarBg: "#e6e0d6",
+        statusDot: "#4f8a5b",
+        avatarBg: "#3a352c",
         launcherBg: "#8c8875",
-        bg: "#f4f1eb",
+        bg: "#f9f6f1",
         panel: "#ffffff",
         shellBorder: "transparent",
-        text: "#3d3a34",
-        userBubble: "#f2ede6",
-        userText: "#3d3a34",
+        text: "#2f2a24",
+        userBubble: "#ece5da",
+        userText: "#2f2a24",
         botBubble: "#ffffff",
-        botText: "#3d3a34",
-        composerBg: "#f7f3ee",
-        composerBorder: "#ffffff",
-        composerText: "#3d3a34",
-        composerButtonBg: "#756f5f",
+        botText: "#2f2a24",
+        composerBg: "#ffffff",
+        composerBorder: "#e8e2d8",
+        composerText: "#2f2a24",
+        composerButtonBg: "#3a352c",
         composerButtonText: "#f8f6f1",
     };
     const DEFAULT_COPY = {
         de: {
             title: "Haben Sie Fragen?",
             subtitle: "",
+            status: "Antwortet sofort",
             intro1: "Hallo! Schoen, dass du da bist. Ich bin XY und finde gerne eine direkte Antwort fuer dich - stelle mir dazu eine Frage.",
+            disclaimer: "Der Assistent kann Fehler machen. Bitte pruefe wichtige Informationen.",
+            privacyLabel: "Datenschutz",
         },
         en: {
             title: "Any questions?",
             subtitle: "",
+            status: "Replies instantly",
             intro1: "Hi! Nice to have you here. I am XY and I am happy to help you find a direct answer - just ask a question.",
+            disclaimer: "The assistant can make mistakes. Please verify important information.",
+            privacyLabel: "Privacy",
         },
     };
+
+    // Widget-Inhalte pro Bot (Backend: widget_config.json)
+    const EMPTY_WIDGET_CFG = {
+        greeting: { enabled: true, text: { de: "", en: "" }, delay_ms: 1200 },
+        topics_label: { de: "", en: "" },
+        topics: [],
+        contact: { url: "", email: "", phone: "" },
+        action_labels: { de: {}, en: {} },
+    };
+    const ACTION_LABEL_FIELDS = [
+        { key: "view", label: "Ansehen", hint: "Öffnet die Seite zur Karte" },
+        { key: "inquiry", label: "Anfrage senden", hint: "Startet eine Anfrage im Chat" },
+        { key: "details", label: "Mehr Details", hint: "Fragt nach mehr Informationen" },
+        { key: "next_step", label: "Nächster Schritt", hint: "Fragt nach dem nächsten Schritt" },
+        { key: "contact", label: "Kontakt aufnehmen", hint: "Führt zum Kontaktweg unten" },
+    ];
+    const EMPTY_TOPIC = () => ({
+        label: { de: "", en: "" },
+        question: { de: "", en: "" },
+        url: "",
+        highlight: false,
+    });
 
     const THEME_FIELDS = [
         { key: "accent", label: "Akzent" },
         { key: "accentStrong", label: "Akzent 2" },
+        { key: "statusDot", label: "Status Punkt" },
         { key: "avatarBg", label: "Avatar Kreis" },
         { key: "launcherBg", label: "Chat Button" },
         { key: "bg", label: "Hintergrund" },
@@ -267,15 +300,26 @@
         const [botSlug] = useState(AuthState.getBotSlug());
         const [embedTitle, setEmbedTitle] = useState(DEFAULT_COPY.de.title);
         const [embedSubtitle, setEmbedSubtitle] = useState(DEFAULT_COPY.de.subtitle);
-        const [embedIcon, setEmbedIcon] = useState("💬");
+        const [embedIcon, setEmbedIcon] = useState(DEFAULT_ICON_SVG);
         const [embedIntro1, setEmbedIntro1] = useState(DEFAULT_COPY.de.intro1);
         const [embedTitleEn, setEmbedTitleEn] = useState(DEFAULT_COPY.en.title);
         const [embedSubtitleEn, setEmbedSubtitleEn] = useState(DEFAULT_COPY.en.subtitle);
         const [embedIntro1En, setEmbedIntro1En] = useState(DEFAULT_COPY.en.intro1);
+        const [embedStatus, setEmbedStatus] = useState(DEFAULT_COPY.de.status);
+        const [embedStatusEn, setEmbedStatusEn] = useState(DEFAULT_COPY.en.status);
+        const [showStatus, setShowStatus] = useState(true);
+        const [embedDisclaimer, setEmbedDisclaimer] = useState(DEFAULT_COPY.de.disclaimer);
+        const [embedDisclaimerEn, setEmbedDisclaimerEn] = useState(DEFAULT_COPY.en.disclaimer);
+        const [privacyUrl, setPrivacyUrl] = useState("");
+        const [privacyLabel, setPrivacyLabel] = useState(DEFAULT_COPY.de.privacyLabel);
+        const [privacyLabelEn, setPrivacyLabelEn] = useState(DEFAULT_COPY.en.privacyLabel);
         const [showPoweredBy, setShowPoweredBy] = useState(true);
         const [theme, setTheme] = useState(() => ({ ...DEFAULT_THEME }));
         const [prompt, setPrompt] = useState("");
         const [promptStatus, setPromptStatus] = useState("");
+        const [widgetCfg, setWidgetCfg] = useState(() => JSON.parse(JSON.stringify(EMPTY_WIDGET_CFG)));
+        const [widgetCfgStatus, setWidgetCfgStatus] = useState("");
+        const [widgetDefaults, setWidgetDefaults] = useState({ greeting_text: {}, topics_label: {} });
 
         useEffect(() => {
             const saved = AuthState.getScopedItem("widget_theme_cfg", botSlug) || "";
@@ -289,6 +333,17 @@
                     if (parsed.titleEn || parsed.title_en) setEmbedTitleEn(parsed.titleEn || parsed.title_en);
                     if (parsed.subtitleEn || parsed.subtitle_en) setEmbedSubtitleEn(parsed.subtitleEn || parsed.subtitle_en);
                     if (parsed.intro1En || parsed.intro1_en) setEmbedIntro1En(parsed.intro1En || parsed.intro1_en);
+                    // Migration: ein frueher gesetzter Untertitel wird zur Statuszeile.
+                    if (parsed.status !== undefined) setEmbedStatus(parsed.status);
+                    else if (parsed.subtitle) setEmbedStatus(parsed.subtitle);
+                    if (parsed.statusEn !== undefined) setEmbedStatusEn(parsed.statusEn);
+                    else if (parsed.subtitleEn || parsed.subtitle_en) setEmbedStatusEn(parsed.subtitleEn || parsed.subtitle_en);
+                    if (typeof parsed.showStatus === "boolean") setShowStatus(parsed.showStatus);
+                    if (parsed.disclaimer !== undefined) setEmbedDisclaimer(parsed.disclaimer);
+                    if (parsed.disclaimerEn !== undefined) setEmbedDisclaimerEn(parsed.disclaimerEn);
+                    if (parsed.privacyUrl !== undefined) setPrivacyUrl(parsed.privacyUrl);
+                    if (parsed.privacyLabel !== undefined) setPrivacyLabel(parsed.privacyLabel);
+                    if (parsed.privacyLabelEn !== undefined) setPrivacyLabelEn(parsed.privacyLabelEn);
                     if (typeof parsed.showPoweredBy === "boolean") setShowPoweredBy(parsed.showPoweredBy);
                     if (parsed.theme && typeof parsed.theme === "object") {
                         const { border, ...restTheme } = parsed.theme;
@@ -322,6 +377,101 @@
             loadPrompt();
         }, [botSlug]);
 
+        useEffect(() => {
+            const loadWidgetCfg = async () => {
+                if (!AuthState.isLoggedIn() || !botSlug) return;
+                try {
+                    const params = new URLSearchParams();
+                    params.set("bot_slug", botSlug);
+                    const res = await fetch(`/api/admin/widget_config?${params.toString()}`, {
+                        headers: AuthState.buildHeaders(),
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.config) {
+                        setWidgetCfg({ ...JSON.parse(JSON.stringify(EMPTY_WIDGET_CFG)), ...data.config });
+                        if (data.defaults) setWidgetDefaults(data.defaults);
+                        setWidgetCfgStatus("");
+                    } else {
+                        setWidgetCfgStatus(data.error || "Inhalte konnten nicht geladen werden.");
+                    }
+                } catch (err) {
+                    console.error("Widget-Inhalte laden fehlgeschlagen", err);
+                    setWidgetCfgStatus("Inhalte konnten nicht geladen werden.");
+                }
+            };
+            loadWidgetCfg();
+        }, [botSlug]);
+
+        const updateGreeting = (key, value) => setWidgetCfg((prev) => ({
+            ...prev,
+            greeting: { ...prev.greeting, [key]: value },
+        }));
+        const updateGreetingText = (lang, value) => setWidgetCfg((prev) => ({
+            ...prev,
+            greeting: { ...prev.greeting, text: { ...prev.greeting.text, [lang]: value } },
+        }));
+        const updateTopicsLabel = (lang, value) => setWidgetCfg((prev) => ({
+            ...prev,
+            topics_label: { ...prev.topics_label, [lang]: value },
+        }));
+        const updateTopic = (idx, path, value) => setWidgetCfg((prev) => {
+            const topics = prev.topics.map((topic, i) => {
+                if (i !== idx) return topic;
+                if (path === "url" || path === "highlight") return { ...topic, [path]: value };
+                const [field, lang] = path.split(".");
+                return { ...topic, [field]: { ...topic[field], [lang]: value } };
+            });
+            return { ...prev, topics };
+        });
+        const updateContact = (key, value) => setWidgetCfg((prev) => ({
+            ...prev,
+            contact: { ...(prev.contact || {}), [key]: value },
+        }));
+        const updateActionLabel = (lang, key, value) => setWidgetCfg((prev) => ({
+            ...prev,
+            action_labels: {
+                ...(prev.action_labels || {}),
+                [lang]: { ...((prev.action_labels || {})[lang] || {}), [key]: value },
+            },
+        }));
+        const addTopic = () => setWidgetCfg((prev) => ({ ...prev, topics: [...prev.topics, EMPTY_TOPIC()] }));
+        const removeTopic = (idx) => setWidgetCfg((prev) => ({
+            ...prev,
+            topics: prev.topics.filter((_, i) => i !== idx),
+        }));
+        const moveTopic = (idx, offset) => setWidgetCfg((prev) => {
+            const next = [...prev.topics];
+            const target = idx + offset;
+            if (target < 0 || target >= next.length) return prev;
+            const [item] = next.splice(idx, 1);
+            next.splice(target, 0, item);
+            return { ...prev, topics: next };
+        });
+
+        const saveWidgetCfg = async () => {
+            setWidgetCfgStatus("Speichere...");
+            try {
+                const res = await fetch("/api/admin/widget_config", {
+                    method: "POST",
+                    headers: AuthState.buildHeaders(true),
+                    body: JSON.stringify({ bot_slug: botSlug, config: widgetCfg }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setWidgetCfgStatus(data.error || "Konnte Inhalte nicht speichern.");
+                    return;
+                }
+                if (data.config) setWidgetCfg({ ...JSON.parse(JSON.stringify(EMPTY_WIDGET_CFG)), ...data.config });
+                setWidgetCfgStatus("Gespeichert.");
+                // Vorschau neu laden, damit die Startansicht die neuen Themen zeigt.
+                const iframe = document.getElementById("chat-embed-frame");
+                if (iframe) iframe.src = iframe.src;
+            } catch (err) {
+                console.error(err);
+                setWidgetCfgStatus("Netzwerkfehler beim Speichern.");
+            }
+        };
+
         const embedSrc = useMemo(() => {
             const params = new URLSearchParams();
             if (botSlug.trim()) params.set("bot_slug", botSlug.trim());
@@ -336,7 +486,8 @@
                 params.set("title_de", trimmedTitle);
             }
             if (trimmedSubtitle) params.set("subtitle_de", trimmedSubtitle);
-            if (embedIcon.trim()) params.set("icon", embedIcon.trim());
+            // Immer setzen: ein leeres Feld bedeutet "kein Avatar".
+            params.set("icon", embedIcon.trim());
             if (trimmedIntro1 && trimmedIntro1 !== DEFAULT_COPY.de.intro1) {
                 params.set("intro1_de", trimmedIntro1);
             }
@@ -347,13 +498,35 @@
             if (trimmedIntro1En && trimmedIntro1En !== DEFAULT_COPY.en.intro1) {
                 params.set("intro1_en", trimmedIntro1En);
             }
+            // Statuszeile, Hinweistext und Datenschutz-Link der neuen Fusszeile.
+            // Status wird immer gesetzt, damit ein alter Untertitel ihn nicht ueberschreibt.
+            if (embedStatus.trim()) params.set("status_de", embedStatus.trim());
+            if (embedStatusEn.trim()) params.set("status_en", embedStatusEn.trim());
+            if (!showStatus) params.set("show_status", "0");
+            if (embedDisclaimer.trim() && embedDisclaimer.trim() !== DEFAULT_COPY.de.disclaimer) {
+                params.set("disclaimer_de", embedDisclaimer.trim());
+            }
+            if (embedDisclaimerEn.trim() && embedDisclaimerEn.trim() !== DEFAULT_COPY.en.disclaimer) {
+                params.set("disclaimer_en", embedDisclaimerEn.trim());
+            }
+            if (privacyUrl.trim()) {
+                params.set("privacy_url", privacyUrl.trim());
+                if (privacyLabel.trim() && privacyLabel.trim() !== DEFAULT_COPY.de.privacyLabel) {
+                    params.set("privacy_label_de", privacyLabel.trim());
+                }
+                if (privacyLabelEn.trim() && privacyLabelEn.trim() !== DEFAULT_COPY.en.privacyLabel) {
+                    params.set("privacy_label_en", privacyLabelEn.trim());
+                }
+            }
             if (!showPoweredBy) params.set("show_powered_by", "0");
             Object.entries(theme).forEach(([key, value]) => {
                 if (key === "border") return;
                 if (value) params.set(`theme_${key}`, value);
             });
             return "/embed" + (params.toString() ? "?" + params.toString() : "");
-        }, [botSlug, embedTitle, embedSubtitle, embedIcon, embedIntro1, embedTitleEn, embedSubtitleEn, embedIntro1En, showPoweredBy, theme]);
+        }, [botSlug, embedTitle, embedSubtitle, embedIcon, embedIntro1, embedTitleEn, embedSubtitleEn, embedIntro1En,
+            embedStatus, embedStatusEn, showStatus, embedDisclaimer, embedDisclaimerEn,
+            privacyUrl, privacyLabel, privacyLabelEn, showPoweredBy, theme]);
 
         useEffect(() => {
             AuthState.setScopedItem("widget_theme_cfg", JSON.stringify({
@@ -364,6 +537,14 @@
                 titleEn: embedTitleEn,
                 subtitleEn: embedSubtitleEn,
                 intro1En: embedIntro1En,
+                status: embedStatus,
+                statusEn: embedStatusEn,
+                showStatus,
+                disclaimer: embedDisclaimer,
+                disclaimerEn: embedDisclaimerEn,
+                privacyUrl,
+                privacyLabel,
+                privacyLabelEn,
                 showPoweredBy,
                 theme
             }), botSlug);
@@ -379,18 +560,28 @@
                     (accent && accentStrong ? `linear-gradient(135deg, ${accent}, ${accentStrong})` : accent);
                 if (launcherBg) toggle.style.background = launcherBg;
             }
-        }, [botSlug, embedSrc, embedIcon, embedIntro1, embedTitleEn, embedSubtitleEn, embedIntro1En, showPoweredBy, theme]);
+        }, [botSlug, embedSrc, embedIcon, embedIntro1, embedTitleEn, embedSubtitleEn, embedIntro1En,
+            embedStatus, embedStatusEn, showStatus, embedDisclaimer, embedDisclaimerEn,
+            privacyUrl, privacyLabel, privacyLabelEn, showPoweredBy, theme]);
 
         const updateTheme = (key, value) => setTheme((prev) => ({ ...prev, [key]: value }));
         const resetTheme = () => {
             setTheme({ ...DEFAULT_THEME });
             setEmbedTitle(DEFAULT_COPY.de.title);
             setEmbedSubtitle(DEFAULT_COPY.de.subtitle);
-            setEmbedIcon("💬");
+            setEmbedIcon(DEFAULT_ICON_SVG);
             setEmbedIntro1(DEFAULT_COPY.de.intro1);
             setEmbedTitleEn(DEFAULT_COPY.en.title);
             setEmbedSubtitleEn(DEFAULT_COPY.en.subtitle);
             setEmbedIntro1En(DEFAULT_COPY.en.intro1);
+            setEmbedStatus(DEFAULT_COPY.de.status);
+            setEmbedStatusEn(DEFAULT_COPY.en.status);
+            setShowStatus(true);
+            setEmbedDisclaimer(DEFAULT_COPY.de.disclaimer);
+            setEmbedDisclaimerEn(DEFAULT_COPY.en.disclaimer);
+            setPrivacyUrl("");
+            setPrivacyLabel(DEFAULT_COPY.de.privacyLabel);
+            setPrivacyLabelEn(DEFAULT_COPY.en.privacyLabel);
             setShowPoweredBy(true);
         };
 
@@ -449,9 +640,9 @@
                         ]),
                         h("div", { className: "control" }, [
                             h("input", {
-                                placeholder: "Untertitel (DE)",
-                                value: embedSubtitle,
-                                onChange: (e) => setEmbedSubtitle(e.target.value),
+                                placeholder: "Statuszeile (DE), z.B. Antwortet sofort",
+                                value: embedStatus,
+                                onChange: (e) => setEmbedStatus(e.target.value),
                             }),
                         ]),
                         h("div", { className: "control" }, [
@@ -472,9 +663,9 @@
                         ]),
                         h("div", { className: "control" }, [
                             h("input", {
-                                placeholder: "Subtitle (EN)",
-                                value: embedSubtitleEn,
-                                onChange: (e) => setEmbedSubtitleEn(e.target.value),
+                                placeholder: "Status line (EN), e.g. Replies instantly",
+                                value: embedStatusEn,
+                                onChange: (e) => setEmbedStatusEn(e.target.value),
                             }),
                         ]),
                         h("div", { className: "control" }, [
@@ -487,11 +678,21 @@
                         ]),
                         h("div", { className: "control" }, [
                             h("textarea", {
-                                placeholder: "Icon / Emoji oder SVG (z.B. <svg ...></svg>)",
+                                placeholder: "Icon / Emoji oder SVG (z.B. <svg ...></svg>) - leer = kein Avatar",
                                 value: embedIcon,
                                 onChange: (e) => setEmbedIcon(e.target.value),
                                 style: { minHeight: 90 }
                             }),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("label", { style: { display: "flex", alignItems: "center", gap: 10 } }, [
+                                h("input", {
+                                    type: "checkbox",
+                                    checked: showStatus,
+                                    onChange: (e) => setShowStatus(e.target.checked),
+                                }),
+                                h("span", null, "Statuszeile mit Punkt anzeigen"),
+                            ]),
                         ]),
                         h("div", { className: "control" }, [
                             h("label", { style: { display: "flex", alignItems: "center", gap: 10 } }, [
@@ -502,6 +703,50 @@
                                 }),
                                 h("span", null, "Powered by florianmatthias anzeigen"),
                             ]),
+                        ]),
+                    ]),
+                ]),
+
+                h("div", { key: "footer", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "📄"), "Fusszeile"]),
+                    h("p", { className: "muted" },
+                        "Hinweistext unter dem Eingabefeld und optionaler Datenschutz-Link. " +
+                        "Leer lassen für die Standardtexte."),
+                    h("div", { className: "stack" }, [
+                        h("div", { className: "control" }, [
+                            h("input", {
+                                placeholder: DEFAULT_COPY.de.disclaimer,
+                                value: embedDisclaimer,
+                                onChange: (e) => setEmbedDisclaimer(e.target.value),
+                            }),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("input", {
+                                placeholder: DEFAULT_COPY.en.disclaimer,
+                                value: embedDisclaimerEn,
+                                onChange: (e) => setEmbedDisclaimerEn(e.target.value),
+                            }),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("input", {
+                                placeholder: "Datenschutz-URL (leer = kein Link)",
+                                value: privacyUrl,
+                                onChange: (e) => setPrivacyUrl(e.target.value),
+                            }),
+                        ]),
+                        h("div", { className: "form-grid" }, [
+                            h("input", {
+                                key: "pl-de",
+                                placeholder: "Link-Text (DE)",
+                                value: privacyLabel,
+                                onChange: (e) => setPrivacyLabel(e.target.value),
+                            }),
+                            h("input", {
+                                key: "pl-en",
+                                placeholder: "Link text (EN)",
+                                value: privacyLabelEn,
+                                onChange: (e) => setPrivacyLabelEn(e.target.value),
+                            }),
                         ]),
                     ]),
                 ]),
@@ -539,6 +784,204 @@
                         h("div", { className: "control", style: { justifyContent: "flex-start" } }, [
                             h("button", { onClick: savePrompt, style: { minWidth: 140 } }, "💾 Prompt speichern"),
                             promptStatus ? h("span", { className: "muted" }, promptStatus) : null,
+                        ]),
+                    ]),
+                ]),
+
+                h("div", { key: "greeting", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "👋"), "Begrüßungs-Popup"]),
+                    h("p", { className: "muted" },
+                        "Erscheint neben dem Chat-Button, einmal pro Besucher. Über das × schließt der Besucher es weg."),
+                    h("div", { className: "stack" }, [
+                        h("div", { className: "control" }, [
+                            h("label", { style: { display: "flex", alignItems: "center", gap: 10 } }, [
+                                h("input", {
+                                    type: "checkbox",
+                                    checked: widgetCfg.greeting.enabled !== false,
+                                    onChange: (e) => updateGreeting("enabled", e.target.checked),
+                                }),
+                                h("span", null, "Popup anzeigen"),
+                            ]),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("input", {
+                                placeholder: (widgetDefaults.greeting_text && widgetDefaults.greeting_text.de) || "Popup-Text (DE)",
+                                value: widgetCfg.greeting.text.de || "",
+                                onChange: (e) => updateGreetingText("de", e.target.value),
+                            }),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("input", {
+                                placeholder: (widgetDefaults.greeting_text && widgetDefaults.greeting_text.en) || "Popup text (EN)",
+                                value: widgetCfg.greeting.text.en || "",
+                                onChange: (e) => updateGreetingText("en", e.target.value),
+                            }),
+                        ]),
+                        h("div", { className: "control" }, [
+                            h("span", { className: "muted" }, "Verzögerung nach Seitenaufruf"),
+                            h("input", {
+                                type: "number",
+                                min: 0,
+                                max: 20000,
+                                step: 100,
+                                style: { maxWidth: 140 },
+                                value: typeof widgetCfg.greeting.delay_ms === "number" ? widgetCfg.greeting.delay_ms : 1200,
+                                onChange: (e) => updateGreeting("delay_ms", Number(e.target.value) || 0),
+                            }),
+                            h("span", { className: "muted" }, "ms"),
+                        ]),
+                    ]),
+                ]),
+
+                h("div", { key: "topics", className: "card" }, [
+                    h("h2", null, [h("span", { className: "card-icon" }, "⚡"), "Schnellaktionen der Startansicht"]),
+                    h("p", { className: "muted" },
+                        "Diese Themen erscheinen direkt beim Öffnen des Chats. Der Titel wird angezeigt, " +
+                        "die Frage wird beim Klick an den Bot geschickt. Mit einer URL wird stattdessen die Seite geöffnet."),
+                    h("div", { className: "stack" }, [
+                        h("div", { className: "control" }, [
+                            h("input", {
+                                placeholder: (widgetDefaults.topics_label && widgetDefaults.topics_label.de) || "Überschrift (DE)",
+                                value: widgetCfg.topics_label.de || "",
+                                onChange: (e) => updateTopicsLabel("de", e.target.value),
+                            }),
+                            h("input", {
+                                placeholder: (widgetDefaults.topics_label && widgetDefaults.topics_label.en) || "Heading (EN)",
+                                value: widgetCfg.topics_label.en || "",
+                                onChange: (e) => updateTopicsLabel("en", e.target.value),
+                            }),
+                        ]),
+
+                        ...widgetCfg.topics.map((topic, idx) => h("div", {
+                            key: `topic-${idx}`,
+                            style: {
+                                border: "1px solid var(--border-subtle)",
+                                borderRadius: 12,
+                                padding: 16,
+                                display: "grid",
+                                gap: 10,
+                            },
+                        }, [
+                            h("div", { key: "head", style: { display: "flex", alignItems: "center", gap: 8 } }, [
+                                h("strong", { style: { flex: 1 } }, `${idx + 1}. ${(topic.label && topic.label.de) || "Neues Thema"}`),
+                                h("button", {
+                                    className: "ghost-btn",
+                                    title: "Nach oben",
+                                    onClick: () => moveTopic(idx, -1),
+                                }, "↑"),
+                                h("button", {
+                                    className: "ghost-btn",
+                                    title: "Nach unten",
+                                    onClick: () => moveTopic(idx, 1),
+                                }, "↓"),
+                                h("button", {
+                                    className: "ghost-btn",
+                                    title: "Entfernen",
+                                    onClick: () => removeTopic(idx),
+                                }, "🗑"),
+                            ]),
+                            h("div", { key: "labels", className: "form-grid" }, [
+                                h("input", {
+                                    placeholder: "Titel DE (z.B. Zimmer & Chalets)",
+                                    value: (topic.label && topic.label.de) || "",
+                                    onChange: (e) => updateTopic(idx, "label.de", e.target.value),
+                                }),
+                                h("input", {
+                                    placeholder: "Titel EN",
+                                    value: (topic.label && topic.label.en) || "",
+                                    onChange: (e) => updateTopic(idx, "label.en", e.target.value),
+                                }),
+                            ]),
+                            h("div", { key: "questions", className: "form-grid" }, [
+                                h("input", {
+                                    placeholder: "Frage DE, die gesendet wird",
+                                    value: (topic.question && topic.question.de) || "",
+                                    onChange: (e) => updateTopic(idx, "question.de", e.target.value),
+                                }),
+                                h("input", {
+                                    placeholder: "Frage EN",
+                                    value: (topic.question && topic.question.en) || "",
+                                    onChange: (e) => updateTopic(idx, "question.en", e.target.value),
+                                }),
+                            ]),
+                            h("div", { key: "extras", style: { display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" } }, [
+                                h("input", {
+                                    style: { flex: 1, minWidth: 220 },
+                                    placeholder: "Optional: URL statt Frage (z.B. Kontaktformular)",
+                                    value: topic.url || "",
+                                    onChange: (e) => updateTopic(idx, "url", e.target.value),
+                                }),
+                                h("label", { style: { display: "flex", alignItems: "center", gap: 8 } }, [
+                                    h("input", {
+                                        type: "checkbox",
+                                        checked: !!topic.highlight,
+                                        onChange: (e) => updateTopic(idx, "highlight", e.target.checked),
+                                    }),
+                                    h("span", { className: "muted" }, "hervorheben"),
+                                ]),
+                            ]),
+                        ])),
+
+                        h("div", { className: "control", style: { justifyContent: "flex-start" } }, [
+                            h("button", { className: "ghost-btn", onClick: addTopic }, "➕ Thema hinzufügen"),
+                        ]),
+
+                        h("div", { style: { fontWeight: 600, marginTop: 12, marginBottom: 4 } }, "Kontaktweg"),
+                        h("p", { className: "muted", style: { marginTop: 0 } },
+                            "Ziel des \"Kontakt aufnehmen\"-Buttons unter den Antworten. " +
+                            "Ohne Angabe fragt der Bot im Chat nach."),
+                        h("div", { className: "form-grid" }, [
+                            h("input", {
+                                key: "curl",
+                                placeholder: "Kontaktseite oder Formular (URL)",
+                                value: (widgetCfg.contact && widgetCfg.contact.url) || "",
+                                onChange: (e) => updateContact("url", e.target.value),
+                            }),
+                            h("input", {
+                                key: "cmail",
+                                placeholder: "E-Mail (Fallback)",
+                                value: (widgetCfg.contact && widgetCfg.contact.email) || "",
+                                onChange: (e) => updateContact("email", e.target.value),
+                            }),
+                            h("input", {
+                                key: "cphone",
+                                placeholder: "Telefon (Fallback)",
+                                value: (widgetCfg.contact && widgetCfg.contact.phone) || "",
+                                onChange: (e) => updateContact("phone", e.target.value),
+                            }),
+                        ]),
+
+                        h("div", { style: { fontWeight: 600, marginTop: 12, marginBottom: 4 } }, "Button-Texte in Antworten (Fallback)"),
+                        h("p", { className: "muted", style: { marginTop: 0 } },
+                            "Die Buttons unter den Antworten werden normalerweise von der KI aus dem " +
+                            "Gesprächsverlauf erzeugt. Diese Texte greifen nur, wenn das fehlschlägt. " +
+                            "Leer lassen für die Standardtexte."),
+                        ...ACTION_LABEL_FIELDS.map((field) => h("div", {
+                            key: `al-${field.key}`,
+                            className: "form-grid",
+                            style: { alignItems: "center" },
+                        }, [
+                            h("div", { key: "meta" }, [
+                                h("div", { style: { fontSize: 13, fontWeight: 600 } }, field.label),
+                                h("div", { className: "muted", style: { fontSize: 12 } }, field.hint),
+                            ]),
+                            h("input", {
+                                key: "de",
+                                placeholder: `${field.label} (DE)`,
+                                value: ((widgetCfg.action_labels || {}).de || {})[field.key] || "",
+                                onChange: (e) => updateActionLabel("de", field.key, e.target.value),
+                            }),
+                            h("input", {
+                                key: "en",
+                                placeholder: "(EN)",
+                                value: ((widgetCfg.action_labels || {}).en || {})[field.key] || "",
+                                onChange: (e) => updateActionLabel("en", field.key, e.target.value),
+                            }),
+                        ])),
+
+                        h("div", { className: "control", style: { justifyContent: "flex-start", marginTop: 8 } }, [
+                            h("button", { onClick: saveWidgetCfg, style: { minWidth: 160 } }, "💾 Speichern"),
+                            widgetCfgStatus ? h("span", { className: "muted" }, widgetCfgStatus) : null,
                         ]),
                     ]),
                 ]),

@@ -1,0 +1,428 @@
+.aicb-admin {
+  color: #1f2328;
+}
+
+.aicb-shell {
+  max-width: 1180px;
+  margin: 24px 20px 48px 0;
+}
+
+.aicb-titlebar {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.aicb-titlebar h1 {
+  margin: 0 0 6px;
+  font-size: 28px;
+  line-height: 1.15;
+  font-weight: 650;
+}
+
+.aicb-titlebar p {
+  margin: 0;
+  color: #646970;
+  font-size: 14px;
+}
+
+.aicb-titlebar code {
+  margin-top: 6px;
+  padding: 7px 9px;
+  border: 1px solid #dcdcde;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.aicb-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+
+.aicb-tabs button {
+  border: 1px solid #c3c4c7;
+  background: #fff;
+  color: #2c3338;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.aicb-tabs button.active {
+  background: #1d2327;
+  border-color: #1d2327;
+  color: #fff;
+}
+
+.aicb-panel {
+  background: #fff;
+  border: 1px solid #dcdcde;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
+}
+
+.aicb-panel + .aicb-panel {
+  margin-top: 16px;
+}
+
+.aicb-panel h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.aicb-panel h3 {
+  margin: 20px 0 10px;
+  font-size: 15px;
+}
+
+.aicb-panel p {
+  color: #646970;
+}
+
+.aicb-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.aicb-panel-head p {
+  margin: 0;
+}
+
+.aicb-busy {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border-left: 4px solid #2271b1;
+  background: #f0f6fc;
+}
+
+.aicb-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.aicb-metrics div {
+  border: 1px solid #dcdcde;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f6f7f7;
+}
+
+.aicb-metrics strong {
+  display: block;
+  font-size: 24px;
+  line-height: 1;
+  margin-bottom: 7px;
+}
+
+.aicb-metrics span {
+  display: block;
+  color: #646970;
+  font-size: 12px;
+}
+
+.aicb-progress {
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e5e5e5;
+  margin: 12px 0;
+}
+
+.aicb-progress i {
+  display: block;
+  height: 100%;
+  background: #2271b1;
+}
+
+.aicb-log {
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 6px;
+  background: #101517;
+  color: #d7f7df;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.aicb-form input[type="text"],
+.aicb-form input[type="password"],
+.aicb-form input[type="number"],
+.aicb-form input:not([type]),
+.aicb-form textarea,
+.aicb-inline input,
+.aicb-memory-item input,
+.aicb-memory-item textarea {
+  width: 100%;
+  max-width: none;
+  border: 1px solid #c3c4c7;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.aicb-field {
+  display: block;
+  margin: 0 0 14px;
+}
+
+.aicb-field > span {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+
+.aicb-field small {
+  display: block;
+  margin-top: 4px;
+  color: #646970;
+}
+
+.aicb-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.aicb-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.aicb-checks,
+.aicb-posttypes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 14px 0;
+}
+
+.aicb-checks label,
+.aicb-posttypes label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.aicb-colors {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.aicb-colors label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #dcdcde;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.aicb-colors label span {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+
+.aicb-colors input {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 30px;
+  padding: 0;
+}
+
+.aicb-row,
+.aicb-faq-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(200px, 1.2fr) minmax(160px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+/* Checkbox und Entfernen-Button duerfen nicht schrumpfen */
+.aicb-row > label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.aicb-faq-row {
+  grid-template-columns: minmax(180px, 0.7fr) minmax(260px, 1.4fr) auto;
+  align-items: start;
+}
+
+.aicb-memory-list {
+  display: grid;
+  gap: 14px;
+}
+
+.aicb-memory-item {
+  border: 1px solid #dcdcde;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfbfc;
+}
+
+.aicb-memory-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.aicb-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.aicb-inline input {
+  min-width: 260px;
+}
+
+.aicb-table {
+  display: grid;
+  border: 1px solid #dcdcde;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.aicb-table > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #dcdcde;
+}
+
+.aicb-table > div:last-child {
+  border-bottom: 0;
+}
+
+.aicb-test-chat {
+  display: grid;
+  gap: 12px;
+}
+
+.aicb-test-messages {
+  min-height: 260px;
+  max-height: 460px;
+  overflow: auto;
+  border: 1px solid #dcdcde;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f6f7f7;
+}
+
+.aicb-test-messages > div {
+  max-width: 72%;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff;
+  white-space: pre-wrap;
+}
+
+.aicb-test-messages > .user {
+  margin-left: auto;
+  background: #dbeafe;
+}
+
+@media (max-width: 900px) {
+  .aicb-titlebar,
+  .aicb-panel-head {
+    display: block;
+  }
+
+  .aicb-metrics,
+  .aicb-grid.two,
+  .aicb-checks,
+  .aicb-posttypes,
+  .aicb-colors,
+  .aicb-row,
+  .aicb-faq-row {
+    grid-template-columns: 1fr;
+  }
+
+  .aicb-row > label {
+    justify-content: flex-start;
+  }
+
+  .aicb-inline {
+    display: grid;
+  }
+}
+
+/* Hinweiszeile in Formularen */
+.aicb-admin .aicb-hint {
+  margin: 0 0 14px;
+  max-width: 760px;
+  color: #6b6558;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* --- Widget-Tab: Formular und Live-Vorschau nebeneinander ------------------ */
+.aicb-admin .aicb-widget-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 460px;
+  gap: 20px;
+  align-items: start;
+}
+
+/* Nebeneinander erst ab genug Breite, sonst untereinander */
+@media (max-width: 1400px) {
+  .aicb-admin .aicb-widget-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.aicb-admin .aicb-widget-layout .aicb-panel + .aicb-panel {
+  margin-top: 0;
+}
+
+.aicb-admin .aicb-preview {
+  position: sticky;
+  top: 46px;
+}
+
+.aicb-admin #aicb-preview-host {
+  display: flex;
+  justify-content: center;
+  padding: 16px;
+  border-radius: 10px;
+  background: #f1ede7;
+}
+
+.aicb-admin .aicb-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 0;
+}
+
+@media (max-width: 782px) {
+  .aicb-admin .aicb-colors {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

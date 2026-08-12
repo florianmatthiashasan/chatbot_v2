@@ -1,0 +1,892 @@
+/*
+ * AI Content Chatbot - Widget
+ * Gleiche Formensprache wie das florianmatthias-Chat-Widget.
+ * Alle Regeln sind auf .aicb-widget-shell gescoped und setzen Eigenschaften
+ * explizit, damit WordPress-Themes nicht in die Darstellung hineinregieren.
+ */
+
+.aicb-widget-shell,
+.aicb-widget-shell *,
+.aicb-widget-shell *::before,
+.aicb-widget-shell *::after {
+  box-sizing: border-box;
+}
+
+.aicb-widget-shell {
+  /* Farben - werden vom Plugin als Inline-Variablen ueberschrieben */
+  --aicb-accent: #8c8875;
+  --aicb-accent-strong: #756f5f;
+  --aicb-status-dot: #4f8a5b;
+  --aicb-launcher-bg: #8c8875;
+  --aicb-bg: #f9f6f1;
+  --aicb-panel: #ffffff;
+  --aicb-text: #2f2a24;
+  --aicb-avatar-bg: #3a352c;
+  --aicb-avatar-fg: #f8f6f1;
+  --aicb-user-bubble: #ece5da;
+  --aicb-bot-bubble: #ffffff;
+  --aicb-composer-bg: #ffffff;
+  --aicb-composer-border: #e8e2d8;
+  --aicb-composer-button-bg: #3a352c;
+  --aicb-composer-button-text: #f8f6f1;
+
+  /* Abgeleitete Toene: Fallback in Grau, sonst aus der Textfarbe gemischt */
+  --aicb-hairline: rgba(47, 42, 36, 0.12);
+  --aicb-hairline-soft: rgba(47, 42, 36, 0.09);
+  --aicb-hover-soft: rgba(47, 42, 36, 0.06);
+  --aicb-muted: rgba(47, 42, 36, 0.55);
+  --aicb-soft: rgba(47, 42, 36, 0.75);
+  --aicb-idle-bg: rgba(47, 42, 36, 0.1);
+  --aicb-idle-fg: rgba(47, 42, 36, 0.5);
+
+  --aicb-radius-lg: 18px;
+  --aicb-radius-md: 14px;
+  --aicb-radius-sm: 10px;
+
+  color: var(--aicb-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  z-index: 999999;
+}
+
+@supports (color: color-mix(in srgb, red 50%, transparent)) {
+  .aicb-widget-shell {
+    --aicb-hairline: color-mix(in srgb, var(--aicb-text) 12%, transparent);
+    --aicb-hairline-soft: color-mix(in srgb, var(--aicb-text) 9%, transparent);
+    --aicb-hover-soft: color-mix(in srgb, var(--aicb-text) 6%, transparent);
+    --aicb-muted: color-mix(in srgb, var(--aicb-text) 55%, transparent);
+    --aicb-soft: color-mix(in srgb, var(--aicb-text) 75%, transparent);
+    --aicb-idle-bg: color-mix(in srgb, var(--aicb-text) 10%, transparent);
+    --aicb-idle-fg: color-mix(in srgb, var(--aicb-text) 50%, transparent);
+  }
+}
+
+.aicb-widget-shell.aicb-mode-floating {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+}
+
+.aicb-widget-shell.aicb-mode-inline {
+  position: relative;
+  width: min(100%, 420px);
+}
+
+/* --- Launcher und Begruessungs-Popup -------------------------------------- */
+.aicb-widget-shell .aicb-launcher {
+  width: 60px;
+  height: 60px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: #fff;
+  background: var(--aicb-launcher-bg);
+  box-shadow: 0 14px 34px rgba(17, 16, 13, 0.22);
+  transition: transform 0.2s ease;
+}
+
+.aicb-widget-shell .aicb-launcher:hover {
+  transform: translateY(-1px) scale(1.04);
+}
+
+.aicb-widget-shell .aicb-launcher-icon {
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.aicb-widget-shell .aicb-launcher-icon svg {
+  width: 32px;
+  height: 32px;
+  display: block;
+}
+
+.aicb-widget-shell.aicb-open .aicb-launcher {
+  display: none;
+}
+
+.aicb-widget-shell .aicb-teaser {
+  position: absolute;
+  right: 0;
+  bottom: 76px;
+  display: none;
+  align-items: flex-start;
+  gap: 12px;
+  width: max-content;
+  max-width: 280px;
+  padding: 14px 16px;
+  border: 1px solid var(--aicb-hairline);
+  border-radius: var(--aicb-radius-lg);
+  background: var(--aicb-panel);
+  color: var(--aicb-text);
+  box-shadow: 0 18px 40px rgba(17, 16, 13, 0.16);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: start;
+  cursor: pointer;
+}
+
+.aicb-widget-shell .aicb-teaser.aicb-teaser-visible {
+  display: flex;
+}
+
+.aicb-widget-shell.aicb-open .aicb-teaser {
+  display: none;
+}
+
+.aicb-widget-shell .aicb-teaser-close {
+  flex-shrink: 0;
+  margin-block: -2px 0;
+  margin-inline: 0 -4px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--aicb-muted);
+  font-size: 18px;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.aicb-widget-shell .aicb-teaser-close:hover {
+  color: var(--aicb-text);
+}
+
+/* --- Panel ---------------------------------------------------------------- */
+.aicb-widget-shell .aicb-panel {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  max-width: calc(100vw - 28px);
+  height: min(660px, calc(100vh - 60px));
+  min-height: 460px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: 1px solid var(--aicb-hairline-soft);
+  border-radius: 20px;
+  overflow: hidden;
+  background: var(--aicb-panel);
+  box-shadow: 0 24px 60px rgba(17, 16, 13, 0.2);
+}
+
+/* display: grid schlaegt sonst das hidden-Attribut - Panel bliebe immer offen */
+.aicb-widget-shell .aicb-panel[hidden] {
+  display: none;
+}
+
+.aicb-widget-shell.aicb-mode-inline .aicb-panel {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  width: 100%;
+  max-width: none;
+  height: 620px;
+  box-shadow: 0 8px 30px rgba(17, 16, 13, 0.1);
+}
+
+/* --- Kopfzeile ------------------------------------------------------------ */
+.aicb-widget-shell .aicb-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-block: 14px;
+  padding-inline: 16px 14px;
+  background: var(--aicb-panel);
+  border-bottom: 1px solid var(--aicb-hairline);
+}
+
+.aicb-widget-shell .aicb-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--aicb-avatar-bg);
+  color: var(--aicb-avatar-fg);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.aicb-widget-shell .aicb-avatar svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.aicb-widget-shell .aicb-meta {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.aicb-widget-shell .aicb-title {
+  margin: 0;
+  padding: 0;
+  color: var(--aicb-text);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aicb-widget-shell .aicb-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  color: var(--aicb-muted);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.aicb-widget-shell .aicb-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--aicb-status-dot);
+}
+
+.aicb-widget-shell .aicb-header-actions {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.aicb-widget-shell .aicb-icon-btn {
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--aicb-muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.aicb-widget-shell .aicb-icon-btn:hover {
+  background: var(--aicb-hover-soft);
+  color: var(--aicb-text);
+}
+
+.aicb-widget-shell .aicb-icon-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* --- Verlauf -------------------------------------------------------------- */
+.aicb-widget-shell .aicb-messages {
+  position: relative;
+  overflow-y: auto;
+  padding: 18px 16px 22px;
+  background: var(--aicb-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--aicb-hairline) transparent;
+}
+
+.aicb-widget-shell .aicb-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.aicb-widget-shell .aicb-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.aicb-widget-shell .aicb-messages::-webkit-scrollbar-thumb {
+  background: var(--aicb-hairline);
+  border-radius: 999px;
+}
+
+.aicb-widget-shell .aicb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.aicb-widget-shell .aicb-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.aicb-widget-shell .aicb-row.aicb-user {
+  justify-content: flex-end;
+}
+
+.aicb-widget-shell .aicb-row-avatar {
+  width: 30px;
+  height: 30px;
+  margin-top: 2px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--aicb-avatar-bg);
+  color: var(--aicb-avatar-fg);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.aicb-widget-shell .aicb-row-avatar svg {
+  width: 21px;
+  height: 21px;
+  display: block;
+}
+
+/* Folgenachrichten desselben Absenders: Platz halten, Avatar ausblenden */
+.aicb-widget-shell .aicb-row.aicb-stacked .aicb-row-avatar {
+  visibility: hidden;
+}
+
+.aicb-widget-shell .aicb-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.aicb-widget-shell .aicb-row.aicb-user .aicb-stack {
+  flex: 0 1 auto;
+  align-items: flex-end;
+  max-width: 85%;
+}
+
+.aicb-widget-shell .aicb-bubble {
+  max-width: 100%;
+  width: fit-content;
+  margin: 0;
+  padding: 12px 15px;
+  border: 1px solid var(--aicb-hairline-soft);
+  border-radius: var(--aicb-radius-lg);
+  background: var(--aicb-bot-bubble);
+  color: var(--aicb-text);
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-shadow: 0 1px 2px rgba(17, 16, 13, 0.04);
+}
+
+.aicb-widget-shell .aicb-row.aicb-user .aicb-bubble {
+  background: var(--aicb-user-bubble);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.aicb-widget-shell .aicb-bubble a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.aicb-widget-shell .aicb-bubble strong {
+  font-weight: 700;
+}
+
+.aicb-widget-shell .aicb-bubble em {
+  font-style: italic;
+}
+
+.aicb-widget-shell .aicb-bubble code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--aicb-hover-soft);
+}
+
+.aicb-widget-shell .aicb-sources {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--aicb-hairline);
+  color: var(--aicb-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.aicb-widget-shell .aicb-sources-label {
+  margin-bottom: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Tipp-Indikator */
+.aicb-widget-shell .aicb-bubble.aicb-typing {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--aicb-muted);
+  font-size: 13px;
+}
+
+.aicb-widget-shell .aicb-typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.aicb-widget-shell .aicb-typing-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: aicbTyping 1.2s infinite ease-in-out;
+}
+
+.aicb-widget-shell .aicb-typing-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.aicb-widget-shell .aicb-typing-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes aicbTyping {
+  0%,
+  60%,
+  100% {
+    opacity: 0.28;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 0.85;
+    transform: translateY(-2px);
+  }
+}
+
+/* --- Startansicht: Themen ------------------------------------------------- */
+.aicb-widget-shell .aicb-topics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.aicb-widget-shell .aicb-topics-label {
+  margin-bottom: 2px;
+  padding-inline-start: 2px;
+  color: var(--aicb-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.aicb-widget-shell .aicb-topics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.aicb-widget-shell .aicb-topic-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--aicb-hairline-soft);
+  border-radius: var(--aicb-radius-md);
+  background: var(--aicb-bot-bubble);
+  color: var(--aicb-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: start;
+  text-decoration: none;
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(17, 16, 13, 0.04);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.aicb-widget-shell .aicb-topic-row:hover {
+  border-color: var(--aicb-accent-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(17, 16, 13, 0.08);
+}
+
+.aicb-widget-shell .aicb-topic-row.aicb-highlight {
+  border-color: var(--aicb-accent-strong);
+  box-shadow: inset 0 0 0 1px var(--aicb-accent-strong), 0 4px 14px rgba(17, 16, 13, 0.07);
+}
+
+.aicb-widget-shell .aicb-chevron {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.4;
+}
+
+/* --- Karten und Aktionen -------------------------------------------------- */
+.aicb-widget-shell .aicb-card {
+  width: min(100%, 330px);
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--aicb-hairline-soft);
+  border-radius: var(--aicb-radius-md);
+  background: var(--aicb-panel);
+  color: var(--aicb-text);
+  box-shadow: 0 4px 14px rgba(17, 16, 13, 0.06);
+}
+
+.aicb-widget-shell .aicb-card-thumb {
+  width: 68px;
+  height: 68px;
+  border-radius: var(--aicb-radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+  background:
+    repeating-linear-gradient(135deg, rgba(140, 136, 117, 0.14) 0 9px, rgba(140, 136, 117, 0.04) 9px 18px),
+    var(--aicb-bg);
+}
+
+.aicb-widget-shell .aicb-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 0;
+}
+
+.aicb-widget-shell .aicb-card-body {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  align-content: start;
+}
+
+.aicb-widget-shell .aicb-card-title {
+  color: var(--aicb-text);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.aicb-widget-shell a.aicb-card-title:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.aicb-widget-shell .aicb-card-desc {
+  margin: 0;
+  color: var(--aicb-soft);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.aicb-widget-shell .aicb-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.aicb-widget-shell .aicb-detail {
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--aicb-bg);
+  color: var(--aicb-soft);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.aicb-widget-shell .aicb-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: min(100%, 330px);
+}
+
+.aicb-widget-shell .aicb-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  margin: 0;
+  padding: 8px 16px;
+  border: 1px solid var(--aicb-hairline-soft);
+  border-radius: 999px;
+  background: var(--aicb-panel);
+  color: var(--aicb-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(17, 16, 13, 0.04);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.aicb-widget-shell .aicb-action.aicb-primary {
+  border-color: transparent;
+  background: var(--aicb-composer-button-bg);
+  color: var(--aicb-composer-button-text);
+}
+
+.aicb-widget-shell .aicb-action:hover {
+  transform: translateY(-1px);
+  border-color: var(--aicb-accent-strong);
+}
+
+.aicb-widget-shell .aicb-action-icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* --- Eingabe und Fusszeile ------------------------------------------------ */
+.aicb-widget-shell .aicb-composer-area {
+  background: var(--aicb-panel);
+  border-top: 1px solid var(--aicb-hairline);
+}
+
+.aicb-widget-shell .aicb-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 12px 14px 8px;
+  padding-block: 6px;
+  padding-inline: 15px 6px;
+  border: 1px solid var(--aicb-composer-border);
+  border-radius: 22px;
+  background: var(--aicb-composer-bg);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.aicb-widget-shell .aicb-composer:focus-within {
+  border-color: var(--aicb-accent-strong);
+  box-shadow: 0 0 0 3px var(--aicb-hover-soft);
+}
+
+.aicb-widget-shell .aicb-composer textarea {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  max-height: 120px;
+  margin: 0;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--aicb-text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+  box-shadow: none;
+}
+
+.aicb-widget-shell .aicb-composer textarea:focus {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+
+.aicb-widget-shell .aicb-composer textarea::placeholder {
+  color: var(--aicb-muted);
+  opacity: 1;
+}
+
+.aicb-widget-shell .aicb-send {
+  width: 38px;
+  height: 38px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  background: var(--aicb-composer-button-bg);
+  color: var(--aicb-composer-button-text);
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.aicb-widget-shell .aicb-send:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+/* Leeres Eingabefeld: Button tritt optisch zurueck */
+.aicb-widget-shell .aicb-send.aicb-idle {
+  background: var(--aicb-idle-bg);
+  color: var(--aicb-idle-fg);
+}
+
+.aicb-widget-shell .aicb-send:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.aicb-widget-shell .aicb-send svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.aicb-widget-shell .aicb-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 18px 12px;
+  color: var(--aicb-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.aicb-widget-shell .aicb-disclaimer {
+  margin: 0;
+  padding: 0;
+  max-width: 68%;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.aicb-widget-shell .aicb-privacy {
+  color: inherit;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.aicb-widget-shell .aicb-privacy:hover {
+  color: var(--aicb-text);
+}
+
+.aicb-widget-shell .aicb-hidden {
+  display: none !important;
+}
+
+@media (max-width: 520px) {
+  .aicb-widget-shell.aicb-mode-floating {
+    right: 14px;
+    bottom: 14px;
+  }
+
+  .aicb-widget-shell .aicb-panel {
+    position: fixed;
+    inset: 12px;
+    width: auto;
+    max-width: none;
+    height: auto;
+    min-height: 0;
+  }
+
+  .aicb-widget-shell .aicb-launcher {
+    width: 56px;
+    height: 56px;
+  }
+
+  .aicb-widget-shell .aicb-topic-row {
+    font-size: 15px;
+    padding: 15px 16px;
+  }
+
+  .aicb-widget-shell .aicb-composer textarea {
+    /* verhindert Auto-Zoom in iOS Safari */
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aicb-widget-shell *,
+  .aicb-widget-shell *::before,
+  .aicb-widget-shell *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- Rechts-nach-links (Arabisch, Hebraeisch ...) -------------------------- */
+.aicb-widget-shell[dir="rtl"].aicb-mode-floating {
+  right: auto;
+  left: 24px;
+}
+
+.aicb-widget-shell[dir="rtl"] .aicb-panel,
+.aicb-widget-shell[dir="rtl"] .aicb-teaser {
+  right: auto;
+  left: 0;
+}
+
+.aicb-widget-shell[dir="rtl"] .aicb-chevron {
+  transform: scaleX(-1);
+}
+
+@media (max-width: 520px) {
+  .aicb-widget-shell[dir="rtl"].aicb-mode-floating {
+    right: auto;
+    left: 14px;
+  }
+}

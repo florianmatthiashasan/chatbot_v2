@@ -7,7 +7,7 @@
   <title>{% block title %}florianmatthias{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Sora:wght@500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&amp;family=Sora:wght@500;600;700&amp;display=swap" rel="stylesheet">
   <style>
     :root {
       --font-body: "Manrope", "Segoe UI", sans-serif;
@@ -799,6 +799,112 @@
       text-underline-offset: 2px;
     }
 
+    .chat-log .message-group {
+      display: grid;
+      gap: 10px;
+      max-width: 88%;
+      margin-right: auto;
+    }
+
+    .chat-log .message-group .bubble {
+      max-width: 100%;
+    }
+
+    .chat-log .rich-card {
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr);
+      gap: 14px;
+      padding: 14px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+    }
+
+    .chat-log .rich-thumb {
+      width: 76px;
+      height: 76px;
+      border-radius: 8px;
+      overflow: hidden;
+      background:
+        repeating-linear-gradient(135deg, rgba(14, 165, 164, 0.12) 0 9px, rgba(14, 165, 164, 0.04) 9px 18px),
+        rgba(255, 255, 255, 0.65);
+    }
+
+    .chat-log .rich-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .chat-log .rich-card-body {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+      align-content: start;
+    }
+
+    .chat-log .rich-card-title {
+      font-size: 15px;
+      font-weight: 800;
+      line-height: 1.25;
+      color: var(--text-primary);
+      overflow-wrap: anywhere;
+    }
+
+    .chat-log .rich-card-desc {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--text-secondary);
+      overflow-wrap: anywhere;
+    }
+
+    .chat-log .rich-detail-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .chat-log .rich-detail {
+      max-width: 100%;
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: rgba(14, 165, 164, 0.08);
+      color: var(--text-secondary);
+      font-size: 11px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+
+    .chat-log .rich-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chat-log .rich-action-btn {
+      min-height: 38px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.94);
+      color: var(--text-primary);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.2;
+      cursor: pointer;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+    }
+
+    .chat-log .rich-action-btn.primary {
+      border-color: transparent;
+      background: var(--accent-gradient);
+      color: white;
+    }
+
     .chat-controls {
       display: flex;
       gap: 12px;
@@ -1091,6 +1197,49 @@
       width: 100%;
       height: 100%;
       border: none;
+    }
+
+    /* Begruessungs-Popup (Vorschau - wird nicht dauerhaft weggeklickt) */
+    #chat-teaser {
+      position: absolute;
+      bottom: 80px;
+      right: 0;
+      display: none;
+      align-items: flex-start;
+      gap: 12px;
+      width: max-content;
+      max-width: 300px;
+      padding: 14px 16px;
+      background: #ffffff;
+      color: #1b1c1e;
+      border: 1px solid rgba(27, 28, 30, 0.10);
+      border-radius: 18px;
+      box-shadow: 0 18px 40px rgba(17, 16, 13, 0.16);
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.35;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    #chat-teaser.visible {
+      display: flex;
+    }
+
+    #chat-teaser-close {
+      flex-shrink: 0;
+      margin: -2px -4px 0 0;
+      padding: 0 2px;
+      border: none;
+      background: transparent;
+      color: rgba(27, 28, 30, 0.45);
+      font-size: 18px;
+      line-height: 1.1;
+      cursor: pointer;
+    }
+
+    #chat-teaser-close:hover {
+      color: #1b1c1e;
     }
 
     @media (max-width: 640px) {
@@ -1472,6 +1621,10 @@
 
   <!-- Floating Chat Widget -->
   <div id="chat-widget">
+    <div id="chat-teaser" role="button" tabindex="0" aria-label="Chat öffnen">
+      <span id="chat-teaser-text"></span>
+      <button type="button" id="chat-teaser-close" aria-label="Hinweis schließen">&times;</button>
+    </div>
     <button id="chat-toggle" aria-label="Chat öffnen/schließen">💬</button>
     <div id="chat-panel">
       <iframe id="chat-embed-frame" src="/embed" title="Chat Embed"
@@ -1508,8 +1661,53 @@
           : "";
         if (event.key === themeKey) applyToggleTheme();
       });
+      // Begruessungs-Popup: in der Vorschau bewusst ohne localStorage,
+      // damit du es beim Bearbeiten immer wieder siehst.
+      const teaser = document.getElementById("chat-teaser");
+      const teaserText = document.getElementById("chat-teaser-text");
+      const teaserClose = document.getElementById("chat-teaser-close");
+      const hideTeaser = () => {
+        if (teaser) teaser.classList.remove("visible");
+      };
+      const openPanel = () => {
+        panel.style.display = "block";
+        hideTeaser();
+      };
+      if (teaser && teaserText) {
+        if (teaserClose) {
+          teaserClose.addEventListener("click", (event) => {
+            event.stopPropagation();
+            hideTeaser();
+          });
+        }
+        teaser.addEventListener("click", openPanel);
+        const slug = (window.AuthState && window.AuthState.getBotSlug && window.AuthState.getBotSlug()) || "";
+        if (slug) {
+          const params = new URLSearchParams({ bot_slug: slug, lang: (document.documentElement.lang || "de") });
+          fetch(`/api/public/widget_config?${params.toString()}`, {
+            headers: (window.AuthState && window.AuthState.buildHeaders) ? window.AuthState.buildHeaders() : {},
+          })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((cfg) => {
+              const greeting = (cfg && cfg.greeting) || null;
+              if (!greeting || greeting.enabled === false || !greeting.text) return;
+              const delay = typeof greeting.delay_ms === "number" ? greeting.delay_ms : 1200;
+              window.setTimeout(() => {
+                if (panel.style.display === "block") return;
+                teaserText.textContent = greeting.text;
+                teaser.classList.add("visible");
+              }, Math.max(0, delay));
+            })
+            .catch(() => {});
+        }
+      }
+
       toggle.addEventListener("click", () => {
-        panel.style.display = panel.style.display === "block" ? "none" : "block";
+        if (panel.style.display === "block") {
+          panel.style.display = "none";
+        } else {
+          openPanel();
+        }
       });
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") panel.style.display = "none";

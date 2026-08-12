@@ -8,6 +8,7 @@
 <script>
     const { useEffect, useState, useRef } = React;
     const h = React.createElement;
+    const CHAT_HISTORY_LIMIT = 16;
 
     const Icon = ({ name }) => {
         const props = { viewBox: "0 0 24 24", "aria-hidden": "true" };
@@ -187,6 +188,78 @@
         return nodes;
     }
 
+    function safeActionUrl(value) {
+        const url = (value || "").toString().trim();
+        return /^(https?:\/\/|mailto:|tel:|\/)/i.test(url) ? url : "";
+    }
+
+    function hasRichPayload(rich) {
+        return !!(
+            rich &&
+            ((Array.isArray(rich.cards) && rich.cards.length) ||
+                (Array.isArray(rich.actions) && rich.actions.length))
+        );
+    }
+
+    function renderRichCard(card, key) {
+        const imageUrl = safeActionUrl(card.image_url);
+        const titleNode = card.url && safeActionUrl(card.url)
+            ? h("a", { className: "rich-card-title", href: card.url, target: "_blank", rel: "noreferrer" }, card.title || "")
+            : h("div", { className: "rich-card-title" }, card.title || "");
+        return h("div", { key, className: "rich-card" }, [
+            h("div", { key: "thumb", className: "rich-thumb" }, imageUrl
+                ? h("img", { src: imageUrl, alt: card.title || "", loading: "lazy" })
+                : null),
+            h("div", { key: "body", className: "rich-card-body" }, [
+                titleNode,
+                card.description ? h("p", { key: "desc", className: "rich-card-desc" }, card.description) : null,
+                Array.isArray(card.details) && card.details.length
+                    ? h("div", { key: "details", className: "rich-detail-list" },
+                        card.details.slice(0, 3).map((detail, idx) =>
+                            h("span", { key: idx, className: "rich-detail" }, detail)
+                        )
+                    )
+                    : null,
+            ]),
+        ]);
+    }
+
+    function renderRichPayload(rich, onAction, disabled) {
+        if (!hasRichPayload(rich)) return null;
+        const cards = (rich.cards || []).slice(0, 2).map((card, idx) => renderRichCard(card, `card-${idx}`));
+        const actions = (rich.actions || []).slice(0, 3);
+        return [
+            ...cards,
+            actions.length ? h("div", { key: "actions", className: "rich-actions" },
+                actions.map((action, idx) =>
+                    h("button", {
+                        key: idx,
+                        type: "button",
+                        className: "rich-action-btn" + (idx === 0 ? " primary" : ""),
+                        disabled,
+                        onClick: () => onAction(action),
+                    }, action.label || action.question || "Auswählen")
+                )
+            ) : null,
+        ];
+    }
+
+    function renderChatMessage(message, idx, onAction, disabled) {
+        const bubble = h("div", {
+            key: "bubble",
+            className: "bubble " + message.sender + (message.placeholderId ? " typing" : "")
+        }, renderMessageContent(message.text, { plain: message.sender === "user" }));
+
+        if (message.sender === "user" || !hasRichPayload(message.rich)) {
+            return React.cloneElement(bubble, { key: idx });
+        }
+
+        return h("div", { key: idx, className: "message-group bot" }, [
+            bubble,
+            ...renderRichPayload(message.rich, onAction, disabled).filter(Boolean),
+        ]);
+    }
+
     function Sidebar({ activePage }) {
         const navItems = [
             { href: "/dashboard", label: "Dashboard", id: "dashboard", icon: "dashboard" },
@@ -257,7 +330,7 @@
             return id;
         };
 
-        const finishPlaceholder = (id, finalText) => {
+        const finishPlaceholder = (id, finalText, rich) => {
             (placeholderTimers.current[id] || []).forEach(clearTimeout);
             delete placeholderTimers.current[id];
             setChatMessages(prev => {
@@ -265,28 +338,32 @@
                 const updated = prev.map(m => {
                     if (m.placeholderId === id) {
                         found = true;
-                        return { sender: "bot", text: finalText };
+                        return { sender: "bot", text: finalText, rich };
                     }
                     return m;
                 });
                 if (!found && finalText) {
-                    updated.push({ sender: "bot", text: finalText });
+                    updated.push({ sender: "bot", text: finalText, rich });
                 }
                 return updated;
             });
         };
 
-        const handleSend = async () => {
-            const text = question.trim();
+        const handleSend = async (textOverride) => {
+            const text = (textOverride !== undefined ? textOverride : question).trim();
             if (!text) return;
+            if (chatLoading) return;
             if (!botSlug.trim()) {
                 setChatMessages((prev) => [...prev, { sender: "bot", text: "⚠️ Bitte zuerst einen Bot-Slug auf dem Dashboard eintragen." }]);
                 return;
             }
-            const historyPayload = chatMessages.slice(-8).map((m) => ({
-                role: m.sender === "bot" ? "assistant" : "user",
-                content: m.text,
-            }));
+            const historyPayload = chatMessages
+                .filter((m) => !m.placeholderId)
+                .slice(-CHAT_HISTORY_LIMIT)
+                .map((m) => ({
+                    role: m.sender === "bot" ? "assistant" : "user",
+                    content: m.text,
+                }));
             setChatMessages(prev => [...prev, { sender: "user", text }]);
             setQuestion("");
             setChatLoading(true);
@@ -299,13 +376,24 @@
                 });
                 const data = await res.json();
                 const reply = res.ok ? data.answer : data.error || "Fehler beim Chat.";
-                finishPlaceholder(placeholderId, reply);
+                finishPlaceholder(placeholderId, reply, res.ok ? data.rich : null);
             } catch (err) {
                 console.error(err);
                 finishPlaceholder(placeholderId, "❌ Netzwerkfehler oder Backend nicht erreichbar.");
             } finally {
                 setChatLoading(false);
             }
+        };
+
+        const handleRichAction = (action) => {
+            if (!action) return;
+            const url = safeActionUrl(action.url);
+            if (action.type === "link" && url) {
+                window.open(url, "_blank", "noopener,noreferrer");
+                return;
+            }
+            const nextQuestion = (action.question || action.label || "").toString().trim();
+            if (nextQuestion) handleSend(nextQuestion);
         };
 
         if (!AuthState.isLoggedIn()) {
@@ -329,12 +417,7 @@
                     h("h2", null, [h("span", { className: "card-icon" }, "💬"), "Konversation"]),
                     h("div", { className: "chat-box", style: { marginTop: 16 } }, [
                         h("div", { ref: chatLogRef, className: "chat-log" },
-                            chatMessages.map((m, idx) =>
-                                h("div", {
-                                    key: idx,
-                                    className: "bubble " + m.sender + (m.placeholderId ? " typing" : "")
-                                }, renderMessageContent(m.text, { plain: m.sender === "user" }))
-                            )
+                            chatMessages.map((m, idx) => renderChatMessage(m, idx, handleRichAction, chatLoading))
                         ),
                         h("div", { className: "chat-controls" }, [
                             h("textarea", {
@@ -349,7 +432,8 @@
                                 },
                             }),
                             h("button", {
-                                onClick: handleSend,
+                                // Ohne Wrapper landet das Click-Event als textOverride in handleSend.
+                                onClick: () => handleSend(),
                                 disabled: chatLoading,
                                 style: { minWidth: 120 }
                             }, h("span", null, chatLoading ? "⏳ ..." : "📤 Senden")),

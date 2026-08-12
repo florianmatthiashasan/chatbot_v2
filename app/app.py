@@ -56,6 +56,10 @@ try:
     RAG_MAX_CONTEXT_CHARS = max(5000, int(os.environ.get("RAG_MAX_CONTEXT_CHARS", "22000")))
 except Exception:
     RAG_MAX_CONTEXT_CHARS = 22000
+try:
+    CHAT_HISTORY_LIMIT = max(8, int(os.environ.get("CHAT_HISTORY_LIMIT", "16")))
+except Exception:
+    CHAT_HISTORY_LIMIT = 16
 DEFAULT_SYSTEM_PROMPT = (
     "Du bist ein Assistent, der NUR auf Basis des folgenden Website-Kontexts antwortet. "
     "Wenn etwas nicht im Kontext steht, sage ehrlich, dass du es nicht weißt. "
@@ -266,6 +270,170 @@ def _normalize_chat_lang(value: Any) -> Optional[str]:
         "english": "en",
     }
     return mapping.get(token)
+
+
+# ---------------------------------------------------------------------------
+# Sprache der Nutzernachricht erkennen
+# Die Antwort muss der Sprache der Frage folgen, nicht der Sprache der Website.
+# Das Modell alleine entscheidet das unzuverlaessig, sobald Verlauf und Kontext
+# in einer anderen Sprache stehen - deshalb wird die Sprache hier bestimmt und
+# dem Modell vorgegeben.
+# ---------------------------------------------------------------------------
+
+LANG_NAMES = {
+    "de": "German (Deutsch)",
+    "en": "English",
+    "tr": "Turkish (Türkçe)",
+    "ar": "Arabic (العربية)",
+    "fr": "French (Français)",
+    "es": "Spanish (Español)",
+    "it": "Italian (Italiano)",
+    "nl": "Dutch (Nederlands)",
+    "pt": "Portuguese (Português)",
+    "pl": "Polish (Polski)",
+    "ru": "Russian (Русский)",
+    "el": "Greek (Ελληνικά)",
+    "he": "Hebrew (עברית)",
+    "uk": "Ukrainian (Українська)",
+    "zh": "Chinese (中文)",
+    "ja": "Japanese (日本語)",
+    "ko": "Korean (한국어)",
+    "hi": "Hindi (हिन्दी)",
+}
+
+# Schriftsysteme sind eindeutig - wer arabisch schreibt, will arabisch lesen.
+_SCRIPT_PATTERNS = [
+    ("ar", re.compile(r"[؀-ۿݐ-ݿ]")),
+    ("he", re.compile(r"[֐-׿]")),
+    ("ru", re.compile(r"[Ѐ-ӿ]")),
+    ("el", re.compile(r"[Ͱ-Ͽ]")),
+    ("hi", re.compile(r"[ऀ-ॿ]")),
+    ("ja", re.compile(r"[぀-ヿ]")),
+    ("ko", re.compile(r"[가-힯]")),
+    ("zh", re.compile(r"[一-鿿]")),
+]
+
+# Haeufige Funktionswoerter je Sprache. Kurze Nachrichten entscheidet oft ein
+# einziges Wort ("merhaba", "danke"), deshalb sind Gruesse mit aufgenommen.
+_LANG_STOPWORDS = {
+    "de": {
+        "der", "die", "das", "und", "ist", "sind", "ich", "du", "ihr", "wir", "nicht", "wie", "was",
+        "wo", "wann", "warum", "kann", "koennen", "können", "habt", "haben", "hat", "mit", "von",
+        "für", "fuer", "auf", "eine", "einen", "mehr", "gibt", "es", "bitte", "danke", "hallo",
+        "guten", "tag", "servus", "moin", "preis", "preise", "kosten", "zimmer", "oeffnungszeiten",
+    },
+    "en": {
+        "the", "is", "are", "how", "what", "where", "when", "why", "can", "you", "your", "we", "do",
+        "does", "have", "has", "please", "thanks", "thank", "yes", "no", "with", "for", "about",
+        "more", "there", "hi", "hello", "hey", "price", "prices", "cost", "opening", "hours", "i",
+    },
+    "tr": {
+        "bir", "ve", "için", "icin", "nasıl", "nasil", "var", "yok", "ne", "nerede", "zaman",
+        "merhaba", "selam", "teşekkür", "tesekkur", "evet", "hayır", "hayir", "ile", "daha", "çok",
+        "cok", "mı", "mi", "mu", "mü", "fiyat", "fiyatlar", "oda", "saat",
+    },
+    "fr": {
+        "le", "la", "les", "des", "une", "est", "vous", "je", "nous", "comment", "quel", "quelle",
+        "pour", "avec", "merci", "oui", "non", "plus", "bonjour", "salut", "prix", "ouvert",
+    },
+    "es": {
+        "el", "los", "las", "una", "es", "usted", "como", "cómo", "cual", "cuál", "para", "con",
+        "gracias", "sí", "hola", "más", "mas", "donde", "dónde", "precio", "precios", "habitación",
+    },
+    "it": {
+        "il", "lo", "gli", "le", "una", "come", "quale", "per", "con", "grazie", "sì", "più",
+        "piu", "dove", "ciao", "buongiorno", "prezzo", "prezzi", "camera", "sono",
+    },
+    "nl": {
+        "het", "een", "hoe", "wat", "waar", "kan", "jij", "jullie", "met", "voor", "dank",
+        "bedankt", "ja", "nee", "meer", "hallo", "prijs", "prijzen", "kamer", "openingstijden",
+    },
+    "pt": {
+        "os", "as", "uma", "é", "como", "qual", "para", "com", "obrigado", "obrigada", "sim",
+        "não", "nao", "mais", "onde", "olá", "ola", "preço", "preco", "quarto", "horário",
+    },
+    "pl": {
+        "jak", "co", "gdzie", "czy", "nie", "tak", "dla", "jest", "są", "sa", "dziękuję",
+        "dziekuje", "cześć", "czesc", "dzień", "dobry", "cena", "ceny", "pokój", "pokoj",
+    },
+}
+
+# Diakritika als Zusatzsignal - "ı" und "ğ" gibt es praktisch nur im Tuerkischen.
+_LANG_HINT_CHARS = {
+    "tr": "ışğİ",
+    "de": "äöüß",
+    "fr": "éèêàçù",
+    "es": "ñ¿¡",
+    "pt": "ãõ",
+    "pl": "ąćęłńśźż",
+    "it": "àòè",
+}
+
+
+def _detect_message_lang(text: str) -> str:
+    """ISO-Code der Nachrichtensprache. Leerer String = nicht sicher erkennbar."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+
+    letters = [ch for ch in raw if ch.isalpha()]
+    if letters:
+        for code, pattern in _SCRIPT_PATTERNS:
+            hits = sum(1 for ch in letters if pattern.match(ch))
+            if hits and hits / len(letters) >= 0.3:
+                return code
+
+    lowered = raw.lower()
+    tokens = set(re.findall(r"[a-zA-Zäöüßàáâãçèéêëìíîïñòóôõùúûüışğđłżźćęąń]+", lowered))
+    if not tokens:
+        return ""
+
+    scores: Dict[str, float] = {}
+    for code, words in _LANG_STOPWORDS.items():
+        score = float(len(tokens & words))
+        for char in _LANG_HINT_CHARS.get(code, ""):
+            if char in lowered:
+                score += 1.5
+        if score:
+            scores[code] = score
+
+    if not scores:
+        return ""
+    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    best_code, best_score = ranked[0]
+    runner_up = ranked[1][1] if len(ranked) > 1 else 0.0
+    # Bei Gleichstand lieber nichts sagen als falsch raten.
+    if best_score < 1 or best_score - runner_up < 0.5:
+        return ""
+    return best_code
+
+
+# Kurzer Hinweis, wenn der Index nichts hergibt - in der Sprache der Frage.
+NO_INFO_TEXTS = {
+    "de": "Dazu habe ich leider keine Informationen im Index gefunden.",
+    "en": "I could not find relevant information for this question.",
+    "tr": "Bu konuda dizinde uygun bir bilgi bulamadım.",
+    "ar": "لم أجد معلومات مناسبة حول هذا الموضوع.",
+    "fr": "Je n'ai pas trouvé d'informations à ce sujet.",
+    "es": "No he encontrado información sobre esto.",
+    "it": "Non ho trovato informazioni al riguardo.",
+    "nl": "Ik heb hierover geen informatie gevonden.",
+    "pt": "Não encontrei informações sobre isso.",
+    "pl": "Nie znalazłem informacji na ten temat.",
+    "ru": "К сожалению, я не нашёл информации по этому вопросу.",
+    "el": "Δεν βρήκα σχετικές πληροφορίες.",
+    "he": "לא מצאתי מידע בנושא הזה.",
+    "uk": "На жаль, я не знайшов інформації з цього питання.",
+    "zh": "抱歉，我没有找到相关信息。",
+    "ja": "申し訳ありませんが、該当する情報が見つかりませんでした。",
+    "ko": "죄송합니다. 관련 정보를 찾지 못했습니다.",
+    "hi": "मुझे इस बारे में जानकारी नहीं मिली।",
+}
+
+
+def _lang_display_name(code: str) -> str:
+    key = (code or "").strip().lower()
+    return LANG_NAMES.get(key, key.upper() or "the user's language")
 
 
 def _extract_chat_lang(payload: Optional[Dict[str, Any]]) -> str:
@@ -627,6 +795,250 @@ def _write_prompt(ctx: BotContext, prompt_text: str) -> str:
     ctx.prompt_path.write_text(text + "\n", encoding="utf-8")
     _invalidate_bot_cache(ctx)
     return text
+
+
+# ---------------------------------------------------------------------------
+# Widget-Inhalte pro Bot (widget_config.json neben prompt.txt)
+# Begruessungs-Popup + Schnellaktionen der Startansicht.
+# Keine Texte fest im Code: die Defaults sind neutral und pro Bot ueberschreibbar.
+# ---------------------------------------------------------------------------
+
+WIDGET_LANGS = ("de", "en")
+
+DEFAULT_GREETING_TEXT = {
+    "de": "Hallo! Wie darf ich dir weiterhelfen?",
+    "en": "Hi! How can I help you?",
+}
+
+DEFAULT_TOPICS_LABEL = {
+    "de": "Beliebte Themen",
+    "en": "Popular topics",
+}
+
+# Button-Texte der Antwort-Aktionen. Neutrale Defaults, pro Bot ueberschreibbar.
+DEFAULT_ACTION_LABELS = {
+    "de": {
+        "view": "Ansehen",
+        "inquiry": "Anfrage senden",
+        "details": "Mehr Details",
+        "next_step": "Nächster Schritt",
+        "contact": "Kontakt aufnehmen",
+    },
+    "en": {
+        "view": "View",
+        "inquiry": "Send inquiry",
+        "details": "More details",
+        "next_step": "Next step",
+        "contact": "Get in touch",
+    },
+}
+
+# Neutrale Ersatzbezeichnung, wenn ein Kartentitel als Betreff untauglich ist.
+DEFAULT_ACTION_SUBJECT = {"de": "dieses Angebot", "en": "this offer"}
+
+
+def _widget_config_path(ctx: BotContext) -> Path:
+    """widget_config.json liegt im Bot-Basisordner - wie prompt.txt."""
+    return ctx.prompt_path.parent / "widget_config.json"
+
+
+def _default_widget_config() -> Dict[str, Any]:
+    return {
+        "greeting": {
+            "enabled": True,
+            "text": {lang: "" for lang in WIDGET_LANGS},
+            "delay_ms": 1200,
+        },
+        "topics_label": {lang: "" for lang in WIDGET_LANGS},
+        "topics": [],
+        # Kontaktweg und Button-Texte pro Bot - damit nichts davon im Code steht.
+        "contact": {"url": "", "email": "", "phone": ""},
+        "action_labels": {lang: {} for lang in WIDGET_LANGS},
+    }
+
+
+def _widget_lang_map(value: Any) -> Dict[str, str]:
+    """Akzeptiert {"de": "...", "en": "..."} oder einen Text fuer alle Sprachen."""
+    result = {lang: "" for lang in WIDGET_LANGS}
+    if isinstance(value, dict):
+        for lang in WIDGET_LANGS:
+            raw = value.get(lang)
+            if raw is not None:
+                result[lang] = str(raw).strip()
+    elif isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned:
+            result = {lang: cleaned for lang in WIDGET_LANGS}
+    return result
+
+
+def _normalize_widget_config(raw: Any) -> Dict[str, Any]:
+    config = _default_widget_config()
+    if not isinstance(raw, dict):
+        return config
+
+    greeting_raw = raw.get("greeting") if isinstance(raw.get("greeting"), dict) else {}
+    try:
+        delay_ms = int(greeting_raw.get("delay_ms", 1200))
+    except Exception:
+        delay_ms = 1200
+    config["greeting"] = {
+        "enabled": _as_bool(greeting_raw.get("enabled"), True),
+        "text": _widget_lang_map(greeting_raw.get("text")),
+        "delay_ms": max(0, min(delay_ms, 20000)),
+    }
+
+    config["topics_label"] = _widget_lang_map(raw.get("topics_label"))
+
+    topics: List[Dict[str, Any]] = []
+    for item in raw.get("topics") or []:
+        if not isinstance(item, dict):
+            continue
+        label = _widget_lang_map(item.get("label"))
+        question = _widget_lang_map(item.get("question"))
+        url = str(item.get("url") or "").strip()
+        if url and not url.lower().startswith(("http://", "https://", "mailto:", "tel:", "/")):
+            url = ""
+        if not any(label.values()) and not any(question.values()):
+            continue
+        topics.append(
+            {
+                "label": label,
+                "question": question,
+                "url": url,
+                "highlight": _as_bool(item.get("highlight"), False),
+            }
+        )
+    config["topics"] = topics[:10]
+
+    contact_raw = raw.get("contact") if isinstance(raw.get("contact"), dict) else {}
+    contact_url = str(contact_raw.get("url") or "").strip()
+    if contact_url and not _is_safe_frontend_url(contact_url):
+        contact_url = ""
+    config["contact"] = {
+        "url": contact_url,
+        "email": str(contact_raw.get("email") or "").strip(),
+        "phone": str(contact_raw.get("phone") or "").strip(),
+    }
+
+    labels_raw = raw.get("action_labels") if isinstance(raw.get("action_labels"), dict) else {}
+    action_labels: Dict[str, Dict[str, str]] = {}
+    for lang in WIDGET_LANGS:
+        entry = labels_raw.get(lang) if isinstance(labels_raw.get(lang), dict) else {}
+        action_labels[lang] = {
+            key: str(entry.get(key) or "").strip()
+            for key in DEFAULT_ACTION_LABELS["de"]
+            if str(entry.get(key) or "").strip()
+        }
+    config["action_labels"] = action_labels
+    return config
+
+
+def _read_widget_config(ctx: BotContext) -> Dict[str, Any]:
+    path = _widget_config_path(ctx)
+    if path.exists():
+        try:
+            return _normalize_widget_config(json.loads(path.read_text(encoding="utf-8")))
+        except Exception as exc:
+            print(f"Konnte widget_config.json nicht lesen ({path}):", exc)
+    return _default_widget_config()
+
+
+def _write_widget_config(ctx: BotContext, raw: Any) -> Dict[str, Any]:
+    config = _normalize_widget_config(raw)
+    path = _widget_config_path(ctx)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+    return config
+
+
+def _pick_lang_value(mapping: Dict[str, str], lang: str, fallback: str = "") -> str:
+    """Sprache -> andere Sprache -> Fallback."""
+    lang_key = _normalize_chat_lang(lang) or "de"
+    value = (mapping or {}).get(lang_key) or ""
+    if value:
+        return value
+    for other in WIDGET_LANGS:
+        alt = (mapping or {}).get(other) or ""
+        if alt:
+            return alt
+    return fallback
+
+
+def _resolve_widget_config(ctx: BotContext, lang: str) -> Dict[str, Any]:
+    """Fertig aufgeloeste Widget-Inhalte fuer eine Sprache (fuer Widget + Snippet)."""
+    lang_key = _normalize_chat_lang(lang) or "de"
+    config = _read_widget_config(ctx)
+    greeting = config.get("greeting") or {}
+
+    topics = []
+    for topic in config.get("topics") or []:
+        label = _pick_lang_value(topic.get("label") or {}, lang_key)
+        question = _pick_lang_value(topic.get("question") or {}, lang_key)
+        if not label and not question:
+            continue
+        topics.append(
+            {
+                "label": label or question,
+                "question": question or label,
+                "url": topic.get("url") or "",
+                "highlight": bool(topic.get("highlight")),
+            }
+        )
+
+    return {
+        "lang": lang_key,
+        "greeting": {
+            "enabled": bool(greeting.get("enabled", True)),
+            "text": _pick_lang_value(
+                greeting.get("text") or {}, lang_key, DEFAULT_GREETING_TEXT.get(lang_key, "")
+            ),
+            "delay_ms": int(greeting.get("delay_ms", 1200) or 0),
+        },
+        "topics_label": _pick_lang_value(
+            config.get("topics_label") or {}, lang_key, DEFAULT_TOPICS_LABEL.get(lang_key, "")
+        ),
+        "topics": topics,
+        "contact": dict(config.get("contact") or {}),
+        "action_labels": _resolved_action_labels(config, lang_key),
+    }
+
+
+def _resolved_action_labels(config: Dict[str, Any], lang: str) -> Dict[str, str]:
+    """Button-Texte: Bot-Konfiguration -> andere Sprache -> neutrale Defaults."""
+    lang_key = _normalize_chat_lang(lang) or "de"
+    defaults = DEFAULT_ACTION_LABELS.get(lang_key) or DEFAULT_ACTION_LABELS["de"]
+    configured = (config.get("action_labels") or {}) if isinstance(config.get("action_labels"), dict) else {}
+    labels: Dict[str, str] = {}
+    for key, fallback in defaults.items():
+        value = str((configured.get(lang_key) or {}).get(key) or "").strip()
+        if not value:
+            for other in WIDGET_LANGS:
+                value = str((configured.get(other) or {}).get(key) or "").strip()
+                if value:
+                    break
+        labels[key] = value or fallback
+    return labels
+
+
+def _contact_action_url(contact: Dict[str, Any]) -> str:
+    """Kontaktweg aus der Bot-Konfiguration, sonst ENV-Default. Nie aus dem Antworttext."""
+    data = contact or {}
+    url = str(data.get("url") or "").strip()
+    if _is_safe_frontend_url(url):
+        return url
+    email = str(data.get("email") or "").strip() or (CONTACT_EMAIL or "")
+    phone = str(data.get("phone") or "").strip() or (CONTACT_PHONE or "")
+    env_url = (CONTACT_URL or "").strip()
+    if _is_safe_frontend_url(env_url):
+        return env_url
+    if email:
+        return f"mailto:{email}"
+    if phone:
+        digits = re.sub(r"[^0-9+]", "", phone)
+        if digits:
+            return f"tel:{digits}"
+    return ""
 
 
 def _pricing_for_model(model: str) -> Dict[str, float]:
@@ -995,7 +1407,7 @@ def build_rag(ctx: BotContext):
             else:
                 cleaned.append(HumanMessage(content=content))
 
-        return cleaned[-8:]
+        return cleaned[-CHAT_HISTORY_LIMIT:]
 
     def _rewrite_question(question: str, history_msgs: List[Any]) -> str:
         """Mache eine Folgefrage eigenständig verständlich, falls History vorhanden."""
@@ -1117,7 +1529,15 @@ def build_rag(ctx: BotContext):
         question: str,
         history: Iterable[Dict[str, Any]] | None = None,
         lang: Optional[str] = None,
+        docs_out: Optional[List[Any]] = None,
     ) -> str:
+        """Beantwortet die Frage.
+
+        `docs_out` ist optional eine Liste des Aufrufers, in die die tatsaechlich
+        verwendeten Kontext-Dokumente geschrieben werden. Bewusst als Parameter
+        (nicht als Attribut am Funktionsobjekt), damit parallele Requests sich
+        nicht gegenseitig ueberschreiben.
+        """
         lang_key = _normalize_chat_lang(lang) or "de"
         unknown_source_label = "unknown source" if lang_key == "en" else "unbekannte Quelle"
         source_label_name = "Source" if lang_key == "en" else "Quelle"
@@ -1129,22 +1549,30 @@ def build_rag(ctx: BotContext):
         effective_question = _rewrite_question(question, history_msgs)
         docs = _collect_context_docs(question, effective_question)
 
+        # Sprache der aktuellen Nachricht schlaegt die Sprache der Website.
+        # Ohne diese Vorgabe folgt das Modell dem deutschen Kontext und Verlauf.
+        target_lang = _detect_message_lang(question) or lang_key
+        target_name = _lang_display_name(target_lang)
+
         if not docs:
-            if lang_key == "en":
+            if target_lang == "de":
+                return (
+                    "Dazu habe ich leider keine Informationen im Index gefunden. "
+                    f"Bitte melde dich {_contact_hint('de')}."
+                )
+            if target_lang == "en":
                 return (
                     "I could not find relevant information in the index for this question. "
-                    f"Please contact us {_contact_hint(lang_key)}."
+                    f"Please contact us {_contact_hint('en')}."
                 )
-            return (
-                "Dazu habe ich leider keine Informationen im Index gefunden. "
-                f"Bitte melde dich {_contact_hint(lang_key)}."
-            )
+            return NO_INFO_TEXTS.get(target_lang, NO_INFO_TEXTS["en"])
 
         context_parts = []
         context_chars = 0
+        used_docs: List[Any] = []
         for i, d in enumerate(docs, start=1):
             meta = d.metadata or {}
-            src = meta.get("source", unknown_source_label)
+            src = _public_url_from_meta(meta) or meta.get("filename") or unknown_source_label
             title = meta.get("title") or meta.get("filename") or ""
             section = meta.get("section") or ""
             content = (d.page_content or "").strip()
@@ -1166,6 +1594,10 @@ def build_rag(ctx: BotContext):
 
             context_parts.append(entry)
             context_chars += len(entry)
+            used_docs.append(d)
+
+        if docs_out is not None:
+            docs_out.extend(used_docs)
 
         if not context_parts:
             if lang_key == "en":
@@ -1186,23 +1618,20 @@ def build_rag(ctx: BotContext):
                 "Answer quality:\n"
                 "- Be concrete and avoid shallow answers.\n"
                 "- If the context contains details (e.g. contacts, names, numbers, conditions, steps), mention them explicitly.\n"
+                "- For rooms, products, properties, offers, services, or concrete items: mention the name, the most relevant facts, and a useful next step instead of only saying that it exists.\n"
                 "- Do not use generic filler if concrete facts are available.\n"
                 "- If something is missing, clearly state what is not present in the context.\n"
                 "- If you answered the question, do NOT append any notice that you do not know something.\n"
                 "- Sentences like \"I do not know based on the website context.\" are only allowed when the "
                 "entire answer consists of that notice."
             )
-            language_rule = (
-                "MANDATORY LANGUAGE RULE:\n"
-                "- Respond exclusively in English.\n"
-                "- Do not answer in German.\n"
-                "- Keep the full answer in English, except unavoidable proper nouns or quoted source text."
-            )
+
         else:
             quality_rules = (
                 "Antwortqualität:\n"
                 "- Antworte konkret und nicht oberflächlich.\n"
                 "- Wenn im Kontext Details stehen (z.B. Kontaktwege, Namen, Zahlen, Bedingungen, Schritte), nenne sie explizit.\n"
+                "- Bei Zimmern, Produkten, Immobilien, Angeboten, Leistungen oder konkreten Objekten: nenne Name, wichtigste Merkmale und einen sinnvollen nächsten Schritt, statt nur zu sagen, dass es etwas gibt.\n"
                 "- Gib keine vagen Allgemeinplätze, wenn konkrete Angaben vorhanden sind.\n"
                 "- Wenn etwas fehlt, sage klar, was im Kontext nicht enthalten ist.\n"
                 "- Wenn du die Frage inhaltlich beantwortet hast, hänge KEINEN Hinweis an, dass du etwas "
@@ -1210,12 +1639,7 @@ def build_rag(ctx: BotContext):
                 "- Sätze wie \"Das weiß ich auf Basis des Website-Kontexts nicht.\" sind nur erlaubt, wenn die "
                 "gesamte Antwort ausschließlich aus diesem Hinweis besteht."
             )
-            language_rule = (
-                "VERBINDLICHE SPRACHREGEL:\n"
-                "- Antworte ausschließlich auf Deutsch.\n"
-                "- Antworte nicht auf Englisch.\n"
-                "- Halte die gesamte Antwort auf Deutsch, außer unvermeidbaren Eigennamen oder direkten Zitaten."
-            )
+
 
         history_text = _history_as_text(history_msgs) if history_msgs else ""
         if lang_key == "en":
@@ -1255,14 +1679,26 @@ def build_rag(ctx: BotContext):
                 "Antwort:"
             )
 
+        # Die Sprachregel steht bewusst am Ende des System-Prompts und wird nach
+        # der Frage wiederholt: so gewinnt sie gegen Kontext und Verlauf.
+        language_rule = (
+            "MANDATORY LANGUAGE RULE - this overrides every other instruction:\n"
+            f"- The user's current message is written in {target_name}.\n"
+            f"- Write the ENTIRE answer in {target_name}.\n"
+            "- Never switch to another language, not even if the context, the system prompt or the "
+            "previous chat history are written in a different language.\n"
+            "- Translate facts from the context into that language. Keep proper nouns, product "
+            "names, prices, URLs and e-mail addresses unchanged."
+        )
         messages = [
             SystemMessage(content=f"{system_prompt}\n\n{quality_rules}\n\n{language_rule}"),
-            HumanMessage(content=user_prompt),
+            HumanMessage(content=f"{user_prompt}\n\n(Reminder: answer in {target_name}.)"),
         ]
         resp = llm.invoke(messages)
         content = resp.content if isinstance(resp.content, str) else str(resp.content)
         return _strip_redundant_unknown_notice(content)
 
+    answer._vectordb = vectordb
     return answer
 
 
@@ -1414,6 +1850,1090 @@ def _write_summary(ctx: BotContext, summary: List[Dict[str, Any]]) -> None:
         json.dumps(summary, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+_RICH_ITEM_INTENT_RE = re.compile(
+    r"\b("
+    r"zimmer|room|rooms|suite|suiten|chalet|chalets|apartment|apartments|"
+    r"wohnung|wohnungen|immobilie|immobilien|haus|haeuser|häuser|projekt|projekte|"
+    r"produkt|produkte|product|products|angebot|angebote|service|leistung|leistungen|"
+    r"tarif|tarife|paket|pakete|sauna|pool|terrasse|balkon|garten|kaufen|buchen|"
+    r"anfragen|anfrage|besichtigung|verfügbarkeit|verfuegbarkeit"
+    r")\b",
+    re.IGNORECASE,
+)
+_RICH_UNANSWERED_RE = re.compile(
+    r"(keine\s+(?:informationen|angaben)|nicht\s+(?:gefunden|enthalten|vorhanden)|"
+    r"could\s+not\s+find|no\s+relevant\s+information|not\s+available)",
+    re.IGNORECASE,
+)
+# Breitere Erkennung von "dazu gibt es keine Auskunft". Absichtlich mit
+# Einschub-Toleranz ("keine SPEZIFISCHEN Informationen"), daran scheiterte
+# die enge Variante oben.
+# Die Lueckenmuster nutzen [\w./-]+ statt \w+, sonst brechen zusammengesetzte
+# Woerter wie "Website-Kontexts" die Erkennung.
+_NO_INFO_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"kein(?:e|erlei)?(?:\s+[\w./-]+){0,2}\s+(?:informationen|angaben|auskunft|details|hinweise|daten)",
+        r"nicht(?:\s+[\w./-]+){0,3}\s+(?:enthalten|vorhanden|verfuegbar|verfügbar|angegeben|genannt|gefunden|beschrieben|aufgefuehrt|aufgeführt|hinterlegt)",
+        r"wei(?:ß|ss)\s+ich(?:\s+[\w./-]+){0,6}?\s+nicht",
+        r"(?:kann|koennen|können)\s+ich(?:\s+[\w./-]+){0,3}?\s+(?:keine|nichts|dazu\s+nichts)",
+        r"liegen\s+(?:mir\s+)?(?:leider\s+)?keine",
+        r"(?:no|not\s+any)(?:\s+[\w./-]+){0,2}\s+(?:information|details|data)",
+        r"(?:is|are|was|were)(?:\s+[\w./-]+){0,2}\s+not\s+(?:available|included|contained|described|mentioned|specified|provided)",
+        r"(?:cannot|can\s?not|can't|unable\s+to)\s+(?:provide|give|answer|find|determine|say)",
+        r"(?:do(?:es)?\s+not|don'?t)\s+(?:know|contain|include|have)",
+        r"could\s+not\s+find",
+    )
+]
+# Meta-/Kontaktfragen bekommen nie eine Produktkarte.
+_RICH_META_QUESTION_RE = re.compile(
+    r"(erreich|kontakt|telefon|telefonnummer|e-?mail|oeffnungszeit|öffnungszeit|adresse|anfahrt|"
+    r"impressum|datenschutz|wer\s+(?:ist|sind|seid)|was\s+ist\s+(?:die|der|das)\b|"
+    r"who\s+(?:is|are)|what\s+is\s+(?:the|a)\b|opening\s+hours|address|reach\s+you|contact)",
+    re.IGNORECASE,
+)
+_RICH_IMAGE_RE = re.compile(r"!\[[^\]]*\]\((https?://[^\s)]+)\)")
+_RICH_LINK_RE = re.compile(r"\[([^\]\n]+)\]((?:\((?:https?://|mailto:|tel:|/)[^\s)]+\)))")
+_RICH_FACT_LABEL_RE = re.compile(
+    r"^(adresse|standort|größe|groesse|fläche|flaeche|wohnfläche|wohnflaeche|"
+    r"wohnnutzfläche|wohnnutzflaeche|zimmer|personen|preis|kosten|tarif|"
+    r"immobilien|tops|baubeginn|status|verfügbarkeit|verfuegbarkeit|"
+    r"kontakt|telefon|e-mail|email|leistung)\b",
+    re.IGNORECASE,
+)
+_RICH_SKIP_TITLES = {
+    "datenschutz",
+    "impressum",
+    "barrierefreiheit",
+    "barrierefreiheitserklaerung",
+    "agb",
+    "kontakt",
+    "ueberuns",
+    "überuns",
+    "aboutus",
+    "about",
+    "news",
+    "newsbeitraege",
+    "presse",
+    "blog",
+    "karriere",
+    "jobs",
+    "cookies",
+    "cookierichtlinie",
+}
+
+
+def _is_safe_frontend_url(value: Any) -> bool:
+    url = str(value or "").strip()
+    if not url:
+        return False
+    lowered = url.lower()
+    return lowered.startswith(("http://", "https://", "mailto:", "tel:", "/"))
+
+
+def _public_url_from_meta(meta: Dict[str, Any]) -> str:
+    for key in ("url", "requested_url", "final_url", "source_url", "canonical_url"):
+        value = str((meta or {}).get(key) or "").strip()
+        if _is_safe_frontend_url(value):
+            return value
+    source = str((meta or {}).get("source") or "").strip()
+    if source.lower().startswith(("http://", "https://", "mailto:", "tel:")):
+        return source
+    return ""
+
+
+def _strip_frontmatter_text(text: str) -> str:
+    source = text or ""
+    if not source.startswith("---"):
+        return source
+    parts = source.split("---", 2)
+    return parts[2].strip() if len(parts) >= 3 else source
+
+
+def _parse_frontmatter_text(text: str) -> Dict[str, str]:
+    source = text or ""
+    if not source.startswith("---"):
+        return {}
+    parts = source.split("---", 2)
+    if len(parts) < 3:
+        return {}
+    result: Dict[str, str] = {}
+    for line in parts[1].splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        if key:
+            result[key] = value.strip()
+    return result
+
+
+def _clean_card_title(value: str) -> str:
+    title = re.sub(r"\s+", " ", value or "").strip(" #*-_")
+    title = re.sub(r"^(Document|Section)\s*:\s*", "", title, flags=re.IGNORECASE).strip()
+    if not title or title.upper() == "N/A":
+        return ""
+    parts = [p.strip() for p in re.split(r"\s+(?:[-|]|\u2013|\u2014)\s+", title) if p.strip()]
+    if len(parts) > 1 and len(parts[0]) >= 4:
+        return parts[0][:90]
+    return title[:90]
+
+
+def _markdown_to_plain(text: str) -> str:
+    plain = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text or "")
+    plain = re.sub(r"\[([^\]\n]+)\]\((?:https?://|mailto:|tel:|/)[^)]+\)", r"\1", plain)
+    plain = re.sub(r"^\s{0,3}#{1,6}\s*", "", plain, flags=re.MULTILINE)
+    plain = re.sub(r"[*_`>]+", "", plain)
+    plain = re.sub(r"^\s*[-+]\s+", "", plain, flags=re.MULTILINE)
+    plain = re.sub(r"\b(?:Document|Section):\s*", "", plain)
+    return re.sub(r"\s+", " ", plain).strip()
+
+
+def _limit_text(text: str, limit: int = 180) -> str:
+    clean = re.sub(r"\s+", " ", text or "").strip()
+    if len(clean) <= limit:
+        return clean
+    truncated = clean[: limit + 1].rsplit(" ", 1)[0].strip()
+    return (truncated or clean[:limit].strip()) + "..."
+
+
+def _extract_first_heading(markdown: str) -> str:
+    for line in _strip_frontmatter_text(markdown).splitlines():
+        match = re.match(r"^\s{0,3}#\s+(.+?)\s*$", line)
+        if match:
+            return _clean_card_title(match.group(1))
+    return ""
+
+
+_IMAGE_SKIP_RE = re.compile(
+    r"(placeholder|platzhalter|logo|favicon|sprite|icon[-_.]|avatar|dummy|blank|pixel|spacer|"
+    r"\.svg($|\?)|loading|lazy[-_])",
+    re.IGNORECASE,
+)
+_IMAGE_SIZE_RE = re.compile(r"-(\d{2,4})x(\d{2,4})\.(?:jpe?g|png|webp|avif)$", re.IGNORECASE)
+
+
+def _is_usable_card_image(url: str) -> bool:
+    """Filtert Platzhalter, Logos und Mini-Thumbnails aus."""
+    if not _is_safe_frontend_url(url):
+        return False
+    if _IMAGE_SKIP_RE.search(url):
+        return False
+    size = _IMAGE_SIZE_RE.search(url.split("?", 1)[0])
+    if size:
+        width, height = int(size.group(1)), int(size.group(2))
+        if width < 300 or height < 150:
+            return False
+    return True
+
+
+def _extract_first_image_url(markdown: str) -> str:
+    """Bevorzugt ein Inhaltsbild nach der ersten H1 statt des Seiten-Banners."""
+    body = _strip_frontmatter_text(markdown or "")
+    heading = re.search(r"^\s{0,3}#\s+.+$", body, re.MULTILINE)
+    heading_pos = heading.end() if heading else 0
+
+    after_heading = ""
+    before_heading = ""
+    for match in _RICH_IMAGE_RE.finditer(body):
+        url = match.group(1).strip()
+        if not _is_usable_card_image(url):
+            continue
+        if match.start() >= heading_pos:
+            after_heading = after_heading or url
+            break
+        before_heading = before_heading or url
+    return after_heading or before_heading
+
+
+def _extract_first_action_url(text: str) -> str:
+    match = re.search(r"\b(https?://[^\s<>)]+|mailto:[^\s<>)]+|tel:[^\s<>)]+)", text or "", re.IGNORECASE)
+    if not match:
+        return ""
+    url = match.group(1).rstrip(".,;:")
+    return url if _is_safe_frontend_url(url) else ""
+
+
+def _resolve_doc_source_path(ctx: BotContext, doc: Any) -> Optional[Path]:
+    meta = getattr(doc, "metadata", {}) or {}
+    candidates = [meta.get("source"), meta.get("filename")]
+    allowed_roots = [ctx.docs_dir.resolve(), ctx.upload_dir.resolve(), ctx.prompt_path.parent.resolve()]
+
+    for candidate in candidates:
+        raw = str(candidate or "").strip()
+        if not raw or raw.lower().startswith(("http://", "https://", "mailto:", "tel:", "upload:")):
+            continue
+        path = Path(raw)
+        if not path.is_absolute():
+            path = ctx.docs_dir / raw
+        try:
+            resolved = path.resolve()
+            if not resolved.is_file():
+                continue
+            if any(resolved == root or resolved.is_relative_to(root) for root in allowed_roots):
+                return resolved
+        except Exception:
+            continue
+    return None
+
+
+def _read_doc_markdown(ctx: BotContext, doc: Any) -> str:
+    source_path = _resolve_doc_source_path(ctx, doc)
+    if source_path:
+        try:
+            return source_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            print(f"Konnte Rich-Reply-Quelle nicht lesen ({source_path}):", exc)
+    return getattr(doc, "page_content", "") or ""
+
+
+def _doc_public_url(ctx: BotContext, doc: Any, markdown: str) -> str:
+    meta = getattr(doc, "metadata", {}) or {}
+    url = _public_url_from_meta(meta)
+    if url:
+        return url
+    fm = _parse_frontmatter_text(markdown)
+    for key in ("requested_url", "url", "final_url", "source"):
+        value = (fm.get(key) or "").strip()
+        if _is_safe_frontend_url(value):
+            return value
+    return ""
+
+
+def _extract_card_teaser(markdown: str, title: str) -> str:
+    body = _strip_frontmatter_text(markdown)
+    title_key = _markdown_to_plain(title).lower()
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("---") or line.startswith("!"):
+            continue
+        if re.search(r"\[[^\]]+\]\([^)]+\)", line) and len(_markdown_to_plain(line)) < 35:
+            continue
+        plain = _markdown_to_plain(line).strip(" -*")
+        if not plain or len(plain) < 45:
+            continue
+        lowered = plain.lower()
+        if lowered == title_key or lowered in {"beschreibung", "daten & fakten", "galerie", "kontakt"}:
+            continue
+        if lowered.startswith(("startseite", "immobilien", "produkte", "teilen")):
+            continue
+        return _limit_text(plain, 190)
+    return ""
+
+
+def _is_no_info_sentence(sentence: str) -> bool:
+    """True, wenn der Satz nur sagt, dass etwas nicht bekannt/enthalten ist."""
+    clean = (sentence or "").strip()
+    if not clean:
+        return False
+    return any(pattern.search(clean) for pattern in _NO_INFO_PATTERNS)
+
+
+def _substantive_answer_text(answer: str) -> str:
+    """Antworttext ohne 'keine Auskunft'-Saetze - Basis fuer Karte und Fallback."""
+    body, _ = _split_sources_tail(answer or "")
+    plain = _markdown_to_plain(body)
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(plain) if s.strip()]
+    kept = [s for s in sentences if not _is_no_info_sentence(s)]
+    return " ".join(kept).strip()
+
+
+def _answer_card_description(answer: str) -> str:
+    """Kartenbeschreibung: nie der 'keine Informationen'-Hinweis."""
+    plain = _substantive_answer_text(answer)
+    plain = re.sub(r"^(ja|yes)[,:\s]+", "", plain, flags=re.IGNORECASE).strip()
+    if len(plain) < 40:
+        # Zu wenig Substanz -> Aufrufer nutzt den Seiten-Teaser.
+        return ""
+    return _limit_text(plain, 180)
+
+
+_DETAIL_JUNK_RE = re.compile(
+    r"(xml\s+version|encoding\s*=|<\s*svg|viewbox|xmlns|https?://|www\.|@media|function\s*\(|"
+    r"\{|\}|&[a-z]+;|base64)",
+    re.IGNORECASE,
+)
+
+
+def _is_junk_detail_value(value: str) -> bool:
+    """Werte aus Scraping-Resten (SVG/XML/CSS) gehoeren nicht in die Fakten-Chips."""
+    clean = (value or "").strip()
+    if not clean or _DETAIL_JUNK_RE.search(clean):
+        return True
+    if not re.search(r"[A-Za-zÄÖÜäöüß0-9]", clean):
+        return True
+    # Reine Label-Zeilen ("Kontakt:") sind kein Wert.
+    return clean.endswith(":")
+
+
+def _extract_card_details(markdown: str, answer: str) -> List[str]:
+    details: List[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        clean = _limit_text(_markdown_to_plain(value), 82).strip(" ,.;")
+        key = clean.lower()
+        if clean and key not in seen and len(clean) >= 3:
+            seen.add(key)
+            details.append(clean)
+
+    lines = [
+        _markdown_to_plain(line).strip(" :")
+        for line in _strip_frontmatter_text(markdown or "").splitlines()
+        if _markdown_to_plain(line).strip(" :")
+    ]
+    for idx, line in enumerate(lines[:-1]):
+        value = lines[idx + 1]
+        if _RICH_FACT_LABEL_RE.search(line) and 1 <= len(value) <= 80:
+            lowered_pair = f"{line} {value}".lower()
+            if line.lower() in {"immobilien", "produkte"} and not re.search(r"\d", value):
+                continue
+            if any(skip in lowered_pair for skip in ("startseite", "blick in die anlage", "teilen")):
+                continue
+            if _is_junk_detail_value(value):
+                continue
+            # Label darf sich nicht im Wert wiederholen ("Kontakt: Kontakt & Stoerdienst").
+            if line.lower() in value.lower() or value.lower() in line.lower():
+                continue
+            add(f"{line}: {value}")
+        if len(details) >= 3:
+            return details
+
+    compact = _markdown_to_plain((answer or "") + "\n" + (markdown or ""))
+    for pattern in (
+        r"\b\d+(?:[.,]\d+)?\s*(?:m²|qm|m2)\b",
+        r"\b\d+\s*(?:Zimmer|Rooms|Tops|Immobilien|Wohnungen)\b",
+        r"\b(?:Sauna|Pool|Terrasse|Balkon|Garten|Kachelofen|Tiefgarage|Conciergeservice)\b",
+    ):
+        for match in re.finditer(pattern, compact, re.IGNORECASE):
+            add(match.group(0))
+            if len(details) >= 3:
+                return details
+    return details
+
+
+def _looks_unanswered(answer: str) -> bool:
+    """True, wenn die Antwort im Kern keine inhaltliche Auskunft gibt.
+
+    Nicht die Zeichenlaenge entscheidet, sondern was nach Abzug der
+    'keine Auskunft'-Saetze uebrig bleibt.
+    """
+    body, _ = _split_sources_tail(answer or "")
+    plain = _markdown_to_plain(body).strip()
+    if not plain:
+        return True
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(plain) if s.strip()]
+    if not any(_is_no_info_sentence(s) for s in sentences):
+        return False
+    # 40 Zeichen: eine kurze, echte Teilantwort ("Wir bieten Strom, Wärme,
+    # Wasser und Kälte an.") soll weiterhin als Antwort gelten.
+    return len(_substantive_answer_text(answer)) < 40
+
+
+_INTENT_STOPWORDS = {
+    "welche", "welcher", "welches", "eine", "einen", "einem", "eines", "habt", "haben", "bietet",
+    "bieten", "gibt", "kann", "kannst", "koennen", "können", "moechte", "möchte", "bitte", "mehr",
+    "details", "informationen", "infos", "aufnehmen", "senden", "ueber", "über", "unsere", "unser",
+    "euer", "eure", "which", "what", "have", "offer", "about", "would", "like", "more", "please",
+    "send", "your", "does", "there", "bereich", "bereiche", "thema", "themen", "frage", "fragen",
+}
+
+
+def _is_object_like_title(title: str) -> bool:
+    """True, wenn der Titel wie eine Bezeichnung wirkt und nicht wie ein Satz.
+
+    Marketing-H1 wie "Frische Kühle fürs Büro und daheim." sind als Kartentitel
+    und als Betreff unbrauchbar.
+    """
+    clean = re.sub(r"\s+", " ", (title or "").strip())
+    if not clean:
+        return False
+    if clean.endswith((".", "!", "?")):
+        return False
+    return len(clean.split()) <= 6
+
+
+def _item_intent_keywords(widget_cfg: Optional[Dict[str, Any]]) -> set:
+    """Zusatz-Stichwoerter aus den konfigurierten Themen des Bots.
+
+    Die eingebaute Wortliste (_RICH_ITEM_INTENT_RE) ist auf Hotel/Immobilien
+    zugeschnitten. Ein Energieversorger hat "Kälte" oder "Fernwärme" - solche
+    Begriffe kommen aus der Bot-Konfiguration, nicht aus dem Code.
+    """
+    keywords: set = set()
+    for topic in ((widget_cfg or {}).get("topics") or []):
+        if not isinstance(topic, dict):
+            continue
+        for value in (topic.get("label"), topic.get("question")):
+            for token in re.findall(r"[a-zA-ZäöüÄÖÜß]{4,}", str(value or "").lower()):
+                if token in _INTENT_STOPWORDS or _RICH_META_QUESTION_RE.search(token):
+                    continue
+                keywords.add(token)
+    return keywords
+
+
+def _has_rich_item_intent(
+    question: str,
+    answer: str,
+    docs: List[Any],
+    extra_keywords: Optional[set] = None,
+) -> bool:
+    """Karte nur bei echtem Objekt-/Angebotsbezug in der FRAGE.
+
+    Bewusst nicht geprueft werden:
+    - der Antworttext (dort steht fast immer irgendein Treffer wie
+      "Leistungen", wodurch auch "Wer ist die Hall AG?" eine Karte bekam)
+    - Dokumenttitel bei langen Fragen (ein Titel wie "Service auf Knopfdruck"
+      loeste bei "Wie kann ich euch erreichen?" eine Produktkarte aus)
+
+    Meta-Fragen (Kontakt, Adresse, "wer ist") bekommen nie eine Karte.
+    """
+    q = question or ""
+    if _RICH_META_QUESTION_RE.search(q):
+        return False
+    if _RICH_ITEM_INTENT_RE.search(q):
+        return True
+    if extra_keywords:
+        q_tokens = set(re.findall(r"[a-zA-ZäöüÄÖÜß]{4,}", q.lower()))
+        if q_tokens & extra_keywords:
+            return True
+    # Sehr kurze Folgefragen ("und die Chalets?") haben oft keinen eigenen
+    # Bezug - dann entscheiden die Titel der Antwortquellen.
+    if len(q.split()) <= 4:
+        doc_text = " ".join(
+            str((getattr(doc, "metadata", {}) or {}).get(key) or "")
+            for doc in docs[:3]
+            for key in ("title", "section", "filename")
+        )
+        return bool(_RICH_ITEM_INTENT_RE.search(doc_text))
+    return False
+
+
+def _rich_query_text(question: str, history: Any) -> str:
+    parts: List[str] = []
+    if isinstance(history, list):
+        for item in history[-6:]:
+            if not isinstance(item, dict):
+                continue
+            content = str(item.get("content") or item.get("text") or "").strip()
+            if content:
+                parts.append(content)
+    parts.append(question or "")
+    return _limit_text(" ".join(parts), 1400)
+
+
+def _rich_docs_for_question(ctx: BotContext, rag: Any, question: str, history: Any) -> List[Any]:
+    vectordb = getattr(rag, "_vectordb", None)
+    if vectordb is None:
+        try:
+            vectordb = _load_vectordb(ctx)
+        except Exception as exc:
+            print("Rich-Reply-Retrieval nicht verfügbar:", exc)
+            return []
+    try:
+        return vectordb.similarity_search(_rich_query_text(question, history), k=4)
+    except Exception as exc:
+        print("Rich-Reply-Retrieval fehlgeschlagen:", exc)
+        return []
+
+
+def _doc_skip_keys(meta: Dict[str, Any], title: str) -> List[str]:
+    """Vergleichsschluessel aus Titel, Dateiname und URL-Segment."""
+    keys = [title]
+    filename = str(meta.get("filename") or meta.get("source") or "")
+    if filename:
+        keys.append(Path(filename).stem)
+    url = _public_url_from_meta(meta)
+    if url:
+        keys.append(url.rstrip("/").rsplit("/", 1)[-1])
+    return [re.sub(r"[^a-z0-9äöüß]+", "", key.lower()) for key in keys if key]
+
+
+def _pick_rich_doc(docs: List[Any], question: str) -> Optional[Any]:
+    """Waehlt das Dokument, das am besten zur Frage passt.
+
+    Vorher wurde einfach das erste nicht-ausgeschlossene Dokument genommen -
+    bei "Welche Immobilien bietet ihr an?" landete so die "Über uns"-Seite auf
+    der Karte. Jetzt zaehlt die Wortueberlappung mit der Frage; die
+    Trefferreihenfolge des Retrievals entscheidet nur bei Gleichstand.
+    """
+    if not docs:
+        return None
+
+    wants_contact = bool(re.search(r"\b(kontakt|telefon|e-mail|email|contact)\b", question or "", re.IGNORECASE))
+    question_tokens = set(re.findall(r"[a-zA-ZäöüÄÖÜß0-9]{4,}", (question or "").lower()))
+
+    best_doc = None
+    best_score = None
+    for idx, doc in enumerate(docs):
+        meta = getattr(doc, "metadata", {}) or {}
+        title = _clean_card_title(str(meta.get("section") or meta.get("title") or meta.get("filename") or ""))
+        skip_keys = _doc_skip_keys(meta, title)
+        if not wants_contact and any(key in _RICH_SKIP_TITLES for key in skip_keys):
+            continue
+
+        url = _public_url_from_meta(meta)
+        haystack = " ".join(
+            [title, str(meta.get("title") or ""), str(meta.get("section") or ""), str(meta.get("filename") or ""), url]
+        ).lower()
+        haystack_tokens = set(re.findall(r"[a-zA-ZäöüÄÖÜß0-9]{4,}", haystack))
+        overlap = len(question_tokens & haystack_tokens)
+        # Ueberlappung dominiert, dann Vollstaendigkeit, dann Retrieval-Rang.
+        score = (overlap, 1 if (title and url) else 0, -idx)
+        if best_score is None or score > best_score:
+            best_score = score
+            best_doc = doc
+
+    # Wenn alle Kandidaten ausgeschlossen sind, gibt es bewusst keine Karte
+    # (statt einer Datenschutz-/Impressum-Karte).
+    return best_doc
+
+
+def _build_rich_card(ctx: BotContext, doc: Any, answer: str, lang: str) -> Optional[Dict[str, Any]]:
+    markdown = _read_doc_markdown(ctx, doc)
+    meta = getattr(doc, "metadata", {}) or {}
+    # Kandidaten in Prioritaet: H1, Abschnitt, Seitentitel. Genommen wird der
+    # erste, der wie eine Bezeichnung aussieht - Slogans ("Frische Kühle fürs
+    # Büro und daheim.") und FAQ-Fragen als Abschnittstitel sind unbrauchbar.
+    title_candidates = [
+        _extract_first_heading(markdown),
+        _clean_card_title(str(meta.get("section") or "")),
+        _clean_card_title(str(meta.get("title") or meta.get("filename") or "")),
+    ]
+    title = next(
+        (candidate for candidate in title_candidates if _is_object_like_title(candidate)),
+        next((candidate for candidate in title_candidates if candidate), ""),
+    )
+    description = _answer_card_description(answer) or _extract_card_teaser(markdown, title)
+    url = _doc_public_url(ctx, doc, markdown)
+    image_url = _extract_first_image_url(markdown)
+    details = _extract_card_details(markdown, answer)
+
+    if not title and not description:
+        return None
+
+    card: Dict[str, Any] = {
+        "title": title or ("Recommendation" if _normalize_chat_lang(lang) == "en" else "Empfehlung"),
+        "description": description,
+        "details": details,
+    }
+    if url:
+        card["url"] = url
+    if image_url:
+        card["image_url"] = image_url
+    return card
+
+
+def _append_action(actions: List[Dict[str, str]], label: str, question: str = "", url: str = "") -> None:
+    clean_label = _limit_text(label, 34).strip()
+    if not clean_label:
+        return
+    action: Dict[str, str] = {"label": clean_label}
+    if url and _is_safe_frontend_url(url):
+        action["type"] = "link"
+        action["url"] = url
+    elif question:
+        action["type"] = "question"
+        action["question"] = question.strip()
+    else:
+        return
+    if any(existing.get("label", "").lower() == clean_label.lower() for existing in actions):
+        return
+    actions.append(action)
+
+
+def _action_subject(title: str, lang: str) -> str:
+    """Kartentitel als Betreff nutzbar machen.
+
+    Viele H1 sind Saetze ("Wir sind fuer Sie da.") - als Betreff ergeben sie
+    Unsinn. Dann lieber eine neutrale Bezeichnung.
+    """
+    lang_key = _normalize_chat_lang(lang) or "de"
+    fallback = DEFAULT_ACTION_SUBJECT.get(lang_key, DEFAULT_ACTION_SUBJECT["de"])
+    clean = re.sub(r"\s+", " ", (title or "").strip())
+    if not clean:
+        return fallback
+    if not _is_object_like_title(clean):
+        return fallback
+    return clean.rstrip(" .!?,;:") or fallback
+
+
+def _build_quick_actions(
+    card: Optional[Dict[str, Any]],
+    question: str,
+    answer: str,
+    lang: str,
+    widget_cfg: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
+    lang_key = _normalize_chat_lang(lang) or "de"
+    cfg = widget_cfg or {}
+    labels = cfg.get("action_labels") or DEFAULT_ACTION_LABELS.get(lang_key) or DEFAULT_ACTION_LABELS["de"]
+    actions: List[Dict[str, str]] = []
+
+    if card:
+        subject = _action_subject(card.get("title") or "", lang_key)
+        card_url = card.get("url") or ""
+        if card_url:
+            _append_action(actions, labels.get("view", ""), url=card_url)
+        if lang_key == "en":
+            _append_action(
+                actions,
+                labels.get("inquiry", ""),
+                f"I would like to send an inquiry about {subject}. What information do you need?",
+            )
+            _append_action(actions, labels.get("details", ""), f"What details are available about {subject}?")
+        else:
+            _append_action(
+                actions,
+                labels.get("inquiry", ""),
+                f"Ich möchte eine Anfrage senden. Es geht um: {subject}. Welche Informationen brauchst du?",
+            )
+            _append_action(actions, labels.get("details", ""), f"Welche Details kannst du zu \"{subject}\" nennen?")
+        return actions[:3]
+
+    # Kontaktweg kommt aus der Bot-Konfiguration bzw. ENV - nie aus dem
+    # Antworttext (dort steht meist nur eine Quellen-URL).
+    contact_url = _contact_action_url(cfg.get("contact") or {})
+    if lang_key == "en":
+        _append_action(actions, labels.get("details", ""), "Can you explain that in more detail?")
+        _append_action(actions, labels.get("next_step", ""), "What is the next step?")
+        if contact_url:
+            _append_action(actions, labels.get("contact", ""), url=contact_url)
+        else:
+            _append_action(actions, labels.get("contact", ""), "How can I contact someone about this?")
+    else:
+        _append_action(actions, labels.get("details", ""), "Kannst du das genauer erklären?")
+        _append_action(actions, labels.get("next_step", ""), "Was ist der nächste Schritt?")
+        if contact_url:
+            _append_action(actions, labels.get("contact", ""), url=contact_url)
+        else:
+            _append_action(actions, labels.get("contact", ""), "Wie kann ich dazu Kontakt aufnehmen?")
+    return actions[:3]
+
+
+# ---------------------------------------------------------------------------
+# Antwort-Buttons per KI
+# Labels und Folgefragen entstehen aus dem laufenden Gespraech statt aus festen
+# Textbausteinen. Die konfigurierten action_labels bleiben als Fallback, wenn
+# der Call scheitert, zu lange braucht oder unbrauchbares JSON liefert.
+# ---------------------------------------------------------------------------
+
+AI_ACTIONS_LABEL_MAX = 34
+AI_ACTIONS_QUESTION_MAX = 180
+AI_ACTIONS_MAX = 3
+try:
+    AI_ACTIONS_TIMEOUT = float(os.environ.get("RAG_AI_ACTIONS_TIMEOUT", "8"))
+except Exception:
+    AI_ACTIONS_TIMEOUT = 8.0
+
+_AI_ACTIONS_SYSTEM = (
+    "Du erzeugst die Klick-Buttons, die unter der Antwort eines Chat-Assistenten "
+    "auf einer Firmen-Website stehen.\n"
+    "Regeln:\n"
+    "- Zwei bis drei Buttons, die genau zu diesem Gespraech passen und den Nutzer "
+    "einen Schritt weiterbringen.\n"
+    "- Jeder Button ist ein konkreter naechster Schritt, keine Wiederholung der Antwort "
+    "und keine Frage, die schon beantwortet wurde.\n"
+    "- label: hoechstens 30 Zeichen, keine Emojis, kein Satzzeichen am Ende.\n"
+    "- question: die Nachricht, die beim Klick als Nutzerfrage gesendet wird - ein "
+    "vollstaendiger, eigenstaendig verstaendlicher Satz.\n"
+    "- SPRACHE, wichtigste Regel: Schreibe ALLE Werte von label und question ausschliesslich in der "
+    "Sprache, die im Kontext unter \"Sprache der Buttons\" steht. Diese Anweisung ist auf Deutsch, "
+    "das aendert daran nichts; auch aeltere Nachrichten im Gespraech aendern daran nichts. Ist die "
+    "Sprache Tuerkisch, heisst ein Anruf-Button \"Ara\" und nicht \"Anrufen\".\n"
+    "- Erfinde nichts: keine Preise, Zahlen, Angebote, Telefonnummern oder URLs, "
+    "die nicht im Kontext stehen.\n"
+    "- Aktions-Buttons (type \"link\") nur mit einem target, das der Kontext unter "
+    "\"Verfuegbare Aktionen\" auflistet: \"card\", \"contact\", \"phone\" oder \"email\". "
+    "Die Adresse setzt das System, du gibst nie eine URL oder Nummer aus. "
+    "Bei type \"link\" kein question angeben.\n"
+    "- Wenn \"phone\" verfuegbar ist und Anrufen im Gespraech sinnvoll waere (Beratung, "
+    "Termin, dringende Rueckfrage, Kontaktwunsch), setze einen Anruf-Button an die erste "
+    "Stelle; das Label nennt das Anrufen.\n"
+    "- Hoechstens zwei Aktions-Buttons, jedes target nur einmal.\n"
+    "- Mindestens ein Button muss type \"question\" sein und unter den Aktions-Buttons stehen.\n"
+    "- Keine zwei Buttons mit gleicher Bedeutung.\n"
+    "Antworte ausschliesslich mit JSON in dieser Form: "
+    "{\"actions\": [{\"label\": \"...\", \"type\": \"question\", \"question\": \"...\"}]}"
+)
+
+# Telefonnummern nur mit klarem Signal erkennen. Ohne Signal landen Preise,
+# Jahreszahlen, Uhrzeiten und Groessenangaben im Anruf-Button.
+_PHONE_CANDIDATE_RE = re.compile(r"\+?\d[\d\s().\-/]{5,}\d")
+_PHONE_CUE_RE = re.compile(
+    r"(?:tel|telefon|telephone|fon|phone|mobil|handy|hotline|zentrale|durchwahl|festnetz|"
+    r"whatsapp|anruf|anrufen|rufen sie(?: uns)?(?: gerne)? an|ruf(?:e)? uns an|"
+    r"erreichbar|erreichst|erreichen sie|erreichen|call us|call|nummer|number)"
+    r"[^0-9+]{0,20}$",
+    re.IGNORECASE,
+)
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+
+def _normalize_phone(raw: str) -> str:
+    """Rohtext zu einer waehlbaren Nummer. Leerer String = unbrauchbar."""
+    cleaned = re.sub(r"[^\d+]", "", str(raw or ""))
+    if cleaned.startswith("00"):
+        cleaned = "+" + cleaned[2:]
+    digits = cleaned.lstrip("+")
+    if not digits.isdigit() or not (7 <= len(digits) <= 15):
+        return ""
+    return cleaned
+
+
+def _phone_from_text(text: str) -> str:
+    """Erste plausible Telefonnummer aus einem Text (Antwort, Quellen).
+
+    Akzeptiert wird eine Zahlenfolge nur, wenn sie eine Landesvorwahl hat, ein
+    Hinweiswort davor steht oder sie wie eine gegliederte Rufnummer aussieht.
+    """
+    plain = _markdown_to_plain(text or "")
+    for match in _PHONE_CANDIDATE_RE.finditer(plain):
+        candidate = match.group(0)
+        number = _normalize_phone(candidate)
+        if not number:
+            continue
+        has_cue = bool(_PHONE_CUE_RE.search(plain[max(0, match.start() - 40) : match.start()]))
+        looks_grouped = "/" in candidate and len(number.lstrip("+")) >= 9
+        if number.startswith("+") or has_cue or looks_grouped:
+            return number
+    return ""
+
+
+def _email_from_text(text: str) -> str:
+    match = _EMAIL_RE.search(_markdown_to_plain(text or ""))
+    return match.group(0) if match else ""
+
+
+def _sources_text(docs: Optional[List[Any]]) -> str:
+    """Rohtext der Quellen, gegen den Nummern und Adressen geprueft werden."""
+    parts: List[str] = []
+    for doc in (docs or [])[:6]:
+        content = getattr(doc, "page_content", "") or ""
+        if content:
+            parts.append(str(content))
+        meta = getattr(doc, "metadata", {}) or {}
+        for key in ("title", "section", "url", "source"):
+            value = meta.get(key)
+            if value:
+                parts.append(str(value))
+    return "\n".join(parts)
+
+
+def _phone_in_sources(number: str, sources: str) -> bool:
+    """Steht die Nummer wirklich so in den Quellen?
+
+    Verglichen wird gegen echte Nummern-Kandidaten aus dem Quelltext, nicht
+    gegen alle Ziffern am Stueck: sonst gilt eine erfundene Nummer als belegt,
+    weil ihre Endziffern zufaellig in einem Zaehlerstand vorkommen.
+    Schreibweisen (0043, +43, 0...) werden ueber die letzten Ziffern verglichen.
+    """
+    digits = re.sub(r"\D", "", number or "")
+    if len(digits) < 7:
+        return False
+    tail = digits[-7:]
+    for match in _PHONE_CANDIDATE_RE.finditer(_markdown_to_plain(sources or "")):
+        candidate = re.sub(r"\D", "", match.group(0))
+        if len(candidate) >= 7 and candidate.endswith(tail):
+            return True
+    return False
+
+
+def _email_in_sources(email: str, sources: str) -> bool:
+    return bool(email) and email.lower() in (sources or "").lower()
+
+_ai_actions_llm_cache: Dict[str, Any] = {}
+
+
+def _ai_actions_enabled() -> bool:
+    return _as_bool(os.environ.get("RAG_AI_ACTIONS"), True)
+
+
+def _ai_actions_llm(ctx: BotContext) -> Optional[Any]:
+    """LLM fuer die Button-Generierung - bewusst mit hartem Timeout ohne Retry.
+
+    Die Buttons sind Beiwerk: lieber die statischen Fallback-Texte als eine
+    Antwort, die wegen eines haengenden Zweit-Calls spaeter ankommt.
+    """
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    model_name = (
+        os.environ.get("RAG_AI_ACTIONS_MODEL")
+        or os.environ.get("RAG_CHAT_MODEL")
+        or ctx.model
+        or DEFAULT_MODEL
+    ).strip()
+    cached = _ai_actions_llm_cache.get(model_name)
+    if cached is not None:
+        return cached
+    try:
+        llm = ChatOpenAI(
+            api_key=api_key,
+            model=model_name,
+            temperature=0.4,
+            max_tokens=260,
+            timeout=AI_ACTIONS_TIMEOUT,
+            max_retries=0,
+        )
+    except Exception as exc:
+        print("Button-LLM konnte nicht erstellt werden:", exc)
+        return None
+    _ai_actions_llm_cache[model_name] = llm
+    return llm
+
+
+def _history_lines(history: Any, limit: int = 4) -> str:
+    """Die letzten Gespraechszuege als kurzer Text fuer den Prompt."""
+    if not isinstance(history, list):
+        return ""
+    lines: List[str] = []
+    for item in history[-limit:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or item.get("sender") or "user").strip().lower()
+        content = _markdown_to_plain(str(item.get("content") or item.get("text") or "")).strip()
+        if not content:
+            continue
+        speaker = "Assistent" if role in {"assistant", "ai", "bot"} else "Nutzer"
+        lines.append(f"{speaker}: {_limit_text(content, 240)}")
+    return "\n".join(lines)
+
+
+def _parse_json_object(text: str) -> Optional[Dict[str, Any]]:
+    """Erstes JSON-Objekt aus einer Modellantwort lesen (auch in ```-Bloecken)."""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        parsed = json.loads(raw[start : end + 1])
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _clean_action_label(value: Any) -> str:
+    """Button-Beschriftung normalisieren - Kuerzen ohne "..." an der Wortgrenze."""
+    label = re.sub(r"\s+", " ", str(value or "")).strip().strip("\"'")
+    if len(label) > AI_ACTIONS_LABEL_MAX:
+        cut = label[: AI_ACTIONS_LABEL_MAX + 1].rsplit(" ", 1)[0]
+        # Zu kurzer Rest heisst: das letzte Wort war lang. Dann lieber hart
+        # kuerzen als ein sinnloses Fragment ("Habe ich eine") stehen lassen.
+        label = cut if len(cut) >= AI_ACTIONS_LABEL_MAX * 0.6 else label[: AI_ACTIONS_LABEL_MAX - 1].rstrip() + "\u2026"
+    return re.sub(r"[.!?;:,\-]+$", "", label).strip()
+
+
+def _ai_quick_actions(
+    ctx: BotContext,
+    card: Optional[Dict[str, Any]],
+    question: str,
+    answer: str,
+    history: Any,
+    lang: str,
+    widget_cfg: Optional[Dict[str, Any]] = None,
+    source_docs: Optional[List[Any]] = None,
+) -> List[Dict[str, str]]:
+    """Buttons aus dem Gespraech generieren. Leere Liste = Fallback nutzen."""
+    if not _ai_actions_enabled():
+        return []
+    llm = _ai_actions_llm(ctx)
+    if llm is None:
+        return []
+
+    cfg = widget_cfg or {}
+    lang_key = _normalize_chat_lang(lang) or "de"
+    # Buttons folgen der Sprache der aktuellen Frage - nicht der Website und
+    # nicht dem, was das Modell aus aelteren Nachrichten herausliest.
+    button_lang = _detect_message_lang(question) or lang_key
+    lang_name = _lang_display_name(button_lang)
+    card_url = (card or {}).get("url") or ""
+    card_title = (card or {}).get("title") or ""
+    contact = cfg.get("contact") or {}
+    # Nur eine echte Seite darf "contact" sein - sonst verspricht das Label eine
+    # Kontaktseite und der Klick oeffnet das Mailprogramm.
+    contact_page = str(contact.get("url") or "").strip()
+    if not contact_page.lower().startswith(("http://", "https://", "/")):
+        contact_page = ""
+
+    # Nummer/Adresse aus der Antwort schlaegt die konfigurierte: sie gehoert zu
+    # genau dem Thema, ueber das gerade gesprochen wird. Sie muss aber in den
+    # Quellen belegt sein, sonst waehlt der Button eine erfundene Nummer.
+    # Globale ENV-Defaults bleiben aussen vor - in einem Multi-Tenant-Setup
+    # gehoeren sie keinem einzelnen Bot.
+    sources = _sources_text(source_docs)
+    configured_phone = _normalize_phone(contact.get("phone") or "")
+    configured_email = str(contact.get("email") or "").strip()
+
+    phone_from_answer = _phone_from_text(answer)
+    if phone_from_answer and not _phone_in_sources(phone_from_answer, sources):
+        print("Anruf-Button verworfen, Nummer nicht in den Quellen:", phone_from_answer)
+        phone_from_answer = ""
+    email_from_answer = _email_from_text(answer)
+    if email_from_answer and not _email_in_sources(email_from_answer, sources):
+        email_from_answer = ""
+
+    phone = phone_from_answer or configured_phone
+    email = email_from_answer or configured_email
+    link_targets = {
+        "card": card_url,
+        "contact": contact_page,
+        "phone": f"tel:{phone}" if phone else "",
+        "email": f"mailto:{email}" if email else "",
+    }
+
+    topics = [
+        str(topic.get("label") or "").strip()
+        for topic in (cfg.get("topics") or [])
+        if isinstance(topic, dict) and str(topic.get("label") or "").strip()
+    ]
+
+    available = [
+        f"card (oeffnet die Seite: {card_title or 'Detailseite'})" if link_targets["card"] else "",
+        "contact (Kontaktseite des Unternehmens)" if link_targets["contact"] else "",
+        f"phone (waehlt {phone} direkt auf dem Geraet)" if phone else "",
+        f"email (oeffnet eine Mail an {email})" if email else "",
+    ]
+    context_lines = [
+        f"Sprache der Buttons: {lang_name}",
+        "Verfuegbare Aktionen: " + (", ".join(filter(None, available)) or "keine"),
+    ]
+    verlauf = _history_lines(history)
+    if verlauf:
+        context_lines.append(f"Bisheriges Gespraech:\n{verlauf}")
+    if topics:
+        context_lines.append("Themen des Unternehmens: " + ", ".join(topics[:8]))
+    context_lines.append(f"Aktuelle Frage des Nutzers: {_limit_text(question, 300)}")
+    context_lines.append(
+        "Antwort des Assistenten:\n"
+        + _limit_text(_markdown_to_plain(_split_sources_tail(answer or "")[0]), 900)
+    )
+
+    try:
+        response = llm.invoke(
+            [
+                SystemMessage(content=_AI_ACTIONS_SYSTEM),
+                HumanMessage(content="\n\n".join(context_lines)),
+            ]
+        )
+    except Exception as exc:
+        print("Button-Generierung fehlgeschlagen:", exc)
+        return []
+
+    content = getattr(response, "content", response)
+    if isinstance(content, list):  # manche Modelle liefern Content-Bloecke
+        content = "".join(
+            part.get("text", "") if isinstance(part, dict) else str(part) for part in content
+        )
+    payload = _parse_json_object(str(content or ""))
+    if not payload:
+        print("Button-Generierung: kein JSON in der Antwort")
+        return []
+
+    # Aktionen (Anrufen, Seite oeffnen) stehen vor den Folgefragen - sie gehoeren
+    # optisch zur Karte darueber, die Fragen sind der Rest des Gespraechs.
+    link_actions: List[Dict[str, str]] = []
+    question_actions: List[Dict[str, str]] = []
+    used_targets: set = set()
+    for item in (payload.get("actions") or [])[:6]:
+        if not isinstance(item, dict):
+            continue
+        label = _clean_action_label(item.get("label"))
+        if not label:
+            continue
+        kind = str(item.get("type") or "question").strip().lower()
+        if kind == "link":
+            target = str(item.get("target") or item.get("url_ref") or "").strip().lower()
+            url = link_targets.get(target) or ""
+            # Modell-URLs werden nie uebernommen - nur die bekannten Ziele.
+            if not url or target in used_targets or len(link_actions) >= 2:
+                continue
+            _append_action(link_actions, label, url=url)
+            used_targets.add(target)
+            continue
+        if len(question_actions) >= AI_ACTIONS_MAX:
+            continue
+        follow_up = re.sub(r"\s+", " ", str(item.get("question") or "")).strip()
+        # Ohne Fragetext ist es ein missglueckter Aktions-Button ("Anrufen"):
+        # als Chatnachricht abgeschickt waere er sinnlos.
+        if len(follow_up) < 6:
+            continue
+        _append_action(
+            question_actions, label, question=_limit_text(follow_up, AI_ACTIONS_QUESTION_MAX)
+        )
+
+    actions = link_actions + [
+        action
+        for action in question_actions
+        if not any(existing["label"].lower() == action["label"].lower() for existing in link_actions)
+    ]
+    return actions[:AI_ACTIONS_MAX]
+
+
+def _build_rich_reply(
+    ctx: BotContext,
+    rag: Any,
+    question: str,
+    answer: str,
+    history: Any,
+    lang: str,
+    docs: Optional[List[Any]] = None,
+    widget_cfg: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Karte + Aktionen zur Antwort.
+
+    `docs` sind die Dokumente, auf denen die Antwort beruht. Nur wenn sie
+    fehlen, wird ersatzweise neu gesucht - sonst koennte die Karte eine andere
+    Seite zeigen als die Antwort (und es kostet einen Embedding-Call).
+    """
+    card: Optional[Dict[str, Any]] = None
+    source_docs = list(docs or [])
+    if not source_docs:
+        source_docs = _rich_docs_for_question(ctx, rag, question, history)
+
+    if widget_cfg is None:
+        try:
+            widget_cfg = _resolve_widget_config(ctx, lang)
+        except Exception as exc:
+            print("Widget-Konfiguration für Rich-Reply nicht lesbar:", exc)
+            widget_cfg = {}
+
+    intent_keywords = _item_intent_keywords(widget_cfg)
+    if (
+        source_docs
+        and not _looks_unanswered(answer)
+        and _has_rich_item_intent(question, answer, source_docs, extra_keywords=intent_keywords)
+    ):
+        picked = _pick_rich_doc(source_docs, question)
+        if picked is not None:
+            card = _build_rich_card(ctx, picked, answer, lang)
+
+    # Erst die KI fragen; die statischen Labels sind nur noch das Sicherheitsnetz.
+    actions: List[Dict[str, str]] = []
+    try:
+        actions = _ai_quick_actions(
+            ctx, card, question, answer, history, lang,
+            widget_cfg=widget_cfg, source_docs=source_docs,
+        )
+    except Exception as exc:
+        print("KI-Buttons nicht verfügbar:", exc)
+    if not actions:
+        actions = _build_quick_actions(card, question, answer, lang, widget_cfg=widget_cfg)
+
+    rich: Dict[str, Any] = {"version": 1, "actions": actions}
+    if card:
+        rich["cards"] = [card]
+    return rich
 
 
 def _read_faqs(ctx: BotContext) -> List[Dict[str, str]]:
@@ -2316,6 +3836,76 @@ def embed():
     return render_template("embed.html")
 
 
+@app.route("/api/public/widget_config", methods=["GET"])
+def public_widget_config():
+    """Begruessungs-Popup + Schnellaktionen fuer das Widget.
+
+    Wird sowohl aus dem Embed (gleiche Domain) als auch vom Snippet auf der
+    Kundenseite (andere Domain) gelesen -> CORS erlaubt, nur Lesezugriff.
+    """
+    bot_slug = _extract_bot_slug(None)
+    customer_id = _extract_customer_id(None)
+    lang = _extract_chat_lang(None)
+
+    if not bot_slug:
+        return jsonify({"error": "bot_slug fehlt."}), 400
+
+    try:
+        ctx = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            try:
+                ctx = _build_bot_context(bot_slug)
+            except PermissionError:
+                ctx = None
+        if ctx is None:
+            ctx = _build_public_bot_context(bot_slug, customer_id=customer_id)
+
+        payload = _resolve_widget_config(ctx, lang)
+        response = jsonify(payload)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Cache-Control"] = "public, max-age=60"
+        return response
+    except ValueError as val_err:
+        return jsonify({"error": str(val_err)}), 404
+    except Exception as exc:
+        return jsonify({"error": f"Widget-Konfiguration konnte nicht geladen werden: {exc}"}), 500
+
+
+@app.route("/api/admin/widget_config", methods=["GET", "POST"])
+def admin_widget_config():
+    """Widget-Inhalte (Popup-Text, Themen) lesen und speichern."""
+    payload = {}
+    if request.method == "POST":
+        payload = request.get_json(force=True) or {}
+    bot_slug = _extract_bot_slug(payload)
+
+    if not bot_slug:
+        return jsonify({"error": "bot_slug fehlt."}), 400
+
+    try:
+        ctx = _build_bot_context(bot_slug)
+        _ensure_bot_dirs(ctx)
+        if request.method == "GET":
+            return jsonify(
+                {
+                    "config": _read_widget_config(ctx),
+                    "defaults": {
+                        "greeting_text": DEFAULT_GREETING_TEXT,
+                        "topics_label": DEFAULT_TOPICS_LABEL,
+                    },
+                }
+            )
+
+        config = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+        saved = _write_widget_config(ctx, config)
+        return jsonify({"status": "ok", "config": saved})
+    except PermissionError as auth_err:
+        return jsonify({"error": str(auth_err)}), 401
+    except Exception as exc:
+        return jsonify({"error": f"Widget-Konfiguration konnte nicht gespeichert werden: {exc}"}), 500
+
+
 @app.route("/api/public/bot_lookup", methods=["GET"])
 def public_bot_lookup():
     bot_slug = _extract_bot_slug(None)
@@ -2374,12 +3964,14 @@ def download_wp_plugin():
                 return False
         return default
 
+    greeting_payload: Any = None
     if request.method == "POST":
         payload = request.get_json(silent=True) or {}
         embed_url = (payload.get("embed_url") or "").strip()
         icon = payload.get("icon") or "💬"
         launcher_bg = (payload.get("launcher_bg") or "").strip()
         show_hero_toggle = _parse_bool(payload.get("show_hero_toggle"), False)
+        greeting_payload = payload.get("greeting")
     else:
         embed_url = (request.args.get("embed_url", "") or "").strip()
         icon = request.args.get("icon", "💬")
@@ -2388,10 +3980,10 @@ def download_wp_plugin():
 
     if not launcher_bg:
         launcher_bg = "#8c8875"
-    
+
     if not embed_url:
         return jsonify({"error": "embed_url parameter required"}), 400
-    
+
     def _php_single_quote(value: str) -> str:
         return value.replace("\\", "\\\\").replace("'", "\\'")
 
@@ -2400,12 +3992,23 @@ def download_wp_plugin():
     launcher_bg_safe = _php_single_quote(launcher_bg)
     show_hero_toggle_js = "true" if show_hero_toggle else "false"
 
+    # Begruessungs-Popup: Default aus der Bot-Konfiguration mitgeben.
+    greeting_cfg = _normalize_widget_config({"greeting": greeting_payload or {}}).get("greeting") or {}
+    greeting_js = json.dumps(
+        {
+            "enabled": bool(greeting_cfg.get("enabled", True)),
+            "text": greeting_cfg.get("text") or {},
+            "delay_ms": int(greeting_cfg.get("delay_ms", 1200) or 0),
+        },
+        ensure_ascii=False,
+    ).replace("<", "\\u003c")
+
     # WordPress plugin PHP content
     plugin_php = f'''<?php
 /**
  * Plugin Name: AI Chat Widget
  * Description: Ein AI-Chat-Widget für deine WordPress-Website.
- * Version: 1.0.3
+ * Version: 1.0.4
  * Author: Scraping Admin
  * License: GPL v2 or later
  */
@@ -2475,7 +4078,7 @@ function ai_chat_widget_footer() {{
             align-items: center;
             gap: 12px;
             padding: 10px 14px;
-            border-radius: 0;
+            border-radius: 14px;
             background: rgba(255, 255, 255, 0.9);
             border: 1px solid rgba(15, 23, 42, 0.12);
             box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
@@ -2486,13 +4089,61 @@ function ai_chat_widget_footer() {{
             background: #0f766e;
             color: #fff;
             padding: 8px 14px;
-            border-radius: 0;
+            border-radius: 999px;
             cursor: pointer;
             font-size: 14px;
             font-weight: 600;
         }}
+        /* Begruessungs-Popup ueber dem Chat-Button */
+        #ai-chat-teaser {{
+            position: absolute;
+            bottom: 80px;
+            right: 0;
+            display: none;
+            align-items: flex-start;
+            gap: 12px;
+            width: max-content;
+            max-width: 300px;
+            padding: 14px 16px;
+            background: #ffffff;
+            color: #1b1c1e;
+            border: 1px solid rgba(27, 28, 30, 0.10);
+            border-radius: 18px;
+            box-shadow: 0 18px 40px rgba(17, 16, 13, 0.16);
+            font-size: 15px;
+            font-weight: 600;
+            line-height: 1.35;
+            text-align: left;
+            cursor: pointer;
+        }}
+        #ai-chat-teaser.ai-chat-teaser-visible {{
+            display: flex;
+        }}
+        #ai-chat-teaser-close {{
+            flex-shrink: 0;
+            margin: -2px -4px 0 0;
+            padding: 0 2px;
+            border: none;
+            background: transparent;
+            color: rgba(27, 28, 30, 0.45);
+            font-size: 18px;
+            line-height: 1.1;
+            cursor: pointer;
+        }}
+        #ai-chat-teaser-close:hover {{
+            color: #1b1c1e;
+        }}
+        @media (max-width: 640px) {{
+            #ai-chat-teaser {{
+                max-width: calc(100vw - 48px);
+            }}
+        }}
     </style>
     <div id="ai-chat-widget" style="position: fixed; bottom: 24px; right: 24px; z-index: 9999;">
+        <div id="ai-chat-teaser" role="button" tabindex="0" aria-label="Chat oeffnen">
+            <span id="ai-chat-teaser-text"></span>
+            <button type="button" id="ai-chat-teaser-close" aria-label="Hinweis schliessen">&times;</button>
+        </div>
         <button id="ai-chat-toggle" onclick="toggleAIChat()" style="
             width: 64px; height: 64px; border-radius: 50%; border: none;
             background: <?php echo esc_attr($button_bg); ?>;
@@ -2506,8 +4157,8 @@ function ai_chat_widget_footer() {{
         <div id="ai-chat-panel" style="
             display: none; position: absolute; bottom: 80px; right: 0;
             width: 400px; max-width: calc(100vw - 48px); height: 550px;
-            border-radius: 0; overflow: hidden;
-            box-shadow: 0 25px 80px rgba(0,0,0,0.5);
+            border-radius: 20px; overflow: hidden;
+            box-shadow: 0 24px 60px rgba(17, 16, 13, 0.20);
             border: none;
             background: #fff;
         ">
@@ -2557,12 +4208,117 @@ function ai_chat_widget_footer() {{
     function openAIChatPanel() {{
         var panel = document.getElementById('ai-chat-panel');
         if (panel) panel.style.display = 'block';
+        hideAIChatTeaser(true);
     }}
 
     function closeAIChatPanel() {{
         var panel = document.getElementById('ai-chat-panel');
         if (panel) panel.style.display = 'none';
     }}
+
+    /* --- Begruessungs-Popup: einmal pro Besucher ---------------------- */
+    var AI_CHAT_GREETING = {greeting_js};
+
+    function aiChatEmbedUrl() {{
+        var iframe = document.getElementById('ai-chat-embed');
+        if (!iframe) return '';
+        return iframe.getAttribute('data-src') || iframe.src || '';
+    }}
+
+    function aiChatBotSlug() {{
+        try {{
+            var src = aiChatEmbedUrl();
+            if (!src) return '';
+            return new URL(src, window.location.origin).searchParams.get('bot_slug') || '';
+        }} catch (e) {{
+            return '';
+        }}
+    }}
+
+    function aiChatTeaserKey() {{
+        return 'aiChatTeaserSeen:' + (aiChatBotSlug() || 'default');
+    }}
+
+    function aiChatWidgetConfigUrl() {{
+        try {{
+            var src = aiChatEmbedUrl();
+            if (!src) return '';
+            var parsed = new URL(src, window.location.origin);
+            var slug = parsed.searchParams.get('bot_slug');
+            if (!slug) return '';
+            var query = 'bot_slug=' + encodeURIComponent(slug);
+            var customer = parsed.searchParams.get('customer_id');
+            if (customer) query += '&customer_id=' + encodeURIComponent(customer);
+            var lang = resolveAiChatLang();
+            if (lang) query += '&lang=' + encodeURIComponent(lang);
+            return parsed.origin + '/api/public/widget_config?' + query;
+        }} catch (e) {{
+            return '';
+        }}
+    }}
+
+    function hideAIChatTeaser(remember) {{
+        var teaser = document.getElementById('ai-chat-teaser');
+        if (teaser) teaser.classList.remove('ai-chat-teaser-visible');
+        if (remember) {{
+            try {{ window.localStorage.setItem(aiChatTeaserKey(), '1'); }} catch (e) {{}}
+        }}
+    }}
+
+    (function () {{
+        var teaser = document.getElementById('ai-chat-teaser');
+        var textEl = document.getElementById('ai-chat-teaser-text');
+        var closeBtn = document.getElementById('ai-chat-teaser-close');
+        if (!teaser || !textEl) return;
+
+        var seen = false;
+        try {{ seen = window.localStorage.getItem(aiChatTeaserKey()) === '1'; }} catch (e) {{}}
+        if (seen) return;
+
+        if (closeBtn) {{
+            closeBtn.addEventListener('click', function (event) {{
+                event.stopPropagation();
+                hideAIChatTeaser(true);
+            }});
+        }}
+        teaser.addEventListener('click', function () {{
+            hideAIChatTeaser(true);
+            openAIChatPanel();
+        }});
+        teaser.addEventListener('keydown', function (event) {{
+            if (event.key === 'Enter' || event.key === ' ') {{
+                event.preventDefault();
+                hideAIChatTeaser(true);
+                openAIChatPanel();
+            }}
+        }});
+
+        var lang = resolveAiChatLang() === 'en' ? 'en' : 'de';
+        var injected = AI_CHAT_GREETING || {{}};
+        var injectedText = (injected.text && (injected.text[lang] || injected.text.de || injected.text.en)) || '';
+
+        var url = aiChatWidgetConfigUrl();
+        var live = (url && window.fetch)
+            ? fetch(url).then(function (res) {{ return res.ok ? res.json() : null; }}).catch(function () {{ return null; }})
+            : null;
+        var settled = live
+            ? Promise.race([live, new Promise(function (resolve) {{ window.setTimeout(function () {{ resolve(null); }}, 1500); }})])
+            : Promise.resolve(null);
+
+        var delay = typeof injected.delay_ms === 'number' ? injected.delay_ms : 1200;
+        window.setTimeout(function () {{
+            settled.then(function (cfg) {{
+                var greeting = (cfg && cfg.greeting) ? cfg.greeting : injected;
+                if (greeting.enabled === false) return;
+                var text = (typeof greeting.text === 'string' && greeting.text) ? greeting.text : injectedText;
+                if (!text) return;
+                var panel = document.getElementById('ai-chat-panel');
+                if (panel && panel.style.display === 'block') return;
+                textEl.textContent = text;
+                teaser.classList.add('ai-chat-teaser-visible');
+            }});
+        }}, Math.max(0, delay));
+    }})();
 
     function toggleAIChat() {{
         var panel = document.getElementById('ai-chat-panel');
@@ -3175,9 +4931,24 @@ def chat():
             # Public bot context - optional customer_id for disambiguation
             ctx = _build_public_bot_context(bot_slug, customer_id=customer_id)
         rag = get_qa(ctx)
-        answer = rag(question, history=history, lang=lang)
+        # Die verwendeten Kontext-Dokumente einsammeln, damit die Karte zur
+        # Antwort passt und kein zweites Retrieval nötig ist.
+        answer_docs: List[Any] = []
+        answer = rag(question, history=history, lang=lang, docs_out=answer_docs)
+        try:
+            rich = _build_rich_reply(ctx, rag, question, answer, history, lang, docs=answer_docs)
+        except Exception as rich_exc:
+            print("Rich-Reply konnte nicht erzeugt werden:", rich_exc)
+            try:
+                fallback_cfg = _resolve_widget_config(ctx, lang)
+            except Exception:
+                fallback_cfg = {}
+            rich = {
+                "version": 1,
+                "actions": _build_quick_actions(None, question, answer, lang, widget_cfg=fallback_cfg),
+            }
         _record_chat_event(ctx, ctx.customer_id, question, answer, status="ok")
-        return jsonify({"answer": answer})
+        return jsonify({"answer": answer, "rich": rich})
     except ValueError as val_err:
         return jsonify({"error": str(val_err)}), 404
     except Exception as e:
