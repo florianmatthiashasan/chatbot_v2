@@ -829,6 +829,10 @@
     let anchorRow = null;
     const SCROLL_TOP_OFFSET = 8;
     const history = [];
+    // Bereits gezeigte Buttons: gehen mit, damit der Bot nicht dieselbe
+    // Empfehlung zweimal hintereinander anbietet.
+    const offeredActions = [];
+    const OFFERED_LIMIT = 10;
     const CHAT_HISTORY_LIMIT = 16;
     const placeholderTimers = new Map();
     const params = new URLSearchParams(window.location.search);
@@ -1403,8 +1407,11 @@
         const actionRow = document.createElement("div");
         actionRow.className = "rich-actions";
         actions.forEach((action, idx) => {
+          const label = (action.label || "").toString().trim();
+          if (label && offeredActions.indexOf(label) === -1) offeredActions.push(label);
           actionRow.appendChild(createActionElement(action, idx === 0));
         });
+        while (offeredActions.length > OFFERED_LIMIT) offeredActions.shift();
         nodes.push(actionRow);
       }
       return nodes;
@@ -1753,6 +1760,7 @@
 
     function clearConversation() {
       history.length = 0;
+      offeredActions.length = 0;
       messageListEl.innerHTML = "";
       resetScrollAnchor();
       placeholderTimers.forEach((entry) => entry.timers.forEach(clearTimeout));
@@ -1799,6 +1807,7 @@
         const payload = {
           question: text,
           history: historyPayload,
+          offered: offeredActions.slice(-OFFERED_LIMIT),
           bot_slug: botSlug,
           lang: resolveLang(),
         };

@@ -11,6 +11,7 @@
   var HISTORY_KEY = "aicb_history";
   var TEASER_KEY = "aicb_teaser_seen";
   var HISTORY_LIMIT = 16;
+  var OFFERED_LIMIT = 10;
   var SCROLL_TOP_OFFSET = 8;
 
   var cfg = window.AICBWidget.config || {};
@@ -354,6 +355,9 @@
     if (!panel || !messagesEl || !listEl || !formEl || !inputEl) return;
 
     var icon = (copy.icon || "").trim();
+    // Bereits gezeigte Buttons: gehen mit, damit der Bot nicht dieselbe
+    // Empfehlung zweimal hintereinander anbietet.
+    var offeredActions = [];
     var anchorRow = null;
     var busy = false;
     var timers = [];
@@ -518,8 +522,11 @@
         row.className = "aicb-actions-row";
         actions.forEach(function (action, idx) {
           if (!action || (!action.label && !action.question)) return;
+          var label = (action.label || "").toString().trim();
+          if (label && offeredActions.indexOf(label) === -1) offeredActions.push(label);
           row.appendChild(createAction(action, idx === 0));
         });
+        while (offeredActions.length > OFFERED_LIMIT) offeredActions.shift();
         nodes.push(row);
       }
       return nodes;
@@ -666,6 +673,7 @@
           return api("chat", {
             question: question,
             history: history,
+            offered: offeredActions.slice(-OFFERED_LIMIT),
             session_token: token,
             lang: lang(),
           });
@@ -706,6 +714,7 @@
       shell.classList.remove("aicb-open");
       if (reset) {
         listEl.innerHTML = "";
+        offeredActions = [];
         anchorRow = null;
         if (spacerEl) spacerEl.style.height = "0px";
         setHistory([]);

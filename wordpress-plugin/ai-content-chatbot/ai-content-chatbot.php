@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.3.3
+ * Version: 0.3.4
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -26,7 +26,7 @@ final class AICB_Plugin {
      */
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.3.3';
+    private const ASSET_VERSION = '0.3.4';
     // Cosinus-Aehnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -929,6 +929,15 @@ final class AICB_Plugin {
         $question = sanitize_textarea_field((string) ($params['question'] ?? $params['message'] ?? ''));
         $history = is_array($params['history'] ?? null) ? $params['history'] : [];
         $lang = sanitize_key((string) ($params['lang'] ?? 'de'));
+        // Bereits gezeigte Buttons: verhindert dieselbe Empfehlung zweimal.
+        $offered = [];
+        foreach ((array) ($params['offered'] ?? []) as $item) {
+            $label = sanitize_text_field((string) $item);
+            if ($label !== '') {
+                $offered[] = $label;
+            }
+        }
+        $offered = array_slice($offered, -10);
 
         if ($question === '') {
             return new WP_REST_Response(['error' => 'Keine Frage uebergeben.'], 400);
@@ -938,7 +947,7 @@ final class AICB_Plugin {
         $session_hash = $session_payload['session_hash'];
 
         try {
-            $answer_payload = $this->answer_question($question, $history, $lang);
+            $answer_payload = $this->answer_question($question, $history, $lang, $offered);
             $this->record_event($session_hash, $question, $answer_payload['answer'], 'ok', null, $answer_payload['usage']);
             $this->touch_session($session_hash);
             return rest_ensure_response([
@@ -1429,7 +1438,7 @@ final class AICB_Plugin {
         return "Document: {$title}\nSection: {$section}\n" . trim($body);
     }
 
-    private function answer_question(string $question, array $history, string $lang): array {
+    private function answer_question(string $question, array $history, string $lang, array $offered = []): array {
         global $wpdb;
         $chunks_table = $wpdb->prefix . 'aicb_chunks';
         $count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$chunks_table}");
@@ -1470,7 +1479,7 @@ final class AICB_Plugin {
         }
 
         $candidates = $this->card_candidates($relevant, $answer);
-        $actions = $this->build_actions($candidates, $question, $answer, $history, $target_lang, $relevant);
+        $actions = $this->build_actions($candidates, $question, $answer, $history, $target_lang, $relevant, $offered);
 
         // Aehnlichkeitswerte allein trennen Begruessung und fremdsprachige
         // Fachfrage nicht (gemessen: 0.32 vs 0.31). Deshalb meldet der
@@ -1978,9 +1987,9 @@ final class AICB_Plugin {
      * Buttons unter der Antwort. Zuerst von der KI aus dem Gespraech erzeugt,
      * bei Fehlern die statischen Texte.
      */
-    private function build_actions(array $candidates, string $question, string $answer, array $history, string $lang, array $matches): array {
+    private function build_actions(array $candidates, string $question, string $answer, array $history, string $lang, array $matches, array $offered = []): array {
         try {
-            $result = $this->ai_quick_actions($candidates, $question, $answer, $history, $lang, $matches);
+            $result = $this->ai_quick_actions($candidates, $question, $answer, $history, $lang, $matches, $offered);
             if (!empty($result['actions'])) {
                 return $result;
             }
@@ -2016,11 +2025,14 @@ final class AICB_Plugin {
     }
 
     private const AI_ACTIONS_SYSTEM = <<<'PROMPT'
+WICHTIGSTE FORMREGEL: label ist eine Menue-Beschriftung aus ZWEI bis DREI Woertern. Zaehle die Woerter, bevor du antwortest. Vier oder mehr Woerter sind verboten, ebenso Fragen und ganze Saetze.
+
 Du erzeugst die Klick-Buttons, die unter der Antwort eines Chat-Assistenten auf einer Firmen-Website stehen.
 Regeln:
 - Zwei bis drei Buttons, die genau zu diesem Gespraech passen und den Nutzer einen Schritt weiterbringen.
-- Jeder Button ist ein konkreter naechster Schritt, keine Wiederholung der Antwort und keine Frage, die schon beantwortet wurde.
-- label: hoechstens 30 Zeichen, keine Emojis, kein Satzzeichen am Ende.
+- Jeder Button oeffnet ein NEUES Thema, das im bisherigen Gespraech noch nicht vorkam. Wiederhole nie die aktuelle Frage, eine fruehere Frage oder den Inhalt der Antwort - auch nicht anders formuliert.
+- Die Buttons sollen neugierig machen: nenne Themen, die der Nutzer wahrscheinlich als naechstes interessant findet.
+- label: zwei bis drei Woerter, hoechstens 24 Zeichen. Es ist eine Menue-Beschriftung, keine Frage und kein Satz. Gut: "Zimmer ansehen", "Preise & Pauschalen", "Anfahrt", "Termin anfragen". Schlecht: "Wo befindet sich die Zentrale?", "Ich moechte mehr wissen". Keine Emojis, kein Satzzeichen am Ende, niemals abgeschnittene Wortgruppen.
 - question: die Nachricht, die beim Klick als Nutzerfrage gesendet wird - ein vollstaendiger, eigenstaendig verstaendlicher Satz.
 - SPRACHE, wichtigste Regel: Schreibe ALLE Werte von label und question ausschliesslich in der Sprache, die im Kontext unter "Sprache der Buttons" steht. Diese Anweisung ist auf Deutsch, das aendert daran nichts; auch aeltere Nachrichten im Gespraech aendern daran nichts. Ist die Sprache Tuerkisch, heisst ein Anruf-Button "Ara" und nicht "Anrufen".
 - Erfinde nichts: keine Preise, Zahlen, Angebote, Telefonnummern oder URLs, die nicht im Kontext stehen.
@@ -2039,7 +2051,7 @@ Gib zusaetzlich an:
 Antworte ausschliesslich mit JSON in dieser Form: {"card": 0, "lang": "de", "content": true, "actions": [{"label": "...", "type": "question", "question": "..."}]}
 PROMPT;
 
-    private function ai_quick_actions(array $candidates, string $question, string $answer, array $history, string $lang, array $matches): array {
+    private function ai_quick_actions(array $candidates, string $question, string $answer, array $history, string $lang, array $matches, array $offered = []): array {
         $settings = $this->settings();
         if (trim((string) ($settings['openai_api_key'] ?? '')) === '') {
             return ['actions' => [], 'lang' => '', 'content' => null, 'card' => null];
@@ -2120,6 +2132,11 @@ PROMPT;
         } else {
             $context[] = 'Verfuegbare Seiten: keine - "card" muss 0 sein.';
         }
+        $shown = array_slice(array_filter(array_map('trim', $offered)), -10);
+        if ($shown) {
+            $context[] = "Diese Buttons wurden im Gespraech schon angezeigt - biete keinen davon noch "
+                . "einmal an, auch nicht anders formuliert:\n- " . implode("\n- ", $shown);
+        }
         $context[] = 'Aktuelle Frage des Nutzers: ' . $this->limit_text($question, 300);
         $context[] = "Antwort des Assistenten:\n" . $this->limit_text($this->strip_sources_tail($answer), 900);
 
@@ -2146,6 +2163,25 @@ PROMPT;
         $links = [];
         $questions = [];
         $used = [];
+        // Wortmengen der bisherigen Fragen und der schon gezeigten Buttons.
+        $asked_sets = [$this->compare_tokens($question)];
+        foreach (array_slice($history, -6) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $role = strtolower((string) ($item['role'] ?? $item['sender'] ?? 'user'));
+            if (in_array($role, ['assistant', 'ai', 'bot'], true)) {
+                continue;
+            }
+            $content = trim((string) ($item['content'] ?? $item['text'] ?? ''));
+            if ($content !== '') {
+                $asked_sets[] = $this->compare_tokens($content);
+            }
+        }
+        $shown_sets = [];
+        foreach ($shown as $label) {
+            $shown_sets[] = $this->compare_tokens($label);
+        }
         foreach (array_slice($payload['actions'], 0, 6) as $item) {
             if (!is_array($item)) {
                 continue;
@@ -2155,8 +2191,13 @@ PROMPT;
                 continue;
             }
             $type = strtolower(trim((string) ($item['type'] ?? 'question')));
+            $target = strtolower(trim((string) ($item['target'] ?? $item['url_ref'] ?? '')));
+            // Das Modell schreibt oft "type": "phone" statt type link + target phone.
+            if ($target === '' && array_key_exists($type, $targets)) {
+                $target = $type;
+                $type = 'link';
+            }
             if ($type === 'link') {
-                $target = strtolower(trim((string) ($item['target'] ?? $item['url_ref'] ?? '')));
                 $url = $targets[$target] ?? '';
                 // Modell-URLs werden nie uebernommen - nur die bekannten Ziele.
                 if ($url === '' || isset($used[$target]) || count($links) >= 2) {
@@ -2172,6 +2213,11 @@ PROMPT;
             $follow_up = trim(preg_replace('/\s+/', ' ', (string) ($item['question'] ?? '')));
             // Ohne Fragetext ist es ein missglueckter Aktions-Button ("Anrufen").
             if ($this->str_len($follow_up) < 6) {
+                continue;
+            }
+            // Kein Button, der wiederholt, was schon gefragt oder gezeigt wurde.
+            if ($this->is_repeat_action($follow_up, $asked_sets)
+                || $this->is_repeat_action($label, $shown_sets, 0.6, 1)) {
                 continue;
             }
             $questions[] = [
@@ -2303,17 +2349,82 @@ PROMPT;
         return '';
     }
 
+    // Woerter, mit denen ein Satz beginnt - als Beschriftung unbrauchbar.
+    private const LABEL_SENTENCE_STARTERS = [
+        'wo', 'wie', 'was', 'wann', 'warum', 'wer', 'welche', 'welcher', 'welches', 'ist', 'sind',
+        'gibt', 'kann', 'haben', 'habt', 'ich', 'du', 'sie', 'wir', 'moechte', 'möchte', 'how',
+        'what', 'where', 'when', 'why', 'who', 'which', 'can', 'do', 'does', 'is', 'are', 'i',
+        'you', 'we', 'nasıl', 'nasil', 'nerede', 'hangi', 'kim', 'quel', 'quelle', 'comment',
+        'donde', 'dónde', 'como', 'cómo', 'dove', 'quanto',
+    ];
+
+    // Fuellwoerter, mit denen ein Label nicht enden darf.
+    private const LABEL_TAIL_STOPWORDS = [
+        'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einen', 'einem', 'einer',
+        'und', 'oder', 'zu', 'zum', 'zur', 'in', 'im', 'an', 'am', 'auf', 'fuer', 'für', 'mit',
+        'von', 'bei', 'sich', 'wie', 'wo', 'was', 'ist', 'sind', 'the', 'a', 'an', 'and', 'or',
+        'to', 'for', 'with', 'of', 'on', 'at', 'is', 'are', 'how', 'what', 'where', 'my', 'your',
+        've', 'ile', 'için', 'icin', 'bir', 'de', 'la', 'le', 'les', 'des', 'el', 'il', 'et',
+    ];
+
+    /** Button-Beschriftung: kurze Menue-Bezeichnung, nie ein Satz oder Fragment. */
     private function clean_action_label(string $value): string {
-        $label = trim(preg_replace('/\s+/', ' ', $value), " \t\n\r\0\x0B\"'");
-        if ($this->str_len($label) > 34) {
-            $cut = $this->str_cut($label, 0, 35);
-            $space = $this->str_rpos($cut, ' ');
-            $short = $space ? $this->str_cut($cut, 0, $space) : '';
-            // Zu kurzer Rest heisst: das letzte Wort war lang. Dann hart kuerzen,
-            // statt ein sinnloses Fragment stehen zu lassen.
-            $label = $this->str_len($short) >= 20 ? $short : rtrim($this->str_cut($label, 0, 33)) . "\u{2026}";
+        $label = trim(preg_replace('/\s+/u', ' ', $value), " \t\n\r\0\x0B\"'");
+        $label = trim(preg_replace('/[.!?;:,\-\x{2026}]+$/u', '', $label));
+        if ($label === '') {
+            return '';
         }
-        return trim(preg_replace('/[.!?;:,\-]+$/u', '', $label));
+        $words = explode(' ', $label);
+        // Ein Satz laesst sich nicht zu einem guten Label kuerzen.
+        if (count($words) > 5) {
+            return '';
+        }
+        $first = $this->str_lower(trim($words[0], '¿¡'));
+        if (count($words) > 1 && in_array($first, self::LABEL_SENTENCE_STARTERS, true)) {
+            return '';
+        }
+        if (count($words) > 3) {
+            $words = array_slice($words, 0, 3);
+        }
+        while ($words && $this->str_len(implode(' ', $words)) > 24) {
+            array_pop($words);
+        }
+        while (count($words) > 1 && in_array($this->str_lower(trim(end($words), '.,;:!?')), self::LABEL_TAIL_STOPWORDS, true)) {
+            array_pop($words);
+        }
+        if (count($words) === 1 && in_array($this->str_lower($words[0]), self::LABEL_TAIL_STOPWORDS, true)) {
+            return '';
+        }
+        return trim(preg_replace('/[.!?;:,\-]+$/u', '', implode(' ', $words)));
+    }
+
+    /** Wortmenge fuer den Aehnlichkeitsvergleich (ohne Fuellwoerter). */
+    private function compare_tokens(string $text): array {
+        preg_match_all('/[\p{L}\p{N}]{3,}/u', $this->str_lower($text), $found);
+        $tokens = array_unique($found[0] ?? []);
+        return array_values(array_diff($tokens, self::LABEL_TAIL_STOPWORDS));
+    }
+
+    /**
+     * True, wenn der Button wiederholt, was schon gefragt oder gezeigt wurde.
+     * Gegen die aktuelle Frage wird milder geprueft (viele sinnvolle Folgefragen
+     * teilen ein Wort mit ihr), gegen bereits gezeigte Buttons strenger.
+     */
+    private function is_repeat_action(string $text, array $token_sets, float $ratio = 0.75, int $min_overlap = 2): bool {
+        $tokens = $this->compare_tokens($text);
+        if (!$tokens) {
+            return false;
+        }
+        foreach ($token_sets as $known) {
+            if (!$known) {
+                continue;
+            }
+            $overlap = count(array_intersect($tokens, $known));
+            if ($overlap >= $min_overlap && $overlap / min(count($tokens), count($known)) >= $ratio) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function limit_text(string $text, int $limit): string {

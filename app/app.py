@@ -2520,7 +2520,8 @@ def _build_quick_actions(
 # der Call scheitert, zu lange braucht oder unbrauchbares JSON liefert.
 # ---------------------------------------------------------------------------
 
-AI_ACTIONS_LABEL_MAX = 34
+AI_ACTIONS_LABEL_MAX = 24
+AI_ACTIONS_LABEL_WORDS = 3
 AI_ACTIONS_QUESTION_MAX = 180
 AI_ACTIONS_MAX = 3
 try:
@@ -2529,14 +2530,23 @@ except Exception:
     AI_ACTIONS_TIMEOUT = 8.0
 
 _AI_ACTIONS_SYSTEM = (
+    "WICHTIGSTE FORMREGEL: label ist eine Menue-Beschriftung aus ZWEI bis DREI Woertern. "
+    "Zaehle die Woerter, bevor du antwortest. Vier oder mehr Woerter sind verboten, ebenso Fragen "
+    "und ganze Saetze.\n\n"
     "Du erzeugst die Klick-Buttons, die unter der Antwort eines Chat-Assistenten "
     "auf einer Firmen-Website stehen.\n"
     "Regeln:\n"
     "- Zwei bis drei Buttons, die genau zu diesem Gespraech passen und den Nutzer "
     "einen Schritt weiterbringen.\n"
-    "- Jeder Button ist ein konkreter naechster Schritt, keine Wiederholung der Antwort "
-    "und keine Frage, die schon beantwortet wurde.\n"
-    "- label: hoechstens 30 Zeichen, keine Emojis, kein Satzzeichen am Ende.\n"
+    "- Jeder Button oeffnet ein NEUES Thema, das im bisherigen Gespraech noch nicht vorkam. "
+    "Wiederhole nie die aktuelle Frage, eine fruehere Frage oder den Inhalt der Antwort - auch "
+    "nicht anders formuliert. Wurde nach Preisen gefragt, biete etwas anderes an.\n"
+    "- Die Buttons sollen neugierig machen: nenne Themen, die der Nutzer wahrscheinlich als "
+    "naechstes interessant findet.\n"
+    "- label: zwei bis drei Woerter, hoechstens 24 Zeichen. Es ist eine Menue-Beschriftung, "
+    "keine Frage und kein Satz. Gut: \"Zimmer ansehen\", \"Preise & Pauschalen\", \"Anfahrt\", "
+    "\"Termin anfragen\". Schlecht: \"Wo befindet sich die Zentrale?\", \"Ich moechte mehr wissen\". "
+    "Keine Emojis, kein Satzzeichen am Ende, niemals abgeschnittene Wortgruppen.\n"
     "- question: die Nachricht, die beim Klick als Nutzerfrage gesendet wird - ein "
     "vollstaendiger, eigenstaendig verstaendlicher Satz.\n"
     "- SPRACHE, wichtigste Regel: Schreibe ALLE Werte von label und question ausschliesslich in der "
@@ -2728,15 +2738,94 @@ def _parse_json_object(text: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+# Funktionswoerter, mit denen ein Label niemals enden darf - sonst steht auf
+# dem Button ein Fragment wie "Wo befindet sich die".
+_LABEL_TAIL_STOPWORDS = {
+    "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer",
+    "und", "oder", "zu", "zum", "zur", "in", "im", "an", "am", "auf", "fuer", "für", "mit",
+    "von", "bei", "sich", "wie", "wo", "was", "ist", "sind", "the", "a", "an", "and", "or",
+    "to", "for", "with", "of", "on", "at", "is", "are", "how", "what", "where", "my", "your",
+    "ve", "ile", "için", "icin", "bir", "de", "la", "le", "les", "des", "el", "il", "et",
+}
+
+
+# Woerter, mit denen ein Satz beginnt - als Button-Beschriftung unbrauchbar.
+_LABEL_SENTENCE_STARTERS = {
+    "wo", "wie", "was", "wann", "warum", "wer", "welche", "welcher", "welches", "ist", "sind",
+    "gibt", "kann", "koennen", "können", "haben", "habt", "ich", "du", "sie", "wir", "moechte",
+    "möchte", "how", "what", "where", "when", "why", "who", "which", "can", "do", "does", "is",
+    "are", "i", "you", "we", "nasıl", "nasil", "nerede", "hangi", "kim", "quel", "quelle",
+    "comment", "donde", "dónde", "como", "cómo", "dove", "quanto",
+}
+
+
 def _clean_action_label(value: Any) -> str:
-    """Button-Beschriftung normalisieren - Kuerzen ohne "..." an der Wortgrenze."""
+    """Button-Beschriftung: kurze Menue-Bezeichnung, nie ein Satz oder Fragment."""
     label = re.sub(r"\s+", " ", str(value or "")).strip().strip("\"'")
-    if len(label) > AI_ACTIONS_LABEL_MAX:
-        cut = label[: AI_ACTIONS_LABEL_MAX + 1].rsplit(" ", 1)[0]
-        # Zu kurzer Rest heisst: das letzte Wort war lang. Dann lieber hart
-        # kuerzen als ein sinnloses Fragment ("Habe ich eine") stehen lassen.
-        label = cut if len(cut) >= AI_ACTIONS_LABEL_MAX * 0.6 else label[: AI_ACTIONS_LABEL_MAX - 1].rstrip() + "\u2026"
+    label = re.sub(r"[.!?;:,\-\u2026]+$", "", label).strip()
+    if not label:
+        return ""
+
+    words = label.split(" ")
+    # Ein Satz laesst sich nicht zu einem guten Label kuerzen - dann lieber
+    # keinen Button als "Wo befindet sich die".
+    if len(words) > 5:
+        return ""
+    if len(words) > 1 and words[0].lower().strip("¿¡") in _LABEL_SENTENCE_STARTERS:
+        return ""
+    if len(words) > AI_ACTIONS_LABEL_WORDS:
+        words = words[:AI_ACTIONS_LABEL_WORDS]
+    # Zeichenlimit: lieber ein Wort weniger als ein abgeschnittenes Wort.
+    while words and len(" ".join(words)) > AI_ACTIONS_LABEL_MAX:
+        words.pop()
+    # Fuellwoerter am Ende abschneiden, sonst bleibt ein Fragment stehen.
+    while len(words) > 1 and words[-1].lower().strip(".,;:!?") in _LABEL_TAIL_STOPWORDS:
+        words.pop()
+
+    label = " ".join(words).strip()
+    if len(words) == 1 and words[0].lower() in _LABEL_TAIL_STOPWORDS:
+        return ""
     return re.sub(r"[.!?;:,\-]+$", "", label).strip()
+
+
+def _compare_tokens(text: str) -> set:
+    """Wortmenge fuer den Aehnlichkeitsvergleich (ohne Fuellwoerter)."""
+    tokens = set(re.findall(r"[a-zA-Z0-9äöüÄÖÜßçğıöşü]{3,}", (text or "").lower()))
+    return {token for token in tokens if token not in _LABEL_TAIL_STOPWORDS}
+
+
+def _asked_token_sets(question: str, history: Any) -> List[set]:
+    """Wortmengen aller bisherigen Nutzerfragen inklusive der aktuellen."""
+    sets = [_compare_tokens(question)]
+    if isinstance(history, list):
+        for item in history:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or item.get("sender") or "user").strip().lower()
+            if role in {"assistant", "ai", "bot"}:
+                continue
+            content = str(item.get("content") or item.get("text") or "")
+            if content.strip():
+                sets.append(_compare_tokens(content))
+    return [tokens for tokens in sets if tokens]
+
+
+def _is_repeat_action(text: str, known_sets: List[set], ratio: float = 0.75, min_overlap: int = 2) -> bool:
+    """True, wenn der Button wiederholt, was schon gefragt oder gezeigt wurde.
+
+    Gegen die aktuelle Frage wird milder geprueft (viele sinnvolle Folgefragen
+    teilen ein Wort mit ihr), gegen bereits gezeigte Buttons strenger.
+    """
+    tokens = _compare_tokens(text)
+    if not tokens:
+        return False
+    for known in known_sets:
+        if not known:
+            continue
+        overlap = len(tokens & known)
+        if overlap >= min_overlap and overlap / min(len(tokens), len(known)) >= ratio:
+            return True
+    return False
 
 
 def _ai_quick_actions(
@@ -2748,6 +2837,7 @@ def _ai_quick_actions(
     lang: str,
     widget_cfg: Optional[Dict[str, Any]] = None,
     source_docs: Optional[List[Any]] = None,
+    offered: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, str]], Optional[Dict[str, Any]], bool]:
     """Buttons und passende Karte aus dem Gespraech.
 
@@ -2828,6 +2918,12 @@ def _ai_quick_actions(
         context_lines.append('Verfuegbare Seiten (fuer "card"):\n' + "\n".join(lines))
     else:
         context_lines.append('Verfuegbare Seiten: keine - "card" muss 0 sein.')
+    shown = [str(label).strip() for label in (offered or []) if str(label).strip()][-10:]
+    if shown:
+        context_lines.append(
+            "Diese Buttons wurden im Gespraech schon angezeigt - biete keinen davon noch einmal an, "
+            "auch nicht anders formuliert:\n- " + "\n- ".join(shown)
+        )
     context_lines.append(f"Aktuelle Frage des Nutzers: {_limit_text(question, 300)}")
     context_lines.append(
         "Antwort des Assistenten:\n"
@@ -2869,6 +2965,9 @@ def _ai_quick_actions(
     link_actions: List[Dict[str, str]] = []
     question_actions: List[Dict[str, str]] = []
     used_targets: set = set()
+    asked_sets = _asked_token_sets(question, history)
+    shown_sets = [_compare_tokens(label) for label in (offered or []) if str(label).strip()]
+    shown_sets = [tokens for tokens in shown_sets if tokens]
     for item in (payload.get("actions") or [])[:6]:
         if not isinstance(item, dict):
             continue
@@ -2876,8 +2975,11 @@ def _ai_quick_actions(
         if not label:
             continue
         kind = str(item.get("type") or "question").strip().lower()
+        target = str(item.get("target") or item.get("url_ref") or "").strip().lower()
+        # Das Modell schreibt oft "type": "phone" statt type link + target phone.
+        if not target and kind in link_targets:
+            target, kind = kind, "link"
         if kind == "link":
-            target = str(item.get("target") or item.get("url_ref") or "").strip().lower()
             url = link_targets.get(target) or ""
             # Modell-URLs werden nie uebernommen - nur die bekannten Ziele.
             if not url or target in used_targets or len(link_actions) >= 2:
@@ -2892,6 +2994,11 @@ def _ai_quick_actions(
         # als Chatnachricht abgeschickt waere er sinnlos.
         if len(follow_up) < 6:
             continue
+        # Kein Button, der wiederholt, was schon gefragt oder schon angeboten wurde.
+        if _is_repeat_action(follow_up, asked_sets) or _is_repeat_action(
+            label, shown_sets, ratio=0.6, min_overlap=1
+        ):
+            continue
         _append_action(
             question_actions, label, question=_limit_text(follow_up, AI_ACTIONS_QUESTION_MAX)
         )
@@ -2904,6 +3011,25 @@ def _ai_quick_actions(
     return actions[:AI_ACTIONS_MAX], chosen_card, True
 
 
+# Seiten, die als Antwortkarte nie weiterhelfen - zusaetzlich zu _RICH_SKIP_TITLES
+# wird hier auch die URL geprueft (Startseite, Archive, Funktionsseiten).
+_BOILERPLATE_URL_MARKERS = (
+    "impressum", "datenschutz", "privacy", "/agb", "terms", "cookie", "sitemap",
+    "widerruf", "disclaimer", "newsletter", "login", "anmelden", "warenkorb",
+    "checkout", "kasse", "mein-konto", "my-account", "/suche", "/search", "404",
+    "/category/", "/tag/", "/author/",
+)
+
+
+def _is_boilerplate_page(title: str, url: str) -> bool:
+    haystack = f"{title} {url}".lower()
+    if any(marker in haystack for marker in _BOILERPLATE_URL_MARKERS):
+        return True
+    # Startseite: kein sinnvolles Ziel fuer eine Detailkarte.
+    path = re.sub(r"^https?://[^/]+", "", str(url or "")).split("?", 1)[0].split("#", 1)[0]
+    return path.strip("/") == ""
+
+
 def _build_rich_reply(
     ctx: BotContext,
     rag: Any,
@@ -2913,6 +3039,7 @@ def _build_rich_reply(
     lang: str,
     docs: Optional[List[Any]] = None,
     widget_cfg: Optional[Dict[str, Any]] = None,
+    offered: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Karte + Aktionen zur Antwort.
 
@@ -2948,6 +3075,8 @@ def _build_rich_reply(
             built = _build_rich_card(ctx, doc, answer, lang)
             if not built or not built.get("url") or not built.get("title"):
                 continue
+            if _is_boilerplate_page(str(built.get("title") or ""), str(built.get("url") or "")):
+                continue
             if built["url"] in seen_urls:
                 continue
             seen_urls.add(built["url"])
@@ -2959,7 +3088,7 @@ def _build_rich_reply(
     try:
         actions, card, ai_answered = _ai_quick_actions(
             ctx, candidates, question, answer, history, lang,
-            widget_cfg=widget_cfg, source_docs=source_docs,
+            widget_cfg=widget_cfg, source_docs=source_docs, offered=offered,
         )
     except Exception as exc:
         print("KI-Buttons nicht verfügbar:", exc)
@@ -4949,6 +5078,9 @@ def chat():
     bot_slug = _extract_bot_slug(data)
     customer_id = _extract_customer_id(data)
 
+    # Bereits angezeigte Buttons: verhindert, dass dieselbe Empfehlung erneut kommt.
+    offered = [str(item) for item in (data.get("offered") or []) if str(item).strip()][-10:]
+
     if not question:
         return jsonify({"error": "Keine Frage übergeben."}), 400
     if not bot_slug:
@@ -4978,7 +5110,9 @@ def chat():
         answer_docs: List[Any] = []
         answer = rag(question, history=history, lang=lang, docs_out=answer_docs)
         try:
-            rich = _build_rich_reply(ctx, rag, question, answer, history, lang, docs=answer_docs)
+            rich = _build_rich_reply(
+                ctx, rag, question, answer, history, lang, docs=answer_docs, offered=offered
+            )
         except Exception as rich_exc:
             print("Rich-Reply konnte nicht erzeugt werden:", rich_exc)
             try:

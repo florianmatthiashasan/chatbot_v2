@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.3.3
+Stable tag: 0.3.4
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -45,6 +45,11 @@ The plugin stores embeddings in the WordPress database as JSON vectors. This kee
 
 
 == Changelog ==
+
+= 0.3.4 =
+* Button-Beschriftungen sind jetzt kurze Menue-Texte aus zwei bis drei Woertern. Saetze und abgeschnittene Wortgruppen wie "Wo befindet sich die" werden verworfen statt gekuerzt.
+* Kein Button wiederholt mehr eine schon gestellte Frage oder eine Empfehlung, die im selben Gespraech bereits angezeigt wurde - das Widget meldet dem Server, was er schon gezeigt hat.
+* Fix: Aktions-Buttons gingen verloren, wenn das Modell "type": "phone" statt "type": "link" mit "target": "phone" schrieb.
 
 = 0.3.3 =
 * Antwortkarten passen jetzt zur Antwort: aus den Treffern werden bis zu drei Kandidaten gebildet, das Modell waehlt die passende Seite oder ausdruecklich keine. Vorher war es immer der beste Suchtreffer, auch wenn er nichts mit der Antwort zu tun hatte.
