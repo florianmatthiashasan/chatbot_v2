@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.3.4
+Stable tag: 0.4.0
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -45,6 +45,14 @@ The plugin stores embeddings in the WordPress database as JSON vectors. This kee
 
 
 == Changelog ==
+
+= 0.4.0 =
+* Der Bot kennt jetzt die Details. Bisher wurden Tabellen und Listen beim Indexieren zu einem Wortbrei zusammengezogen ("Doppelzimmer180 EURSuite260 EUR") - Preise, Zeiten und Bedingungen waren praktisch nicht auffindbar. Tabellen werden jetzt als Zeilen mit Spaltentrennung, Listen als Aufzaehlung und Ueberschriften als Abschnitte uebernommen.
+* Kleinere Abschnitte (380 statt 620 Token) mit Ueberlappung: ein Detail an der Grenze zweier Abschnitte geht nicht mehr verloren.
+* Zu jedem Treffer wird der direkt angrenzende Abschnitt derselben Seite mitgeladen - die Tabelle im einen, die Bedingungen im naechsten Abschnitt.
+* Mehr Kontext pro Antwort: Standard jetzt 12 Abschnitte und 20.000 Zeichen (vorher 8 und 14.000). Bestehende Installationen werden angehoben, sofern die alten Standardwerte unveraendert waren.
+* Antwortregel: konkrete Zahlen, Preise, Zeiten und Bedingungen nennen statt vager Zusammenfassung; mehrere Varianten einzeln auffuehren.
+* WICHTIG: Fuer die Verbesserungen ist ein neues Training noetig, da sich die Aufbereitung der Inhalte geaendert hat.
 
 = 0.3.4 =
 * Button-Beschriftungen sind jetzt kurze Menue-Texte aus zwei bis drei Woertern. Saetze und abgeschnittene Wortgruppen wie "Wo befindet sich die" werden verworfen statt gekuerzt.

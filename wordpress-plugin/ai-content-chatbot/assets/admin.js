@@ -273,7 +273,8 @@
     return `
       <section class="aicb-panel">
         <div class="aicb-panel-head">
-          <div><h2>Training aus WordPress-Inhalten</h2><p>Indexiert Seiten, Beitraege und alle ausgewaehlten oeffentlichen Post Types. Keine Sitemap noetig.</p></div>
+          <div><h2>Training aus WordPress-Inhalten</h2><p>Indexiert Seiten, Beitraege und alle ausgewaehlten oeffentlichen Post Types. Keine Sitemap noetig.</p>
+          <p class="aicb-hint">Nach einem Plugin-Update lohnt sich ein neues Training: Tabellen, Listen und Ueberschriften bleiben jetzt erhalten und die Abschnitte ueberlappen sich, damit Details wie Preise, Zeiten und Bedingungen zuverlaessig gefunden werden.</p></div>
           ${button("Jetzt komplett trainieren", { id: "aicb-start-training", primary: true, disabled: state.busy })}
         </div>
         <div class="aicb-metrics">

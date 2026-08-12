@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.3.4
+ * Version: 0.4.0
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -26,10 +26,14 @@ final class AICB_Plugin {
      */
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.3.4';
+    private const ASSET_VERSION = '0.4.0';
     // Cosinus-Aehnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
+    // Kleinere Chunks finden Details praeziser, die Ueberlappung haelt
+    // Zusammenhaenge ueber die Grenze hinweg zusammen.
+    private const CHUNK_TARGET_TOKENS = 380;
+    private const CHUNK_OVERLAP_TOKENS = 70;
     private const SESSION_TTL = 86400;
 
     private static ?AICB_Plugin $instance = null;
@@ -132,8 +136,8 @@ final class AICB_Plugin {
             'openai_api_key' => '',
             'chat_model' => 'gpt-4o-mini',
             'embedding_model' => 'text-embedding-3-large',
-            'retriever_k' => 8,
-            'max_context_chars' => 14000,
+            'retriever_k' => 12,
+            'max_context_chars' => 20000,
             'batch_size' => 4,
             'auto_index_on_save' => true,
             'widget_enabled' => true,
@@ -611,8 +615,22 @@ final class AICB_Plugin {
             . "Wenn etwas nicht im Kontext steht, sage ehrlich, dass du es nicht weisst.\n"
             . "Antworte praezise auf Deutsch, nenne konkrete Fakten und gib Quellen als direkte URLs aus.";
         $settings = $this->settings();
+        $settings_changed = false;
         if (trim((string) ($settings['system_prompt'] ?? '')) === trim($legacy_prompt)) {
             $settings['system_prompt'] = self::default_system_prompt();
+            $settings_changed = true;
+        }
+        // Alte Standardwerte anheben - mehr Kontext heisst mehr Details in der
+        // Antwort. Selbst gesetzte Werte bleiben unangetastet.
+        if ((int) ($settings['retriever_k'] ?? 0) === 8) {
+            $settings['retriever_k'] = 12;
+            $settings_changed = true;
+        }
+        if ((int) ($settings['max_context_chars'] ?? 0) === 14000) {
+            $settings['max_context_chars'] = 20000;
+            $settings_changed = true;
+        }
+        if ($settings_changed) {
             update_option(self::OPTION_KEY, $settings, false);
         }
 
@@ -1375,6 +1393,12 @@ final class AICB_Plugin {
         return implode("\n", $lines);
     }
 
+    /**
+     * Kleinere Abschnitte mit Ueberlappung. Kleiner heisst: eine konkrete
+     * Angabe (Preis, Uhrzeit, Bedingung) dominiert den Chunk und wird bei der
+     * Suche auch gefunden. Die Ueberlappung sorgt dafuer, dass ein Detail an
+     * der Grenze zweier Abschnitte nicht verloren geht.
+     */
     private function chunk_text(string $text, string $title): array {
         $clean = $this->normalize_text($text);
         if ($clean === '') {
@@ -1392,12 +1416,14 @@ final class AICB_Plugin {
                     continue;
                 }
                 $candidate = trim($buffer . "\n\n" . $paragraph);
-                if ($buffer !== '' && $this->estimate_tokens($candidate) > 620) {
+                if ($buffer !== '' && $this->estimate_tokens($candidate) > self::CHUNK_TARGET_TOKENS) {
                     $chunks[] = [
                         'section' => $section['title'],
                         'content' => $this->format_chunk($title, $section['title'], $buffer),
                     ];
-                    $buffer = $paragraph;
+                    // Der letzte Absatz wandert in den naechsten Chunk mit.
+                    $overlap = $this->chunk_overlap_tail($buffer);
+                    $buffer = trim($overlap === '' ? $paragraph : $overlap . "\n\n" . $paragraph);
                 } else {
                     $buffer = $candidate;
                 }
@@ -1410,6 +1436,24 @@ final class AICB_Plugin {
             }
         }
         return $chunks;
+    }
+
+    /** Letzter Absatz eines Chunks als Ueberlappung fuer den naechsten. */
+    private function chunk_overlap_tail(string $buffer): string {
+        $parts = preg_split("/\n{2,}/", trim($buffer)) ?: [];
+        if (!$parts) {
+            return '';
+        }
+        $tail = trim((string) end($parts));
+        if ($tail === '' || $this->estimate_tokens($tail) > self::CHUNK_OVERLAP_TOKENS) {
+            // Zu langer Absatz: nur die letzten Saetze mitnehmen.
+            $sentences = preg_split('/(?<=[.!?])\s+/u', $tail) ?: [];
+            $tail = '';
+            while ($sentences && $this->estimate_tokens($tail) < self::CHUNK_OVERLAP_TOKENS) {
+                $tail = trim(array_pop($sentences) . ' ' . $tail);
+            }
+        }
+        return trim($tail);
     }
 
     private function split_sections(string $text, string $default_title): array {
@@ -1724,6 +1768,10 @@ final class AICB_Plugin {
             . "- Beziehe dich auf den bisherigen Verlauf. Folgefragen wie \"und die Preise?\" beziehen "
             . "sich auf das zuletzt besprochene Thema.\n"
             . "- Nennst du Fakten aus dem Kontext, gib die passenden Quellen als direkte URLs an.\n"
+            . "- Nenne konkrete Details aus dem Kontext: Zahlen, Preise, Uhrzeiten, Dauer, Namen, "
+            . "Bedingungen, Ausstattung. Fasse nicht vage zusammen, wenn genaue Angaben dastehen.\n"
+            . "- Stehen mehrere Varianten im Kontext (z. B. mehrere Zimmer, Tarife oder Pakete), "
+            . "nenne sie einzeln mit ihren jeweiligen Angaben statt nur einer Sammelaussage.\n"
             . "- Halte Antworten kompakt: kurze Absaetze, bei Aufzaehlungen Listen.";
 
         $target_name = $this->lang_display_name($lang);
@@ -1783,7 +1831,7 @@ final class AICB_Plugin {
     private function search_chunks(array $query_vectors): array {
         global $wpdb;
         $table = $wpdb->prefix . 'aicb_chunks';
-        $limit = max(1, min(20, (int) $this->setting('retriever_k', 8)));
+        $limit = max(1, min(24, (int) $this->setting('retriever_k', 12)));
         // Einzelvektor auch akzeptieren, damit Aufrufer beides uebergeben koennen.
         $vectors = (isset($query_vectors[0]) && is_array($query_vectors[0])) ? $query_vectors : [$query_vectors];
         $rows = $wpdb->get_results("SELECT id, source_id, source_url, title, section, content, embedding FROM {$table} WHERE embedding IS NOT NULL", ARRAY_A);
@@ -1805,11 +1853,53 @@ final class AICB_Plugin {
             $scored[] = $row;
         }
         usort($scored, fn($a, $b) => ($b['score'] <=> $a['score']));
-        return array_slice($scored, 0, $limit);
+        $top = array_slice($scored, 0, $limit);
+        return $this->with_neighbour_chunks($top, $scored, $limit);
+    }
+
+    /**
+     * Zu jedem Treffer den direkt angrenzenden Abschnitt derselben Seite
+     * ergaenzen. Details stehen oft eine Zeile weiter: die Tabelle im einen
+     * Chunk, die Fussnote mit den Bedingungen im naechsten.
+     */
+    private function with_neighbour_chunks(array $top, array $all, int $limit): array {
+        if (!$top) {
+            return $top;
+        }
+        $by_id = [];
+        foreach ($all as $row) {
+            $by_id[(int) $row['id']] = $row;
+        }
+        $selected = [];
+        foreach ($top as $row) {
+            $selected[(int) $row['id']] = $row;
+        }
+        foreach ($top as $row) {
+            if (count($selected) >= $limit + 6) {
+                break;
+            }
+            $id = (int) $row['id'];
+            foreach ([$id - 1, $id + 1] as $neighbour_id) {
+                if (isset($selected[$neighbour_id]) || !isset($by_id[$neighbour_id])) {
+                    continue;
+                }
+                $neighbour = $by_id[$neighbour_id];
+                // Nur innerhalb derselben Seite.
+                if ((string) $neighbour['source_id'] !== (string) $row['source_id']) {
+                    continue;
+                }
+                // Etwas unter den Treffer einsortieren, damit die Reihenfolge stimmt.
+                $neighbour['score'] = (float) $row['score'] - 0.001;
+                $selected[$neighbour_id] = $neighbour;
+            }
+        }
+        $result = array_values($selected);
+        usort($result, fn($a, $b) => ($b['score'] <=> $a['score']));
+        return $result;
     }
 
     private function build_context(array $matches): string {
-        $max = max(3000, (int) $this->setting('max_context_chars', 14000));
+        $max = max(3000, (int) $this->setting('max_context_chars', 20000));
         $parts = [];
         $chars = 0;
         foreach ($matches as $idx => $row) {
@@ -1817,8 +1907,8 @@ final class AICB_Plugin {
             if ($content === '') {
                 continue;
             }
-            if (strlen($content) > 2200) {
-                $content = substr($content, 0, 2200) . "\n...[gekuerzt]";
+            if (strlen($content) > 3000) {
+                $content = substr($content, 0, 3000) . "\n...[gekuerzt]";
             }
             $entry = '[' . ($idx + 1) . '] Quelle: ' . ($row['source_url'] ?: home_url('/')) . ' | Titel: ' . $row['title'] . ' | Abschnitt: ' . $row['section'] . "\n" . $content;
             if ($chars + strlen($entry) > $max && $parts) {
@@ -2608,10 +2698,41 @@ PROMPT;
         return (array) get_option(self::FAQ_OPTION_KEY, []);
     }
 
+    /**
+     * HTML zu Text, aber mit Struktur. wp_strip_all_tags alleine macht aus
+     * Tabellen und Listen einen Fliesstext-Brei - genau dort stehen aber die
+     * Details: Preise, Zeiten, Leistungen, Bedingungen.
+     */
     private function clean_text(string $html): string {
-        $html = preg_replace('#<(script|style|noscript)[^>]*>.*?</\1>#is', ' ', $html);
-        $text = wp_strip_all_tags((string) $html, true);
-        return $this->normalize_text($text);
+        $html = (string) $html;
+        $html = preg_replace('#<(script|style|noscript|template)[^>]*>.*?</\1>#is', ' ', $html);
+
+        // Ueberschriften als Markdown, damit die Abschnittslogik sie erkennt.
+        for ($level = 1; $level <= 6; $level++) {
+            $html = preg_replace('#<h' . $level . '[^>]*>(.*?)</h' . $level . '>#is', "\n\n" . str_repeat('#', $level) . ' $1' . "\n", $html);
+        }
+        // Listenpunkte behalten ihren Aufzaehlungscharakter.
+        $html = preg_replace('#<li[^>]*>#i', "\n- ", $html);
+        $html = preg_replace('#</li>#i', "\n", $html);
+        // Tabellen: Zellen mit | trennen, Zeilen umbrechen.
+        $html = preg_replace('#</t[dh]>\s*<t[dh][^>]*>#i', ' | ', $html);
+        $html = preg_replace('#<t[dh][^>]*>#i', '', $html);
+        $html = preg_replace('#</t[dh]>#i', '', $html);
+        $html = preg_replace('#</tr>#i', "\n", $html);
+        $html = preg_replace('#</(caption|table)>#i', "\n\n", $html);
+        // Definitionslisten und Absaetze.
+        $html = preg_replace('#<dt[^>]*>#i', "\n- ", $html);
+        $html = preg_replace('#</dt>#i', ': ', $html);
+        $html = preg_replace('#<br\s*/?>#i', "\n", $html);
+        $html = preg_replace('#</(p|div|section|article|tr|dd|blockquote|figcaption)>#i', "\n\n", $html);
+
+        $text = wp_strip_all_tags($html, false);
+        $text = $this->normalize_text($text);
+        // Aufzaehlungen sauber halten: keine leeren Punkte, keine Doppelstriche.
+        $text = preg_replace('/\n-\s*\n/', "\n", $text);
+        $text = preg_replace('/^-\s*$/m', '', $text);
+        $text = preg_replace('/\n{2,}(?=- )/', "\n", $text);
+        return trim(preg_replace('/\n{3,}/', "\n\n", $text));
     }
 
     private function normalize_text(string $text): string {
