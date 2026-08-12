@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.3.2
+Stable tag: 0.3.3
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -45,6 +45,11 @@ The plugin stores embeddings in the WordPress database as JSON vectors. This kee
 
 
 == Changelog ==
+
+= 0.3.3 =
+* Antwortkarten passen jetzt zur Antwort: aus den Treffern werden bis zu drei Kandidaten gebildet, das Modell waehlt die passende Seite oder ausdruecklich keine. Vorher war es immer der beste Suchtreffer, auch wenn er nichts mit der Antwort zu tun hatte.
+* Rechtstexte, Startseite, Archive, Login-, Konto- und Shop-Seiten kommen als Karte nicht mehr in Frage.
+* Ohne Titel oder ohne Ziel-URL wird keine Karte mehr gebaut.
 
 = 0.3.2 =
 * Eigenes Logo-SVG als Standard-Icon statt Emoji; zeichnet sich in der Avatar-Farbe und laesst sich im Widget-Tab durch ein anderes SVG oder ein Emoji ersetzen.

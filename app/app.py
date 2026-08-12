@@ -2555,8 +2555,13 @@ _AI_ACTIONS_SYSTEM = (
     "- Hoechstens zwei Aktions-Buttons, jedes target nur einmal.\n"
     "- Mindestens ein Button muss type \"question\" sein und unter den Aktions-Buttons stehen.\n"
     "- Keine zwei Buttons mit gleicher Bedeutung.\n"
+    "Gib zusaetzlich \"card\" an: die Nummer der Seite aus \"Verfuegbare Seiten\", die als Karte unter "
+    "der Antwort erscheinen soll. Waehle nur eine Seite, die genau das Thema der Antwort vertieft und "
+    "dem Nutzer echten Mehrwert bringt. Passt keine Seite wirklich zum Inhalt der Antwort, ist die "
+    "Antwort allgemein, eine Begruessung oder eine Absage, gib 0 an. Im Zweifel immer 0 - eine "
+    "unpassende Karte ist schlechter als keine.\n"
     "Antworte ausschliesslich mit JSON in dieser Form: "
-    "{\"actions\": [{\"label\": \"...\", \"type\": \"question\", \"question\": \"...\"}]}"
+    "{\"card\": 0, \"actions\": [{\"label\": \"...\", \"type\": \"question\", \"question\": \"...\"}]}"
 )
 
 # Telefonnummern nur mit klarem Signal erkennen. Ohne Signal landen Preise,
@@ -2736,20 +2741,23 @@ def _clean_action_label(value: Any) -> str:
 
 def _ai_quick_actions(
     ctx: BotContext,
-    card: Optional[Dict[str, Any]],
+    candidates: List[Dict[str, Any]],
     question: str,
     answer: str,
     history: Any,
     lang: str,
     widget_cfg: Optional[Dict[str, Any]] = None,
     source_docs: Optional[List[Any]] = None,
-) -> List[Dict[str, str]]:
-    """Buttons aus dem Gespraech generieren. Leere Liste = Fallback nutzen."""
+) -> Tuple[List[Dict[str, str]], Optional[Dict[str, Any]], bool]:
+    """Buttons und passende Karte aus dem Gespraech.
+
+    Rueckgabe: (Aktionen, gewaehlte Karte, ob die KI geantwortet hat).
+    """
     if not _ai_actions_enabled():
-        return []
+        return [], None, False
     llm = _ai_actions_llm(ctx)
     if llm is None:
-        return []
+        return [], None, False
 
     cfg = widget_cfg or {}
     lang_key = _normalize_chat_lang(lang) or "de"
@@ -2757,8 +2765,6 @@ def _ai_quick_actions(
     # nicht dem, was das Modell aus aelteren Nachrichten herausliest.
     button_lang = _detect_message_lang(question) or lang_key
     lang_name = _lang_display_name(button_lang)
-    card_url = (card or {}).get("url") or ""
-    card_title = (card or {}).get("title") or ""
     contact = cfg.get("contact") or {}
     # Nur eine echte Seite darf "contact" sein - sonst verspricht das Label eine
     # Kontaktseite und der Klick oeffnet das Mailprogramm.
@@ -2786,7 +2792,7 @@ def _ai_quick_actions(
     phone = phone_from_answer or configured_phone
     email = email_from_answer or configured_email
     link_targets = {
-        "card": card_url,
+        "card": "",
         "contact": contact_page,
         "phone": f"tel:{phone}" if phone else "",
         "email": f"mailto:{email}" if email else "",
@@ -2799,7 +2805,7 @@ def _ai_quick_actions(
     ]
 
     available = [
-        f"card (oeffnet die Seite: {card_title or 'Detailseite'})" if link_targets["card"] else "",
+        'card (oeffnet die Seite, die du unter "card" auswaehlst)' if candidates else "",
         "contact (Kontaktseite des Unternehmens)" if link_targets["contact"] else "",
         f"phone (waehlt {phone} direkt auf dem Geraet)" if phone else "",
         f"email (oeffnet eine Mail an {email})" if email else "",
@@ -2813,6 +2819,15 @@ def _ai_quick_actions(
         context_lines.append(f"Bisheriges Gespraech:\n{verlauf}")
     if topics:
         context_lines.append("Themen des Unternehmens: " + ", ".join(topics[:8]))
+    if candidates:
+        lines = []
+        for idx, item in enumerate(candidates, start=1):
+            path = str(item.get("url") or "").split("//", 1)[-1]
+            path = "/" + path.split("/", 1)[1] if "/" in path else path
+            lines.append(f"{idx}) {item.get('title', '')} - {path}")
+        context_lines.append('Verfuegbare Seiten (fuer "card"):\n' + "\n".join(lines))
+    else:
+        context_lines.append('Verfuegbare Seiten: keine - "card" muss 0 sein.')
     context_lines.append(f"Aktuelle Frage des Nutzers: {_limit_text(question, 300)}")
     context_lines.append(
         "Antwort des Assistenten:\n"
@@ -2828,7 +2843,7 @@ def _ai_quick_actions(
         )
     except Exception as exc:
         print("Button-Generierung fehlgeschlagen:", exc)
-        return []
+        return [], None, False
 
     content = getattr(response, "content", response)
     if isinstance(content, list):  # manche Modelle liefern Content-Bloecke
@@ -2838,7 +2853,16 @@ def _ai_quick_actions(
     payload = _parse_json_object(str(content or ""))
     if not payload:
         print("Button-Generierung: kein JSON in der Antwort")
-        return []
+        return [], None, False
+
+    # Karte: nur die vom Modell gewaehlte Seite, sonst keine.
+    try:
+        choice = int(payload.get("card") or 0)
+    except Exception:
+        choice = 0
+    chosen_card = candidates[choice - 1] if 1 <= choice <= len(candidates) else None
+    if chosen_card:
+        link_targets["card"] = chosen_card.get("url") or ""
 
     # Aktionen (Anrufen, Seite oeffnen) stehen vor den Folgefragen - sie gehoeren
     # optisch zur Karte darueber, die Fragen sind der Rest des Gespraechs.
@@ -2877,7 +2901,7 @@ def _ai_quick_actions(
         for action in question_actions
         if not any(existing["label"].lower() == action["label"].lower() for existing in link_actions)
     ]
-    return actions[:AI_ACTIONS_MAX]
+    return actions[:AI_ACTIONS_MAX], chosen_card, True
 
 
 def _build_rich_reply(
@@ -2908,25 +2932,43 @@ def _build_rich_reply(
             print("Widget-Konfiguration für Rich-Reply nicht lesbar:", exc)
             widget_cfg = {}
 
-    intent_keywords = _item_intent_keywords(widget_cfg)
-    if (
-        source_docs
-        and not _looks_unanswered(answer)
-        and _has_rich_item_intent(question, answer, source_docs, extra_keywords=intent_keywords)
-    ):
-        picked = _pick_rich_doc(source_docs, question)
-        if picked is not None:
-            card = _build_rich_card(ctx, picked, answer, lang)
+    # Kandidaten sammeln - welche davon zur Antwort passt, entscheidet der
+    # Button-Call. Eine Karte, die nur der beste Suchtreffer ist, zeigt sonst
+    # irgendeine Seite ohne Bezug zur Antwort.
+    candidates: List[Dict[str, Any]] = []
+    if source_docs and not _looks_unanswered(answer):
+        seen_urls = set()
+        for doc in source_docs[:6]:
+            if len(candidates) >= 3:
+                break
+            meta = getattr(doc, "metadata", {}) or {}
+            title = _clean_card_title(str(meta.get("section") or meta.get("title") or meta.get("filename") or ""))
+            if any(key in _RICH_SKIP_TITLES for key in _doc_skip_keys(meta, title)):
+                continue
+            built = _build_rich_card(ctx, doc, answer, lang)
+            if not built or not built.get("url") or not built.get("title"):
+                continue
+            if built["url"] in seen_urls:
+                continue
+            seen_urls.add(built["url"])
+            candidates.append(built)
 
     # Erst die KI fragen; die statischen Labels sind nur noch das Sicherheitsnetz.
     actions: List[Dict[str, str]] = []
+    ai_answered = False
     try:
-        actions = _ai_quick_actions(
-            ctx, card, question, answer, history, lang,
+        actions, card, ai_answered = _ai_quick_actions(
+            ctx, candidates, question, answer, history, lang,
             widget_cfg=widget_cfg, source_docs=source_docs,
         )
     except Exception as exc:
         print("KI-Buttons nicht verfügbar:", exc)
+    if not ai_answered and candidates:
+        # Ohne KI-Urteil greift die alte Heuristik: Karte nur bei klarem
+        # Objekt-/Angebotsbezug in der Frage.
+        intent_keywords = _item_intent_keywords(widget_cfg)
+        if _has_rich_item_intent(question, answer, source_docs, extra_keywords=intent_keywords):
+            card = candidates[0]
     if not actions:
         actions = _build_quick_actions(card, question, answer, lang, widget_cfg=widget_cfg)
 

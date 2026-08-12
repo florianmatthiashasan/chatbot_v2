@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.3.2
+ * Version: 0.3.3
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -26,7 +26,7 @@ final class AICB_Plugin {
      */
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.3.2';
+    private const ASSET_VERSION = '0.3.3';
     // Cosinus-Aehnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -1469,16 +1469,20 @@ final class AICB_Plugin {
             $answer = $count > 0 ? $pack['error'] : $pack['no_index'];
         }
 
-        $card = $this->build_card($relevant, $answer);
-        $actions = $this->build_actions($card, $question, $answer, $history, $target_lang, $relevant);
+        $candidates = $this->card_candidates($relevant, $answer);
+        $actions = $this->build_actions($candidates, $question, $answer, $history, $target_lang, $relevant);
 
         // Aehnlichkeitswerte allein trennen Begruessung und fremdsprachige
         // Fachfrage nicht (gemessen: 0.32 vs 0.31). Deshalb meldet der
         // Button-Call, ob die Antwort ueberhaupt eine inhaltliche Auskunft ist.
         $is_content = $actions['content'] === null ? true : (bool) $actions['content'];
-        if (!$is_content) {
-            $card = null;
+        // Ohne KI-Urteil (kein Key, Call gescheitert) faellt die Karte auf den
+        // besten Treffer zurueck; mit Urteil zaehlt allein die Wahl des Modells.
+        $card_row = $actions['card'];
+        if ($card_row === null && $actions['content'] === null && $candidates) {
+            $card_row = $candidates[0];
         }
+        $card = ($is_content && $card_row) ? $this->build_card($card_row) : null;
 
         // Quellenblock in der Sprache der Antwort - der Nutzer darf in jeder
         // Sprache schreiben, der Block muss zur Antwort passen.
@@ -1554,34 +1558,75 @@ final class AICB_Plugin {
     }
 
     /**
-     * Eine Karte zum besten Treffer: Titel, Teaser, Beitragsbild, Link.
-     * Bei einer Antwort ohne Information gibt es bewusst keine Karte.
+     * Kandidaten fuer die Antwortkarte. Ausgewaehlt wird spaeter vom Modell -
+     * hier fallen nur die Seiten raus, die als Karte nie Sinn ergeben.
      */
-    private function build_card(array $matches, string $answer): ?array {
+    private function card_candidates(array $matches, string $answer): array {
         if (!$matches || $this->looks_unanswered($answer)) {
-            return null;
+            return [];
         }
-        $row = $matches[0];
-        // Bei Begruessungen und Small Talk passt kein Abschnitt wirklich -
-        // dann gibt es auch keine Karte.
-        if ((float) ($row['score'] ?? 0) < self::CARD_MIN_SCORE) {
-            return null;
+        $candidates = [];
+        $seen = [];
+        foreach ($matches as $row) {
+            if (count($candidates) >= 3) {
+                break;
+            }
+            // Bei Begruessungen und Small Talk passt kein Abschnitt wirklich.
+            if ((float) ($row['score'] ?? 0) < self::CARD_MIN_SCORE) {
+                continue;
+            }
+            $url = esc_url_raw((string) ($row['source_url'] ?? ''));
+            $title = trim((string) ($row['title'] ?? ''));
+            // Ohne Ziel und ohne Titel ist eine Karte wertlos.
+            if ($url === '' || $title === '' || isset($seen[$url])) {
+                continue;
+            }
+            if ($this->is_boilerplate_page($title, $url)) {
+                continue;
+            }
+            $seen[$url] = true;
+            $candidates[] = $row;
         }
+        return $candidates;
+    }
+
+    /**
+     * Seiten, die als Antwortkarte nie weiterhelfen: Rechtstexte, Startseite,
+     * Archive, Konto- und Shop-Funktionsseiten.
+     */
+    private function is_boilerplate_page(string $title, string $url): bool {
+        $haystack = $this->str_lower($title . ' ' . $url);
+        $markers = [
+            'impressum', 'datenschutz', 'privacy', 'agb', 'terms', 'cookie', 'sitemap',
+            'widerruf', 'disclaimer', 'haftung', 'newsletter', 'login', 'anmelden',
+            'warenkorb', 'checkout', 'kasse', 'mein-konto', 'my-account', 'suche', 'search',
+            '404', 'blog/page', 'category/', 'tag/', 'author/',
+        ];
+        foreach ($markers as $marker) {
+            if (strpos($haystack, $marker) !== false) {
+                return true;
+            }
+        }
+        // Startseite: nichts, was man als Detailseite verlinken moechte.
+        $path = trim((string) wp_parse_url($url, PHP_URL_PATH), '/');
+        return $path === '';
+    }
+
+    /** Aus einem Treffer die fertige Karte bauen. */
+    private function build_card(array $row): ?array {
         $title = trim((string) ($row['title'] ?? ''));
         $section = trim((string) ($row['section'] ?? ''));
         $url = esc_url_raw((string) ($row['source_url'] ?? ''));
-        if ($title === '' && $section === '') {
+        if ($title === '' || $url === '') {
             return null;
         }
 
         $card = [
-            'title' => $title !== '' ? $title : $section,
+            'title' => $title,
             'description' => $this->card_teaser((string) ($row['content'] ?? ''), $title, $section),
             'details' => [],
+            'url' => $url,
         ];
-        if ($url !== '') {
-            $card['url'] = $url;
-        }
         $image = $this->card_image((string) ($row['source_id'] ?? ''), $url);
         if ($image !== '') {
             $card['image_url'] = $image;
@@ -1933,16 +1978,16 @@ final class AICB_Plugin {
      * Buttons unter der Antwort. Zuerst von der KI aus dem Gespraech erzeugt,
      * bei Fehlern die statischen Texte.
      */
-    private function build_actions(?array $card, string $question, string $answer, array $history, string $lang, array $matches): array {
+    private function build_actions(array $candidates, string $question, string $answer, array $history, string $lang, array $matches): array {
         try {
-            $result = $this->ai_quick_actions($card, $question, $answer, $history, $lang, $matches);
+            $result = $this->ai_quick_actions($candidates, $question, $answer, $history, $lang, $matches);
             if (!empty($result['actions'])) {
                 return $result;
             }
         } catch (Throwable $e) {
             error_log('AICB action generation failed: ' . $e->getMessage());
         }
-        return ['actions' => $this->quick_actions($lang), 'lang' => $lang, 'content' => null];
+        return ['actions' => $this->quick_actions($lang), 'lang' => $lang, 'content' => null, 'card' => null];
     }
 
     private function quick_actions(string $lang = 'de'): array {
@@ -1985,15 +2030,19 @@ Regeln:
 - Mindestens ein Button muss type "question" sein und unter den Aktions-Buttons stehen.
 - Keine zwei Buttons mit gleicher Bedeutung.
 Gib zusaetzlich an:
+- "card": Nummer der Seite aus "Verfuegbare Seiten", die als Karte unter der Antwort erscheinen soll.
+  Waehle nur eine Seite, die genau das Thema der Antwort vertieft und dem Nutzer echten Mehrwert bringt.
+  Passt keine Seite wirklich zum Inhalt der Antwort, ist die Antwort allgemein, eine Begruessung oder eine
+  Absage, gib 0 an. Im Zweifel immer 0 - eine unpassende Karte ist schlechter als keine.
 - "lang": ISO-639-1-Code der Sprache, in der die Antwort des Assistenten geschrieben ist.
 - "content": true, wenn die Antwort eine inhaltliche Auskunft zu Website, Unternehmen, Produkten oder Leistungen gibt. false, wenn sie nur Begruessung, Dank, Small Talk, Rueckfrage oder die Aussage ist, dass keine Informationen vorliegen.
-Antworte ausschliesslich mit JSON in dieser Form: {"lang": "de", "content": true, "actions": [{"label": "...", "type": "question", "question": "..."}]}
+Antworte ausschliesslich mit JSON in dieser Form: {"card": 0, "lang": "de", "content": true, "actions": [{"label": "...", "type": "question", "question": "..."}]}
 PROMPT;
 
-    private function ai_quick_actions(?array $card, string $question, string $answer, array $history, string $lang, array $matches): array {
+    private function ai_quick_actions(array $candidates, string $question, string $answer, array $history, string $lang, array $matches): array {
         $settings = $this->settings();
         if (trim((string) ($settings['openai_api_key'] ?? '')) === '') {
-            return ['actions' => [], 'lang' => '', 'content' => null];
+            return ['actions' => [], 'lang' => '', 'content' => null, 'card' => null];
         }
 
         $sources = $this->sources_text($matches);
@@ -2015,14 +2064,14 @@ PROMPT;
         $email = $email !== '' ? $email : $configured_email;
 
         $targets = [
-            'card' => (string) ($card['url'] ?? ''),
+            'card' => '',
             'contact' => $contact_page,
             'phone' => $phone !== '' ? 'tel:' . $phone : '',
             'email' => $email !== '' ? 'mailto:' . $email : '',
         ];
 
         $available = array_filter([
-            $targets['card'] !== '' ? 'card (oeffnet die Seite: ' . ($card['title'] ?? 'Detailseite') . ')' : '',
+            $candidates ? 'card (oeffnet die Seite, die du unter "card" auswaehlst)' : '',
             $targets['contact'] !== '' ? 'contact (Kontaktseite des Unternehmens)' : '',
             $phone !== '' ? 'phone (waehlt ' . $phone . ' direkt auf dem Geraet)' : '',
             $email !== '' ? 'email (oeffnet eine Mail an ' . $email . ')' : '',
@@ -2059,6 +2108,18 @@ PROMPT;
         if ($topics) {
             $context[] = 'Themen des Unternehmens: ' . implode(', ', array_slice($topics, 0, 8));
         }
+        if ($candidates) {
+            $lines = [];
+            foreach ($candidates as $idx => $row) {
+                $path = (string) wp_parse_url((string) $row['source_url'], PHP_URL_PATH);
+                $lines[] = ($idx + 1) . ') ' . trim((string) $row['title'])
+                    . (trim((string) ($row['section'] ?? '')) !== '' ? ' - Abschnitt: ' . $row['section'] : '')
+                    . ' - ' . ($path ?: $row['source_url']);
+            }
+            $context[] = "Verfuegbare Seiten (fuer \"card\"):\n" . implode("\n", $lines);
+        } else {
+            $context[] = 'Verfuegbare Seiten: keine - "card" muss 0 sein.';
+        }
         $context[] = 'Aktuelle Frage des Nutzers: ' . $this->limit_text($question, 300);
         $context[] = "Antwort des Assistenten:\n" . $this->limit_text($this->strip_sources_tail($answer), 900);
 
@@ -2069,10 +2130,17 @@ PROMPT;
 
         $payload = $this->decode_json_object((string) ($chat['answer'] ?? ''));
         if (!$payload || !is_array($payload['actions'] ?? null)) {
-            return ['actions' => [], 'lang' => '', 'content' => null];
+            return ['actions' => [], 'lang' => '', 'content' => null, 'card' => null];
         }
         $detected = self::normalize_lang((string) ($payload['lang'] ?? ''));
         $is_content = array_key_exists('content', $payload) ? (bool) $payload['content'] : null;
+
+        // Karte: nur die vom Modell gewaehlte Seite, sonst keine.
+        $choice = (int) ($payload['card'] ?? 0);
+        $chosen = ($choice >= 1 && $choice <= count($candidates)) ? $candidates[$choice - 1] : null;
+        if ($chosen) {
+            $targets['card'] = esc_url_raw((string) $chosen['source_url']);
+        }
 
         // Aktionen stehen vor den Folgefragen - sie gehoeren optisch zur Karte.
         $links = [];
@@ -2124,7 +2192,12 @@ PROMPT;
             $seen[$key] = true;
             $unique[] = $action;
         }
-        return ['actions' => array_slice($unique, 0, 3), 'lang' => $detected, 'content' => $is_content];
+        return [
+            'actions' => array_slice($unique, 0, 3),
+            'lang' => $detected,
+            'content' => $is_content,
+            'card' => $chosen,
+        ];
     }
 
     /**
