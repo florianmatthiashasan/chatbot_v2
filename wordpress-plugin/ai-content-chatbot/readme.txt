@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.7.9
+Stable tag: 0.8.0
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -50,6 +50,9 @@ Die PDF-Textextraktion nutzt die mitgelieferte Bibliothek Smalot/PdfParser (MIT-
 
 
 == Changelog ==
+
+= 0.8.0 =
+* Statistik-Seite komplett neu als modernes Dashboard: KPI-Karten (heute/7/30 Tage/gesamt, Antwortquote, Zufriedenheit, Sessions, Ø Nachrichten je Session, Wissens-Chunks) plus Diagramme via gebuendeltem Chart.js (kein CDN) - Chats pro Tag (30 Tage, inkl. beantwortet), Antwortquote-Donut, Feedback-Donut, Verteilung nach Wochentag und Tageszeit sowie Top-Fragen als Balken. Preis/Kosten entfernt.
 
 = 0.7.9 =
 * Fragen-Popup (Greeting-Stil) zuverlaessiger: erscheint jetzt einmal pro Sitzung je Seite, auch wenn das klassische Greeting deaktiviert ist (Greeting nur noch Fallback).

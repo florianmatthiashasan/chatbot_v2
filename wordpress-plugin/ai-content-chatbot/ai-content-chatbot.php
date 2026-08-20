@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.7.9
+ * Version: 0.8.0
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -31,7 +31,7 @@ final class AICB_Plugin {
     private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.7.9';
+    private const ASSET_VERSION = '0.8.0';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -767,7 +767,10 @@ final class AICB_Plugin {
             'config' => $this->public_widget_config(),
         ]);
 
-        wp_enqueue_script('aicb-admin', $base . 'assets/admin.js', ['aicb-widget'], self::ASSET_VERSION, true);
+        // Chart.js (gebuendelt, kein CDN) fuer das Statistik-Dashboard.
+        wp_enqueue_script('aicb-chartjs', $base . 'assets/chart.umd.min.js', [], '4.4.4', true);
+
+        wp_enqueue_script('aicb-admin', $base . 'assets/admin.js', ['aicb-widget', 'aicb-chartjs'], self::ASSET_VERSION, true);
         wp_localize_script('aicb-admin', 'AICBAdmin', [
             'restUrl' => esc_url_raw(rest_url(self::REST_NS . '/')),
             'nonce' => wp_create_nonce('wp_rest'),
@@ -1366,62 +1369,124 @@ final class AICB_Plugin {
         global $wpdb;
         $events = $wpdb->prefix . 'aicb_events';
         $chunks = $wpdb->prefix . 'aicb_chunks';
-        $since_week = gmdate('Y-m-d H:i:s', time() - 7 * DAY_IN_SECONDS);
-        $since_month = gmdate('Y-m-d H:i:s', time() - 30 * DAY_IN_SECONDS);
+        $sessions = $wpdb->prefix . 'aicb_sessions';
+        $now = time();
+        $since_week = gmdate('Y-m-d H:i:s', $now - 7 * DAY_IN_SECONDS);
+        $since_month = gmdate('Y-m-d H:i:s', $now - 30 * DAY_IN_SECONDS);
+        $today_local = wp_date('Y-m-d');
 
-        $rows = $wpdb->get_results("SELECT question, answer, status, input_tokens, output_tokens, created_at FROM {$events} ORDER BY created_at DESC LIMIT 1000", ARRAY_A);
+        // Rohdaten fuer Zeitreihen/Verteilungen (nach lokaler Zeit gebucketet).
+        $rows = $wpdb->get_results("SELECT question, status, feedback, created_at FROM {$events} ORDER BY created_at DESC LIMIT 5000", ARRAY_A);
+
+        $ok_states = ['ok', 'answered', 'success'];
         $top = [];
-        $daily = [];
-        $input = 0;
-        $output = 0;
-        $answered = 0;
+        $daily_total = [];
+        $daily_answered = [];
+        $weekday = array_fill(1, 7, 0);   // 1=Mo ... 7=So
+        $hourly = array_fill(0, 24, 0);
+        $today_chats = 0;
+        $day_cutoff = wp_date('Y-m-d', $now - 29 * DAY_IN_SECONDS);
+
         foreach ($rows ?: [] as $row) {
+            $created = (string) $row['created_at'];
+            $is_ok = in_array(strtolower((string) $row['status']), $ok_states, true);
             $q = trim((string) $row['question']);
             if ($q !== '') {
                 $top[$q] = ($top[$q] ?? 0) + 1;
             }
-            $day = gmdate('Y-m-d', strtotime((string) $row['created_at']));
-            $daily[$day] = ($daily[$day] ?? 0) + 1;
-            $input += (int) $row['input_tokens'];
-            $output += (int) $row['output_tokens'];
-            if (in_array(strtolower((string) $row['status']), ['ok', 'answered', 'success'], true)) {
-                $answered++;
+            // GMT -> lokale Zeit fuer alle zeitbasierten Auswertungen.
+            $local_day = get_date_from_gmt($created, 'Y-m-d');
+            $local_wd = (int) get_date_from_gmt($created, 'N');
+            $local_hr = (int) get_date_from_gmt($created, 'G');
+            if ($local_wd >= 1 && $local_wd <= 7) {
+                $weekday[$local_wd]++;
+            }
+            if ($local_hr >= 0 && $local_hr <= 23) {
+                $hourly[$local_hr]++;
+            }
+            if ($local_day === $today_local) {
+                $today_chats++;
+            }
+            if ($local_day >= $day_cutoff) {
+                $daily_total[$local_day] = ($daily_total[$local_day] ?? 0) + 1;
+                if ($is_ok) {
+                    $daily_answered[$local_day] = ($daily_answered[$local_day] ?? 0) + 1;
+                }
             }
         }
         arsort($top);
 
-        // Feedback (👍/👎) auswerten.
+        // 30 Tage lueckenlos auffuellen.
+        $daily = [];
+        for ($i = 29; $i >= 0; $i--) {
+            $d = wp_date('Y-m-d', $now - $i * DAY_IN_SECONDS);
+            $total = (int) ($daily_total[$d] ?? 0);
+            $ans = (int) ($daily_answered[$d] ?? 0);
+            $daily[] = [
+                'date' => $d,
+                'label' => wp_date('d.m', strtotime($d . ' 12:00:00')),
+                'total' => $total,
+                'answered' => $ans,
+                'unanswered' => max(0, $total - $ans),
+            ];
+        }
+
+        $wd_labels = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+        $by_weekday = [];
+        for ($w = 1; $w <= 7; $w++) {
+            $by_weekday[] = ['label' => $wd_labels[$w - 1], 'count' => (int) $weekday[$w]];
+        }
+        $by_hour = [];
+        for ($h = 0; $h < 24; $h++) {
+            $by_hour[] = ['label' => sprintf('%02d', $h), 'count' => (int) $hourly[$h]];
+        }
+
+        // Genaue Gesamtzahlen (unabhaengig vom Zeilenlimit).
+        $total_chats = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$events}");
+        $answered_total = (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM {$events} WHERE LOWER(status) IN ('ok','answered','success')"
+        );
+        $error_total = max(0, $total_chats - $answered_total);
+
+        // Feedback (👍/👎).
         $helpful = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$events} WHERE feedback = 1");
         $not_helpful = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$events} WHERE feedback = -1");
         $rated = $helpful + $not_helpful;
         $helpful_month = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$events} WHERE feedback = 1 AND created_at >= %s", $since_month));
         $not_helpful_month = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$events} WHERE feedback = -1 AND created_at >= %s", $since_month));
-        $feedback = [
-            'helpful' => $helpful,
-            'not_helpful' => $not_helpful,
-            'rated' => $rated,
-            'satisfaction' => $rated > 0 ? (int) round(100 * $helpful / $rated) : null,
-            'helpful_month' => $helpful_month,
-            'not_helpful_month' => $not_helpful_month,
-        ];
+
+        // Sessions.
+        $sessions_total = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$sessions}");
+        $sessions_active = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$sessions} WHERE expires_at > %s", gmdate('Y-m-d H:i:s', $now)));
+        $avg_messages = (float) $wpdb->get_var("SELECT AVG(messages) FROM {$sessions}");
 
         return rest_ensure_response([
             'overview' => [
+                'total_chats' => $total_chats,
                 'week_chats' => (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$events} WHERE created_at >= %s", $since_week)),
                 'month_chats' => (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$events} WHERE created_at >= %s", $since_month)),
-                'total_chats' => (int) $wpdb->get_var("SELECT COUNT(*) FROM {$events}"),
-                'answered' => $answered,
+                'today_chats' => $today_chats,
+                'answered' => $answered_total,
+                'errors' => $error_total,
+                'answer_rate' => $total_chats > 0 ? (int) round(100 * $answered_total / $total_chats) : null,
                 'chunks' => (int) $wpdb->get_var("SELECT COUNT(*) FROM {$chunks}"),
+                'sessions' => $sessions_total,
+                'active_sessions' => $sessions_active,
+                'avg_messages' => round($avg_messages, 1),
             ],
-            'feedback' => $feedback,
-            'top_questions' => array_slice(array_map(fn($q, $c) => ['question' => $q, 'count' => $c], array_keys($top), $top), 0, 10),
+            'feedback' => [
+                'helpful' => $helpful,
+                'not_helpful' => $not_helpful,
+                'unrated' => max(0, $total_chats - $rated),
+                'rated' => $rated,
+                'satisfaction' => $rated > 0 ? (int) round(100 * $helpful / $rated) : null,
+                'helpful_month' => $helpful_month,
+                'not_helpful_month' => $not_helpful_month,
+            ],
             'daily' => $daily,
-            'usage' => [
-                'input_tokens' => $input,
-                'output_tokens' => $output,
-                'estimated_cost_usd' => $this->estimate_cost($input, $output),
-                'model' => $this->setting('chat_model', 'gpt-4o-mini'),
-            ],
+            'by_weekday' => $by_weekday,
+            'by_hour' => $by_hour,
+            'top_questions' => array_slice(array_map(fn($q, $c) => ['question' => $q, 'count' => $c], array_keys($top), $top), 0, 12),
         ]);
     }
 
@@ -3846,16 +3911,6 @@ PROMPT;
     private function estimate_tokens(string $text): int {
         $len = strlen(trim($text));
         return $len > 0 ? max(1, (int) ceil($len / 4)) : 0;
-    }
-
-    private function estimate_cost(int $input, int $output): float {
-        $model = (string) $this->setting('chat_model', 'gpt-4o-mini');
-        $pricing = [
-            'gpt-4o-mini' => ['input' => 0.000150, 'output' => 0.000600],
-            'gpt-4o' => ['input' => 0.0025, 'output' => 0.0100],
-        ];
-        $p = $pricing[$model] ?? $pricing['gpt-4o-mini'];
-        return round(($input / 1000) * $p['input'] + ($output / 1000) * $p['output'], 4);
     }
 
     private function cosine_similarity(array $a, array $b): float {

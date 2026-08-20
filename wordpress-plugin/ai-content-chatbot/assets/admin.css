@@ -484,3 +484,120 @@
   color: #b23b3b;
   cursor: pointer;
 }
+
+/* --- Statistik-Dashboard ------------------------------------------------- */
+.aicb-admin .aicb-stats-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.aicb-admin .aicb-stats-head h2 { margin: 0 0 2px; }
+
+.aicb-admin .aicb-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.aicb-admin .aicb-stat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 16px 16px 14px;
+  border: 1px solid #e6e1d8;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fffdfa 0%, #f7f3ec 100%);
+  box-shadow: 0 1px 2px rgba(58, 53, 44, 0.05);
+  overflow: hidden;
+}
+.aicb-admin .aicb-stat::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #c9c2b1;
+}
+.aicb-admin .aicb-stat-green::before { background: #4f8a5b; }
+.aicb-admin .aicb-stat-value {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #3a352c;
+  letter-spacing: -0.01em;
+}
+.aicb-admin .aicb-stat-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b6555;
+}
+.aicb-admin .aicb-stat-sub {
+  font-size: 11px;
+  color: #9a927f;
+}
+
+.aicb-admin .aicb-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.aicb-admin .aicb-chart-card {
+  border: 1px solid #e6e1d8;
+  border-radius: 16px;
+  background: #fffdfa;
+  padding: 16px 18px 18px;
+  box-shadow: 0 1px 2px rgba(58, 53, 44, 0.05);
+  min-width: 0;
+}
+.aicb-admin .aicb-chart-wide { grid-column: 1 / -1; }
+.aicb-admin .aicb-chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.aicb-admin .aicb-chart-head h3 { margin: 0; font-size: 14px; }
+.aicb-admin .aicb-chart-head span { font-size: 11px; color: #9a927f; }
+.aicb-admin .aicb-chart-body {
+  position: relative;
+  height: 240px;
+}
+.aicb-admin .aicb-chart-wide .aicb-chart-body { height: 260px; }
+.aicb-admin .aicb-chart-body canvas { max-width: 100%; }
+
+.aicb-admin .aicb-topq { display: flex; flex-direction: column; gap: 8px; }
+.aicb-admin .aicb-topq-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px 34px;
+  align-items: center;
+  gap: 12px;
+}
+.aicb-admin .aicb-topq-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: #3a352c;
+}
+.aicb-admin .aicb-topq-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #efe9df;
+  overflow: hidden;
+}
+.aicb-admin .aicb-topq-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #a8a08a, #8c8875);
+}
+.aicb-admin .aicb-topq-row strong { text-align: right; font-variant-numeric: tabular-nums; color: #3a352c; }
+
+@media (max-width: 782px) {
+  .aicb-admin .aicb-chart-grid { grid-template-columns: 1fr; }
+  .aicb-admin .aicb-topq-row { grid-template-columns: minmax(0, 1fr) 60px 30px; }
+}

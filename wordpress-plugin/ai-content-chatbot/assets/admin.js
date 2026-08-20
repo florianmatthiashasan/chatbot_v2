@@ -568,32 +568,191 @@
 
   function renderStats() {
     const s = state.stats || {};
-    const overview = s.overview || {};
-    const usage = s.usage || {};
+    const o = s.overview || {};
     const fb = s.feedback || {};
-    const satisfaction = fb.satisfaction === null || fb.satisfaction === undefined ? "–" : `${fb.satisfaction}%`;
+    const pct = (v) => (v === null || v === undefined ? "–" : `${v}%`);
+    const num = (v) => Number(v || 0).toLocaleString("de-DE");
+
+    const tile = (value, label, opts) => `
+      <div class="aicb-stat${opts && opts.accent ? " aicb-stat-" + opts.accent : ""}">
+        <span class="aicb-stat-value">${value}</span>
+        <span class="aicb-stat-label">${label}</span>
+        ${opts && opts.sub ? `<span class="aicb-stat-sub">${opts.sub}</span>` : ""}
+      </div>`;
+    const chartCard = (id, title, sub, wide) => `
+      <div class="aicb-chart-card${wide ? " aicb-chart-wide" : ""}">
+        <div class="aicb-chart-head"><h3>${title}</h3>${sub ? `<span>${sub}</span>` : ""}</div>
+        <div class="aicb-chart-body"><canvas id="${id}"></canvas></div>
+      </div>`;
+
+    const topQ = s.top_questions || [];
+    const maxTop = topQ.reduce((m, i) => Math.max(m, i.count), 0) || 1;
+
     return `
-      <section class="aicb-panel">
-        <h2>Statistiken & Kosten</h2>
-        <div class="aicb-metrics">
-          <div><strong>${overview.week_chats || 0}</strong><span>Chats 7 Tage</span></div>
-          <div><strong>${overview.month_chats || 0}</strong><span>Chats 30 Tage</span></div>
-          <div><strong>${overview.total_chats || 0}</strong><span>Chats gesamt</span></div>
-          <div><strong>$${usage.estimated_cost_usd || 0}</strong><span>Geschätzte Kosten</span></div>
+      <section class="aicb-panel aicb-stats">
+        <div class="aicb-stats-head">
+          <div><h2>Statistiken</h2><p class="aicb-hint">Live-Auswertung der Chats, Antwortqualität und Nutzung.</p></div>
+          <button type="button" class="button" id="aicb-stats-refresh">Aktualisieren</button>
         </div>
 
-        <h3>Feedback der Besucher</h3>
-        <div class="aicb-metrics">
-          <div><strong>👍 ${fb.helpful || 0}</strong><span>Hilfreich</span></div>
-          <div><strong>👎 ${fb.not_helpful || 0}</strong><span>Nicht hilfreich</span></div>
-          <div><strong>${satisfaction}</strong><span>Zufriedenheit</span></div>
-          <div><strong>${fb.rated || 0}</strong><span>Bewertungen gesamt</span></div>
+        <div class="aicb-stat-grid">
+          ${tile(num(o.today_chats), "Chats heute")}
+          ${tile(num(o.week_chats), "7 Tage")}
+          ${tile(num(o.month_chats), "30 Tage")}
+          ${tile(num(o.total_chats), "Gesamt")}
+          ${tile(pct(o.answer_rate), "Antwortquote", { accent: "green" })}
+          ${tile(pct(fb.satisfaction), "Zufriedenheit", { accent: "green", sub: `👍 ${num(fb.helpful)} · 👎 ${num(fb.not_helpful)}` })}
+          ${tile(num(o.sessions), "Sessions", { sub: `${num(o.active_sessions)} aktiv` })}
+          ${tile(num(o.avg_messages), "Ø Nachrichten / Session")}
+          ${tile(num(o.chunks), "Wissens-Chunks")}
         </div>
-        <p class="aicb-hint">Letzte 30 Tage: 👍 ${fb.helpful_month || 0} · 👎 ${fb.not_helpful_month || 0}. „Zufriedenheit" = Anteil positiver Bewertungen.</p>
 
-        <h3>Top Fragen</h3>
-        <div class="aicb-table">${(s.top_questions || []).map((item) => `<div><span>${escapeHtml(item.question)}</span><strong>${item.count}</strong></div>`).join("") || "<p>Noch keine Fragen.</p>"}</div>
+        <div class="aicb-chart-grid">
+          ${chartCard("aicb-c-daily", "Chats pro Tag", "Letzte 30 Tage", true)}
+          ${chartCard("aicb-c-answer", "Antwortquote", "Beantwortet vs. Fehler")}
+          ${chartCard("aicb-c-feedback", "Feedback", "👍 / 👎 / offen")}
+          ${chartCard("aicb-c-weekday", "Nach Wochentag", "Gesamt")}
+          ${chartCard("aicb-c-hour", "Nach Tageszeit", "Stunde (lokal)", true)}
+        </div>
+
+        <div class="aicb-chart-card">
+          <div class="aicb-chart-head"><h3>Top Fragen</h3><span>Häufigste Besucherfragen</span></div>
+          <div class="aicb-topq">${
+            topQ.length
+              ? topQ
+                  .map(
+                    (i) => `
+            <div class="aicb-topq-row">
+              <span class="aicb-topq-label" title="${escapeHtml(i.question)}">${escapeHtml(i.question)}</span>
+              <span class="aicb-topq-bar"><i style="width:${Math.max(6, Math.round((100 * i.count) / maxTop))}%"></i></span>
+              <strong>${i.count}</strong>
+            </div>`
+                  )
+                  .join("")
+              : "<p>Noch keine Fragen.</p>"
+          }</div>
+        </div>
       </section>`;
+  }
+
+  /* --- Statistik-Diagramme (Chart.js) ------------------------------------- */
+  let statCharts = [];
+  function destroyStatCharts() {
+    statCharts.forEach((c) => { try { c.destroy(); } catch (e) {} });
+    statCharts = [];
+  }
+
+  function mountStatsCharts() {
+    if (typeof window.Chart === "undefined") return;
+    destroyStatCharts();
+    const s = state.stats;
+    if (!s) return;
+    const o = s.overview || {};
+    const fb = s.feedback || {};
+
+    const css = getComputedStyle(document.body);
+    const accent = "#8c8875";
+    const accentStrong = "#5f5748";
+    const green = "#4f8a5b";
+    const red = "#c0603f";
+    const amber = "#c9a24b";
+    const gridColor = "rgba(60, 53, 44, 0.08)";
+    const textColor = "#7a7263";
+
+    Chart.defaults.font.family = css.fontFamily || "sans-serif";
+    Chart.defaults.font.size = 11;
+    Chart.defaults.color = textColor;
+
+    const axis = {
+      x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, border: { display: false } },
+      y: { beginAtZero: true, grid: { color: gridColor }, border: { display: false }, ticks: { precision: 0, maxTicksLimit: 5 } },
+    };
+    const barTip = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { padding: 10, cornerRadius: 8, displayColors: false } },
+      scales: axis,
+    };
+    const doughnutOpts = {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: "66%",
+      plugins: {
+        legend: { display: true, position: "bottom", labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, padding: 14 } },
+        tooltip: { padding: 10, cornerRadius: 8 },
+      },
+    };
+
+    const make = (id, config) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      statCharts.push(new Chart(el, config));
+    };
+
+    // Chats pro Tag (Fläche + beantwortet-Linie)
+    const daily = s.daily || [];
+    const dailyEl = document.getElementById("aicb-c-daily");
+    if (dailyEl) {
+      const g = dailyEl.getContext("2d").createLinearGradient(0, 0, 0, 240);
+      g.addColorStop(0, "rgba(140,136,117,0.34)");
+      g.addColorStop(1, "rgba(140,136,117,0.02)");
+      statCharts.push(new Chart(dailyEl, {
+        type: "line",
+        data: {
+          labels: daily.map((d) => d.label),
+          datasets: [
+            { label: "Chats", data: daily.map((d) => d.total), borderColor: accentStrong, backgroundColor: g, fill: true, tension: 0.35, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4 },
+            { label: "Beantwortet", data: daily.map((d) => d.answered), borderColor: green, backgroundColor: "transparent", fill: false, tension: 0.35, borderWidth: 2, borderDash: [4, 3], pointRadius: 0, pointHoverRadius: 4 },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: { legend: { display: true, position: "bottom", labels: { boxWidth: 10, usePointStyle: true, padding: 14 } }, tooltip: { padding: 10, cornerRadius: 8 } },
+          scales: axis,
+        },
+      }));
+    }
+
+    // Antwortquote (Donut)
+    make("aicb-c-answer", {
+      type: "doughnut",
+      data: { labels: ["Beantwortet", "Fehler"], datasets: [{ data: [o.answered || 0, o.errors || 0], backgroundColor: [green, red], borderWidth: 0, hoverOffset: 4 }] },
+      options: doughnutOpts,
+    });
+
+    // Feedback (Donut)
+    make("aicb-c-feedback", {
+      type: "doughnut",
+      data: { labels: ["Hilfreich", "Nicht hilfreich", "Offen"], datasets: [{ data: [fb.helpful || 0, fb.not_helpful || 0, fb.unrated || 0], backgroundColor: [green, red, "#d9d2c6"], borderWidth: 0, hoverOffset: 4 }] },
+      options: doughnutOpts,
+    });
+
+    // Wochentag (Balken)
+    const wd = s.by_weekday || [];
+    make("aicb-c-weekday", {
+      type: "bar",
+      data: { labels: wd.map((d) => d.label), datasets: [{ data: wd.map((d) => d.count), backgroundColor: accent, borderRadius: 6, maxBarThickness: 26 }] },
+      options: barTip,
+    });
+
+    // Tageszeit (Balken)
+    const hr = s.by_hour || [];
+    make("aicb-c-hour", {
+      type: "bar",
+      data: { labels: hr.map((d) => d.label), datasets: [{ data: hr.map((d) => d.count), backgroundColor: amber, borderRadius: 4, maxBarThickness: 18 }] },
+      options: barTip,
+    });
+  }
+
+  async function reloadStats() {
+    try {
+      const stats = await api("admin/stats");
+      set({ stats });
+    } catch (err) {
+      set({ error: err.message });
+    }
   }
 
   function renderChat() {
@@ -758,10 +917,17 @@
         ${renderActiveTab()}
       </div>`;
     if (state.tab === "widget") mountPreview();
+    if (state.tab === "stats") mountStatsCharts();
+    else destroyStatCharts();
   }
 
   root.addEventListener("click", (event) => {
     const tab = event.target.closest("[data-tab]");
+    if (event.target.id === "aicb-stats-refresh") {
+      event.preventDefault();
+      reloadStats();
+      return;
+    }
     if (tab) {
       const target = tab.dataset.tab;
       set({ tab: target, notice: "", error: "" });
