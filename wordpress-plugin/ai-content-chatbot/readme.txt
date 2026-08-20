@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.8.1
+Stable tag: 0.8.2
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -50,6 +50,10 @@ Die PDF-Textextraktion nutzt die mitgelieferte Bibliothek Smalot/PdfParser (MIT-
 
 
 == Changelog ==
+
+= 0.8.2 =
+* Schnellere Suche bei identischer Qualitaet: Embeddings werden jetzt kompakt gepackt gespeichert (Base64 float32, ca. 2,4x kleiner als vorher) und normalisiert - die Aehnlichkeitssuche wird zum schnellen Skalarprodukt statt JSON zu parsen. Ergebnisse sind bit-genau dieselben (verifiziert). Alte Eintraege laufen unveraendert weiter; fuer den vollen Tempogewinn einmal neu trainieren.
+* Mehr Wissen pro Antwort: retriever_k 12 -> 16 und Kontext 20000 -> 26000 Zeichen angehoben (nur alte Standardwerte, eigene Einstellungen bleiben).
 
 = 0.8.1 =
 * Eigene SVG-Logos passen jetzt IMMER in den Kreis - unabhaengig von der im Code angegebenen Groesse. Neuer DOM-basierter SVG-Sanitizer ersetzt wp_kses: width/height werden entfernt (CSS bestimmt die Groesse, preserveAspectRatio gesetzt), und komplexe SVGs mit Verlaeufen/Filtern (linearGradient, feDropShadow, viewBox, gradientUnits ...) bleiben erhalten, weil ihre Gross-/Kleinschreibung nicht mehr zerstoert wird. Schwarz/fehlende Fuellung weiterhin -> Theme-Farbe; Script/onload/externe Verweise werden entfernt.

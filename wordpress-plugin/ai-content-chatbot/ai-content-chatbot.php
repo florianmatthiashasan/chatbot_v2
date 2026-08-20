@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.8.1
+ * Version: 0.8.2
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -31,7 +31,7 @@ final class AICB_Plugin {
     private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.8.1';
+    private const ASSET_VERSION = '0.8.2';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -81,6 +81,7 @@ final class AICB_Plugin {
             content longtext NOT NULL,
             content_hash char(40) NOT NULL,
             embedding longtext NULL,
+            embedding_packed longtext NULL,
             token_estimate int(11) NOT NULL DEFAULT 0,
             updated_at datetime NOT NULL,
             PRIMARY KEY  (id),
@@ -143,8 +144,8 @@ final class AICB_Plugin {
             'openai_api_key' => '',
             'chat_model' => 'gpt-4o-mini',
             'embedding_model' => 'text-embedding-3-large',
-            'retriever_k' => 12,
-            'max_context_chars' => 20000,
+            'retriever_k' => 16,
+            'max_context_chars' => 26000,
             'batch_size' => 4,
             'auto_index_on_save' => true,
             'widget_enabled' => true,
@@ -652,6 +653,15 @@ final class AICB_Plugin {
             $settings['max_context_chars'] = 20000;
             $settings_changed = true;
         }
+        // Fuer vollstaendigeres Wissen weiter anheben (nur alte Standardwerte).
+        if ((int) ($settings['retriever_k'] ?? 0) === 12) {
+            $settings['retriever_k'] = 16;
+            $settings_changed = true;
+        }
+        if ((int) ($settings['max_context_chars'] ?? 0) === 20000) {
+            $settings['max_context_chars'] = 26000;
+            $settings_changed = true;
+        }
         if ($settings_changed) {
             update_option(self::OPTION_KEY, $settings, false);
         }
@@ -728,6 +738,16 @@ final class AICB_Plugin {
         ));
         if (!$has_feedback) {
             $wpdb->query("ALTER TABLE {$events} ADD COLUMN feedback tinyint(4) NOT NULL DEFAULT 0, ADD KEY feedback (feedback)");
+        }
+
+        // Migration: kompakte, schnelle Embedding-Spalte (Base64 gepackter float32).
+        $chunks_table = $wpdb->prefix . 'aicb_chunks';
+        $has_packed = $wpdb->get_var($wpdb->prepare(
+            "SHOW COLUMNS FROM {$chunks_table} LIKE %s",
+            'embedding_packed'
+        ));
+        if (!$has_packed) {
+            $wpdb->query("ALTER TABLE {$chunks_table} ADD COLUMN embedding_packed longtext NULL");
         }
 
         update_option(self::VERSION_OPTION, self::ASSET_VERSION, false);
@@ -2433,10 +2453,13 @@ final class AICB_Plugin {
                 'section' => $chunk['section'],
                 'content' => $chunk['content'],
                 'content_hash' => sha1($chunk['content']),
-                'embedding' => wp_json_encode($embedding),
+                // Kompakte, schnelle Form (Base64 gepackter, normalisierter float32).
+                // JSON-Spalte bleibt leer -> weniger Speicher, schnelleres Laden.
+                'embedding' => null,
+                'embedding_packed' => $this->pack_embedding($embedding),
                 'token_estimate' => $this->estimate_tokens($chunk['content']),
                 'updated_at' => $now,
-            ], ['%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s']);
+            ], ['%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s']);
             $inserted++;
         }
         return $inserted;
@@ -2927,30 +2950,117 @@ final class AICB_Plugin {
     private function search_chunks(array $query_vectors): array {
         global $wpdb;
         $table = $wpdb->prefix . 'aicb_chunks';
-        $limit = max(1, min(24, (int) $this->setting('retriever_k', 12)));
+        $limit = max(1, min(32, (int) $this->setting('retriever_k', 16)));
         // Einzelvektor auch akzeptieren, damit Aufrufer beides übergeben können.
         $vectors = (isset($query_vectors[0]) && is_array($query_vectors[0])) ? $query_vectors : [$query_vectors];
-        $rows = $wpdb->get_results("SELECT id, source_id, source_url, title, section, content, embedding FROM {$table} WHERE embedding IS NOT NULL", ARRAY_A);
+        // Query-Vektoren einmal normalisieren -> Kosinus wird zum Skalarprodukt.
+        $qnorm = [];
+        foreach ($vectors as $qv) {
+            $n = $this->normalize_vector((array) $qv);
+            if ($n) {
+                $qnorm[] = $n;
+            }
+        }
+        if (!$qnorm) {
+            return [];
+        }
+
+        $cols = 'id, source_id, source_url, title, section, content';
         $scored = [];
+
+        // Schneller Pfad: kompakt gepackte (bereits normalisierte) Embeddings.
+        $rows = $wpdb->get_results("SELECT {$cols}, embedding_packed FROM {$table} WHERE embedding_packed IS NOT NULL", ARRAY_A);
         foreach ($rows ?: [] as $row) {
-            $vector = json_decode((string) $row['embedding'], true);
-            if (!is_array($vector)) {
+            $vec = $this->unpack_embedding((string) $row['embedding_packed']);
+            if (!$vec) {
                 continue;
             }
             $best = 0.0;
-            foreach ($vectors as $query_vector) {
-                $score = $this->cosine_similarity($query_vector, $vector);
+            foreach ($qnorm as $q) {
+                $score = $this->dot_product($q, $vec);
                 if ($score > $best) {
                     $best = $score;
                 }
             }
+            unset($row['embedding_packed']);
             $row['score'] = $best;
-            unset($row['embedding']);
             $scored[] = $row;
         }
+
+        // Fallback: alte JSON-Zeilen ohne gepacktes Embedding (bleiben nutzbar).
+        $legacy = $wpdb->get_results("SELECT {$cols}, embedding FROM {$table} WHERE embedding_packed IS NULL AND embedding IS NOT NULL", ARRAY_A);
+        foreach ($legacy ?: [] as $row) {
+            $vector = json_decode((string) $row['embedding'], true);
+            if (!is_array($vector)) {
+                continue;
+            }
+            $vn = $this->normalize_vector($vector);
+            if (!$vn) {
+                continue;
+            }
+            $best = 0.0;
+            foreach ($qnorm as $q) {
+                $score = $this->dot_product($q, $vn);
+                if ($score > $best) {
+                    $best = $score;
+                }
+            }
+            unset($row['embedding']);
+            $row['score'] = $best;
+            $scored[] = $row;
+        }
+
         usort($scored, fn($a, $b) => ($b['score'] <=> $a['score']));
         $top = array_slice($scored, 0, $limit);
         return $this->with_neighbour_chunks($top, $scored, $limit);
+    }
+
+    /** Einheitsvektor (L2). Leeres Array bei Nullvektor. */
+    private function normalize_vector(array $v): array {
+        $sum = 0.0;
+        foreach ($v as $x) {
+            $x = (float) $x;
+            $sum += $x * $x;
+        }
+        if ($sum <= 0.0) {
+            return [];
+        }
+        $inv = 1.0 / sqrt($sum);
+        $out = [];
+        foreach ($v as $x) {
+            $out[] = (float) $x * $inv;
+        }
+        return $out;
+    }
+
+    private function dot_product(array $a, array $b): float {
+        $n = min(count($a), count($b));
+        $sum = 0.0;
+        for ($i = 0; $i < $n; $i++) {
+            $sum += $a[$i] * $b[$i];
+        }
+        return $sum;
+    }
+
+    /** Vektor -> normalisiert -> float32 little-endian -> Base64 (kompakt, schnell). */
+    private function pack_embedding(array $vector): ?string {
+        $norm = $this->normalize_vector($vector);
+        if (!$norm) {
+            return null;
+        }
+        return base64_encode(pack('g*', ...$norm));
+    }
+
+    private function unpack_embedding(string $packed): array {
+        if ($packed === '') {
+            return [];
+        }
+        $bin = base64_decode($packed, true);
+        if ($bin === false || $bin === '') {
+            return [];
+        }
+        $vals = @unpack('g*', $bin);
+        return is_array($vals) ? array_values($vals) : [];
     }
 
     /**
