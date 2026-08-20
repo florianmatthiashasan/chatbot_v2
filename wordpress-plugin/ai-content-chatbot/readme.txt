@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.7.1
+Stable tag: 0.7.7
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -50,6 +50,25 @@ Die PDF-Textextraktion nutzt die mitgelieferte Bibliothek Smalot/PdfParser (MIT-
 
 
 == Changelog ==
+
+= 0.7.7 =
+* Icon-Fix: Eigene SVG-Logos werden zuverlässig in der Widget-Farbe dargestellt (nie mehr durchgehend schwarz) - Schwarz und fehlende Füllungen werden auf currentColor gesetzt, Umrisse bleiben Umrisse, echte Markenfarben bleiben erhalten. Icon im Chat-Kreis größer und sauber zentriert.
+* KI-Fragen jetzt auch in der Themenliste beim Öffnen des Chats (anklickbar), nicht nur im Popup - dezent hervorgehoben.
+* KI-Fragen aktualisieren sich bei Seitenwechsel ohne Full-Reload (SPA-/AJAX-Themes, Page-Builder): History-API-Erkennung plus Fallback, damit die Fragen zur neuen Seite passen.
+* Fragen-Popup mit kurzer Lead-Zeile; Admin-Live-Vorschau ruft die Fragen-API nicht mehr auf (spart OpenAI-Aufrufe).
+
+= 0.7.6 =
+* Page-spezifische KI-Fragen: Das Widget erzeugt pro aktueller Unterseite 2-3 passende Einstiegsfragen und zeigt sie im Greeting-Popup-Stil. Ein Klick öffnet den Chat und sendet die Frage direkt.
+
+= 0.7.5 =
+* SVGRepo- und andere Custom-SVGs mit schwarzem `fill`/`stroke` werden für Widget-Icons automatisch auf die konfigurierbare Icon-Farbe umgebogen.
+
+= 0.7.4 =
+* Custom-SVG-Icons mit `currentColor` erben ihre Farbe jetzt zuverlässiger aus dem Widget.
+
+= 0.7.3 =
+* Standard-Icon und Avatar-Darstellung verfeinert: heller Profil-Kreis, bessere Sichtbarkeit im geöffneten Chat und aktualisierte gespeicherte Standardfarben.
+* Greeting-Popup und Icon-Rendering im Widget robuster gemacht.
 
 = 0.7.1 =
 * Durchgängig korrekte deutsche Umlaute und ß in allen sichtbaren Texten (Admin-Oberfläche, Widget, Meldungen) statt ue/oe/ae/ss.

@@ -10,6 +10,7 @@
   var SESSION_KEY = "aicb_session_token";
   var HISTORY_KEY = "aicb_history";
   var TEASER_KEY = "aicb_teaser_seen";
+  var SUGGESTIONS_KEY = "aicb_page_suggestions_seen";
   var HISTORY_LIMIT = 16;
   var OFFERED_LIMIT = 10;
   var SCROLL_TOP_OFFSET = 8;
@@ -136,6 +137,44 @@
           }
         });
       });
+      // Monochrome-Logos in der Theme-Farbe rendern: Schwarz -> currentColor,
+      // fehlende Fuellung (Default-Schwarz) korrekt setzen, Outlines erhalten.
+      var isBlack = function (value) {
+        var v = (value || "").trim().toLowerCase().replace(/\s+/g, "");
+        return v === "#000" || v === "#000000" || v === "black" || v === "rgb(0,0,0)" || v === "rgba(0,0,0,1)" || v === "#000000ff";
+      };
+      var isColor = function (value) {
+        var v = (value || "").trim().toLowerCase();
+        return v !== "" && v !== "none" && v !== "transparent" && v !== "currentcolor" && v.indexOf("url(") !== 0;
+      };
+      var DRAW = ["path", "circle", "rect", "ellipse", "line", "polyline", "polygon"];
+      [svg].concat(Array.prototype.slice.call(doc.querySelectorAll("*"))).forEach(function (el) {
+        // Explizite Farben in Attributen: Schwarz -> currentColor.
+        ["fill", "stroke"].forEach(function (attrName) {
+          if (isBlack(el.getAttribute(attrName))) el.setAttribute(attrName, "currentColor");
+        });
+        // Inline-Styles ebenfalls entschaerfen (fill/stroke).
+        var style = el.getAttribute("style");
+        if (style && /(fill|stroke)\s*:/i.test(style)) {
+          style = style.replace(/(fill|stroke)\s*:\s*([^;]+)/gi, function (m, prop, val) {
+            return isBlack(val) ? prop + ":currentColor" : (isColor(val) ? m : prop + ":" + val);
+          });
+          el.setAttribute("style", style);
+        }
+        // Zeichenelemente ohne Fuellung: Default waere Schwarz.
+        if (DRAW.indexOf(el.nodeName.toLowerCase()) !== -1) {
+          var hasFill = el.hasAttribute("fill") || /fill\s*:/i.test(style || "");
+          var hasStroke = el.hasAttribute("stroke") || /stroke\s*:/i.test(style || "");
+          if (!hasFill) {
+            // Mit Kontur => Outline (fill=none), sonst gefuellt in Theme-Farbe.
+            el.setAttribute("fill", hasStroke ? "none" : "currentColor");
+          }
+        }
+      });
+      // Wurzel ohne fill/stroke: als gefuellt in Theme-Farbe annehmen.
+      if (!svg.hasAttribute("fill") && !/fill\s*:/i.test(svg.getAttribute("style") || "")) {
+        svg.setAttribute("fill", "currentColor");
+      }
       svg.removeAttribute("width");
       svg.removeAttribute("height");
       svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
@@ -149,6 +188,7 @@
     if (!target) return;
     var trimmed = (value || "").trim();
     target.innerHTML = "";
+    target.classList.remove("aicb-icon-svg", "aicb-icon-text");
     if (!trimmed) {
       target.style.display = "none";
       return;
@@ -156,10 +196,119 @@
     var safeSvg = sanitizeSvg(trimmed);
     if (safeSvg) {
       target.appendChild(safeSvg);
+      target.classList.add("aicb-icon-svg");
     } else {
       target.textContent = trimmed;
+      target.classList.add("aicb-icon-text");
     }
     target.style.display = "grid";
+  }
+
+  function defaultLauncherIcon() {
+    var svg = svgNode([
+      "M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z",
+      "M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01",
+    ], "");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.55");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    if (svg.childNodes[1]) svg.childNodes[1].setAttribute("stroke-width", "2.1");
+    var ns = "http://www.w3.org/2000/svg";
+    var sparkle = document.createElementNS(ns, "path");
+    sparkle.setAttribute("d", "M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z");
+    sparkle.setAttribute("fill", "currentColor");
+    sparkle.setAttribute("stroke", "none");
+    svg.appendChild(sparkle);
+    return svg;
+  }
+
+  function renderLauncherIcon(target, value) {
+    if (!target) return;
+    var trimmed = (value || "").trim();
+    target.innerHTML = "";
+    target.classList.remove("aicb-icon-svg", "aicb-icon-text");
+    if (!trimmed) {
+      target.appendChild(defaultLauncherIcon());
+      target.classList.add("aicb-icon-svg");
+      target.style.display = "grid";
+      return;
+    }
+    renderIcon(target, trimmed);
+  }
+
+  function greetingKey(greeting) {
+    var text = (greeting && greeting.text ? greeting.text : "").trim();
+    var delay = Number(greeting && greeting.delay_ms ? greeting.delay_ms : 1200);
+    return [text, delay].join("|");
+  }
+
+  function pageSignal() {
+    var bits = [];
+    var meta = document.querySelector('meta[name="description"]');
+    var canonical = document.querySelector('link[rel="canonical"]');
+    if (meta && meta.content) bits.push(meta.content);
+    Array.prototype.slice.call(document.querySelectorAll("h1, h2"), 0, 5).forEach(function (el) {
+      var value = (el.textContent || "").trim();
+      if (value) bits.push(value);
+    });
+    return {
+      url: (canonical && canonical.href ? canonical.href : window.location.href).split("#")[0],
+      title: document.title || "",
+      page_text: bits.join("\n").slice(0, 1400),
+      lang: lang(),
+    };
+  }
+
+  function suggestionsKey(items, page) {
+    var questions = items.map(function (item) { return (item.question || "").trim(); }).join("|");
+    return [page.url, questions].join("|");
+  }
+
+  // Kurze Ueberschrift ueber den Fragen im Teaser (falls kein Greeting-Text gesetzt).
+  function suggestLeadLabel() {
+    var map = {
+      de: "Fragen zu dieser Seite", en: "Questions about this page",
+      fr: "Questions sur cette page", es: "Preguntas sobre esta página",
+      it: "Domande su questa pagina", nl: "Vragen over deze pagina",
+      pt: "Perguntas sobre esta página", tr: "Bu sayfa hakkında sorular",
+      pl: "Pytania o tę stronę", ru: "Вопросы об этой странице", ar: "أسئلة حول هذه الصفحة",
+    };
+    return map[lang()] || map.en;
+  }
+
+  // Erkennt Seitenwechsel ohne kompletten Reload (History-API-Themes/Page-Builder,
+  // AJAX-Navigation) und ruft cb auf. Ein Poll-Fallback faengt Faelle ohne History-API.
+  var routeEventsInstalled = false;
+  function installRouteEvents() {
+    if (routeEventsInstalled) return;
+    routeEventsInstalled = true;
+    var fire = function () {
+      try { window.dispatchEvent(new Event("aicb:locationchange")); } catch (err) { /* alte Browser */ }
+    };
+    ["pushState", "replaceState"].forEach(function (method) {
+      var original = window.history && window.history[method];
+      if (typeof original !== "function") return;
+      window.history[method] = function () {
+        var result = original.apply(this, arguments);
+        fire();
+        return result;
+      };
+    });
+    window.addEventListener("popstate", fire);
+  }
+
+  function onLocationChange(cb) {
+    installRouteEvents();
+    window.addEventListener("aicb:locationchange", cb);
+    var lastHref = window.location.href;
+    window.setInterval(function () {
+      if (window.location.href !== lastHref) {
+        lastHref = window.location.href;
+        cb();
+      }
+    }, 1200);
   }
 
   function actionIcon(url) {
@@ -416,10 +565,16 @@
     var anchorRow = null;
     var busy = false;
     var timers = [];
+    var teaserStorageKey = TEASER_KEY;
+    var teaserMemoryValue = "1";
+    var pageQuestions = [];        // KI-generierte Fragen zur aktuellen Seite
+    var lastSuggestUrl = "";       // URL, fuer die zuletzt Fragen geladen wurden
+    var routeTimer = null;
 
     Array.prototype.forEach.call(shell.querySelectorAll("[data-aicb-avatar]"), function (el) {
       renderIcon(el, icon);
     });
+    renderLauncherIcon(shell.querySelector("[data-aicb-launcher-icon], .aicb-launcher-icon"), icon);
 
     /* --- Scrollen: die aktuelle Frage bleibt oben stehen ------------------ */
     function updateSpacer() {
@@ -653,7 +808,14 @@
 
     function renderTopics() {
       if (!topicsEl || !topicsListEl) return;
-      var topics = Array.isArray(cfg.topics) ? cfg.topics : [];
+      // KI-Fragen zur aktuellen Seite zuerst, danach die im Admin gepflegten Themen.
+      var aiRows = (pageQuestions || [])
+        .map(function (item) {
+          var q = (item && item.question ? item.question : "").toString().trim();
+          return q ? { label: "", question: q, url: "", highlight: false, ai: true } : null;
+        })
+        .filter(Boolean);
+      var topics = aiRows.concat(Array.isArray(cfg.topics) ? cfg.topics : []);
       topicsListEl.innerHTML = "";
       if (!topics.length) {
         topicsEl.classList.add("aicb-hidden");
@@ -670,7 +832,7 @@
         var url = safeUrl(topic.url);
         if (!label && !question) return;
         var row = document.createElement(url ? "a" : "button");
-        row.className = "aicb-topic-row" + (topic.highlight ? " aicb-highlight" : "");
+        row.className = "aicb-topic-row" + (topic.highlight ? " aicb-highlight" : "") + (topic.ai ? " aicb-topic-ai" : "");
         if (url) {
           row.href = url;
           row.target = "_blank";
@@ -756,7 +918,7 @@
     /* --- Panel öffnen und schließen ------------------------------------- */
     function hideTeaser(remember) {
       if (teaserEl) teaserEl.classList.remove("aicb-teaser-visible");
-      if (remember) writeStore("localStorage", TEASER_KEY, "1");
+      if (remember) writeStore("localStorage", teaserStorageKey, teaserMemoryValue);
     }
 
     function open() {
@@ -800,15 +962,107 @@
     });
     window.addEventListener("resize", updateSpacer);
 
-    // Begrüßungs-Popup: einmal pro Besucher.
-    var greeting = cfg.greeting || {};
-    if (!inline && teaserEl && greeting.enabled && (greeting.text || "").trim()) {
-      if (readStore("localStorage", TEASER_KEY, "") !== "1") {
-        if (teaserTextEl) teaserTextEl.textContent = greeting.text;
-        setTimeout(function () {
-          if (!shell.classList.contains("aicb-open")) teaserEl.classList.add("aicb-teaser-visible");
-        }, Number(greeting.delay_ms || 1200));
+    function showTeaserAfter(delay) {
+      setTimeout(function () {
+        if (!shell.classList.contains("aicb-open")) teaserEl.classList.add("aicb-teaser-visible");
+      }, Number(delay || 1200));
+    }
+
+    function clearTeaserContent() {
+      if (!teaserTextEl) return;
+      teaserTextEl.innerHTML = "";
+      teaserEl.classList.remove("aicb-teaser-questions");
+    }
+
+    function showGreetingTeaser() {
+      var greeting = cfg.greeting || {};
+      if (inline || !teaserEl || !greeting.enabled || !(greeting.text || "").trim()) return false;
+      var currentGreetingKey = greetingKey(greeting);
+      teaserStorageKey = TEASER_KEY;
+      teaserMemoryValue = currentGreetingKey;
+      if (readStore("localStorage", TEASER_KEY, "") === currentGreetingKey) return true;
+      clearTeaserContent();
+      if (teaserTextEl) teaserTextEl.textContent = greeting.text;
+      showTeaserAfter(Number(greeting.delay_ms || 1200));
+      return true;
+    }
+
+    function showQuestionTeaser(items, page) {
+      if (inline || !teaserEl || !teaserTextEl || !Array.isArray(items) || !items.length) return false;
+      var currentKey = suggestionsKey(items, page);
+      teaserStorageKey = SUGGESTIONS_KEY;
+      teaserMemoryValue = currentKey;
+      if (readStore("localStorage", SUGGESTIONS_KEY, "") === currentKey) return true;
+
+      clearTeaserContent();
+      teaserEl.classList.add("aicb-teaser-questions");
+      // Kurze Lead-Zeile: Greeting-Text, sonst lokalisierte Ueberschrift.
+      var lead = ((cfg.greeting && cfg.greeting.text) || "").toString().trim() || suggestLeadLabel();
+      if (lead) {
+        var leadEl = document.createElement("div");
+        leadEl.className = "aicb-teaser-lead";
+        leadEl.textContent = lead;
+        teaserTextEl.appendChild(leadEl);
       }
+      items.slice(0, 3).forEach(function (item) {
+        var question = (item.question || "").toString().trim();
+        if (!question) return;
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "aicb-teaser-question";
+        btn.textContent = question;
+        btn.addEventListener("click", function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          hideTeaser(true);
+          open();
+          setTimeout(function () { send(question); }, 80);
+        });
+        teaserTextEl.appendChild(btn);
+      });
+      if (!teaserTextEl.children.length) return false;
+      showTeaserAfter(Number((cfg.greeting && cfg.greeting.delay_ms) || 1200));
+      return true;
+    }
+
+    var greetingOn = !cfg.greeting || cfg.greeting.enabled;
+
+    // Ergebnis der KI-Fragen anwenden: in die Topics-Liste UND (falls Popup
+    // erlaubt und Chat zu) in den Teaser.
+    function applySuggestions(items, page) {
+      pageQuestions = (Array.isArray(items) ? items : []).slice(0, 3);
+      renderTopics();
+      if (!inline && teaserEl && greetingOn && !shell.classList.contains("aicb-open")) {
+        if (!showQuestionTeaser(pageQuestions, page)) showGreetingTeaser();
+      }
+    }
+
+    function currentPath() {
+      return window.location.pathname + window.location.search;
+    }
+
+    function loadSuggestions() {
+      lastSuggestUrl = currentPath();
+      var page = pageSignal();
+      api("suggestions", page)
+        .then(function (data) {
+          applySuggestions(Array.isArray(data.questions) ? data.questions : [], page);
+        })
+        .catch(function () {
+          if (!inline && teaserEl && greetingOn && !shell.classList.contains("aicb-open")) showGreetingTeaser();
+        });
+    }
+
+    // Bei Seitenwechsel ohne Full-Reload (SPA/AJAX-Themes): Fragen neu laden.
+    function onRouteChange() {
+      if (currentPath() === lastSuggestUrl) return;
+      pageQuestions = [];
+      renderTopics();
+      if (teaserEl) teaserEl.classList.remove("aicb-teaser-visible");
+      loadSuggestions();
+    }
+
+    if (!inline && teaserEl) {
       teaserEl.addEventListener("click", open);
       if (teaserCloseEl) {
         teaserCloseEl.addEventListener("click", function (event) {
@@ -816,6 +1070,16 @@
           hideTeaser(true);
         });
       }
+    }
+
+    // Nicht in der Admin-Live-Vorschau feuern (spart OpenAI-Aufrufe).
+    // Topics bekommen KI-Fragen auch im Inline-Modus; Teaser nur floating.
+    if (typeof window.AICBAdmin === "undefined") {
+      loadSuggestions();
+      onLocationChange(function () {
+        clearTimeout(routeTimer);
+        routeTimer = setTimeout(onRouteChange, 450);
+      });
     }
 
     if (inline) {

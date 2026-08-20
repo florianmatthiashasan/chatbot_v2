@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.7.1
+ * Version: 0.7.7
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -28,9 +28,10 @@ final class AICB_Plugin {
      * (currentColor), lässt sich im Widget-Tab durch ein eigenes SVG oder ein
      * Emoji ersetzen.
      */
-    private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
+    private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
+    private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.7.1';
+    private const ASSET_VERSION = '0.7.7';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -587,17 +588,17 @@ final class AICB_Plugin {
                 'accent' => '#8c8875',
                 'accentStrong' => '#756f5f',
                 'statusDot' => '#4f8a5b',
-                'launcherBg' => '#8c8875',
+                'launcherBg' => '#736b5b',
                 'bg' => '#f9f6f1',
                 'panel' => '#ffffff',
                 'text' => '#2f2a24',
-                'avatarBg' => '#3a352c',
-                'avatarFg' => '#f8f6f1',
+                'avatarBg' => '#f1ece3',
+                'avatarFg' => '#5f5748',
                 'userBubble' => '#ece5da',
                 'botBubble' => '#ffffff',
                 'composerBg' => '#ffffff',
                 'composerBorder' => '#e8e2d8',
-                'composerButtonBg' => '#3a352c',
+                'composerButtonBg' => '#5f5748',
                 'composerButtonText' => '#f8f6f1',
             ],
             // Leere Texte werden automatisch aus dem Sprachpaket der Seite gefüllt.
@@ -616,11 +617,7 @@ final class AICB_Plugin {
                 'text' => '',
                 'delay_ms' => 1200,
             ],
-            'topics' => [
-                ['label' => 'Leistungen', 'question' => 'Welche Leistungen bietet ihr an?', 'url' => '', 'highlight' => true],
-                ['label' => 'Preise', 'question' => 'Was kostet das?', 'url' => '', 'highlight' => false],
-                ['label' => 'Kontakt', 'question' => 'Wie kann ich Kontakt aufnehmen?', 'url' => '', 'highlight' => false],
-            ],
+            'topics' => [],
         ];
     }
 
@@ -631,7 +628,8 @@ final class AICB_Plugin {
      * unverändert dem alten Standard entspricht - eigene Texte bleiben.
      */
     public function maybe_upgrade(): void {
-        if ((string) get_option(self::VERSION_OPTION, '') === self::ASSET_VERSION) {
+        $installed_version = (string) get_option(self::VERSION_OPTION, '');
+        if ($installed_version === self::ASSET_VERSION) {
             return;
         }
 
@@ -681,9 +679,39 @@ final class AICB_Plugin {
                 $widget['greeting']['text'] = '';
                 $changed = true;
             }
-            // Emoji-Standard durch das Logo ersetzen; eigene Icons bleiben.
-            if (trim((string) ($widget['copy']['icon'] ?? '')) === '💬') {
+            // Nur sehr alte Installationen hatten 💬 als Default. In neueren
+            // Versionen kann 💬 bewusst als eigenes Icon gesetzt sein.
+            if (version_compare($installed_version !== '' ? $installed_version : '0.0.0', '0.3.0', '<') && trim((string) ($widget['copy']['icon'] ?? '')) === '💬') {
                 $widget['copy']['icon'] = self::DEFAULT_ICON_SVG;
+                $changed = true;
+            }
+            if (trim((string) ($widget['copy']['icon'] ?? '')) === self::LEGACY_ICON_SVG) {
+                $widget['copy']['icon'] = self::DEFAULT_ICON_SVG;
+                $changed = true;
+            }
+            $theme_updates = [
+                'launcherBg' => ['#8c8875', '#736b5b'],
+                'avatarBg' => ['#3a352c', '#f1ece3'],
+                'avatarFg' => ['#f8f6f1', '#5f5748'],
+                'composerButtonBg' => ['#3a352c', '#5f5748'],
+            ];
+            foreach ($theme_updates as $key => [$old_value, $new_value]) {
+                if (strtolower((string) ($widget['theme'][$key] ?? '')) === $old_value) {
+                    $widget['theme'][$key] = $new_value;
+                    $changed = true;
+                }
+            }
+            $legacy_topics = [
+                ['label' => 'Leistungen', 'question' => 'Welche Leistungen bietet ihr an?'],
+                ['label' => 'Preise', 'question' => 'Was kostet das?'],
+                ['label' => 'Kontakt', 'question' => 'Wie kann ich Kontakt aufnehmen?'],
+            ];
+            $current_topics = array_map(fn($topic) => [
+                'label' => (string) ($topic['label'] ?? ''),
+                'question' => (string) ($topic['question'] ?? ''),
+            ], array_slice((array) ($widget['topics'] ?? []), 0, 3));
+            if (count((array) ($widget['topics'] ?? [])) === 3 && $current_topics === $legacy_topics) {
+                $widget['topics'] = [];
                 $changed = true;
             }
             if ($changed) {
@@ -810,11 +838,11 @@ final class AICB_Plugin {
         <div class="<?php echo esc_attr($classes); ?>" style="<?php echo esc_attr($style); ?>" dir="<?php echo esc_attr($dir); ?>" lang="<?php echo esc_attr((string) ($config['lang'] ?? 'en')); ?>" data-aicb-widget>
             <?php if (!$inline) : ?>
             <div class="aicb-teaser" role="button" tabindex="0" data-aicb-teaser aria-label="<?php echo esc_attr($pack['aria_open']); ?>">
-                <span data-aicb-teaser-text></span>
+                <div class="aicb-teaser-content" data-aicb-teaser-text></div>
                 <button class="aicb-teaser-close" type="button" data-aicb-teaser-close aria-label="<?php echo esc_attr($pack['aria_teaser_close']); ?>">&times;</button>
             </div>
             <button class="aicb-launcher" type="button" aria-label="<?php echo esc_attr($copy['title']); ?>" data-aicb-launcher>
-                <span class="aicb-launcher-icon"><?php echo $icon_html ?: $this->default_launcher_icon(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
+                <span class="aicb-launcher-icon" data-aicb-launcher-icon><?php echo $icon_html ?: $this->default_launcher_icon(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
             </button>
             <?php endif; ?>
             <div class="aicb-panel" data-aicb-panel <?php echo $inline ? '' : 'hidden'; ?>>
@@ -879,9 +907,16 @@ final class AICB_Plugin {
             return '';
         }
         if (stripos($icon, '<svg') === 0) {
-            return wp_kses($icon, $this->svg_allowed_tags());
+            return wp_kses($this->normalize_svg_icon($icon), $this->svg_allowed_tags());
         }
         return esc_html($icon);
+    }
+
+    private function normalize_svg_icon(string $svg): string {
+        $svg = preg_replace('/xmlns="\\[?(https?:\\/\\/www\\.w3\\.org\\/2000\\/svg)\\]?\\([^"]+\\)"/i', 'xmlns="$1"', $svg) ?? $svg;
+        return preg_replace_callback('/\\b(fill|stroke)=([\'"])(#000000|#000|black|rgb\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*\\)|rgba\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*,\\s*1\\s*\\))\\2/i', function (array $match): string {
+            return $match[1] . '=' . $match[2] . 'currentColor' . $match[2];
+        }, $svg) ?? $svg;
     }
 
     /** Erlaubte SVG-Tags für eigene Logos - genutzt beim Speichern und beim Ausgeben. */
@@ -915,14 +950,16 @@ final class AICB_Plugin {
             return '';
         }
         if (stripos($trimmed, '<svg') === 0) {
-            return wp_kses($trimmed, $this->svg_allowed_tags());
+            return wp_kses($this->normalize_svg_icon($trimmed), $this->svg_allowed_tags());
         }
         return sanitize_text_field($trimmed);
     }
 
     private function default_launcher_icon(): string {
-        return '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
-            . '<path d="M6 5h12a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3h-6l-5 3v-3H6a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3z"></path></svg>';
+        return '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">'
+            . '<path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z"></path>'
+            . '<path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke-width="2.1"></path>'
+            . '<path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor" stroke="none"></path></svg>';
     }
 
     private function widget_css_vars(array $config): string {
@@ -951,6 +988,12 @@ final class AICB_Plugin {
         register_rest_route(self::REST_NS, '/chat', [
             'methods' => 'POST',
             'callback' => [$this, 'rest_chat'],
+            'permission_callback' => '__return_true',
+        ]);
+
+        register_rest_route(self::REST_NS, '/suggestions', [
+            'methods' => 'POST',
+            'callback' => [$this, 'rest_suggestions'],
             'permission_callback' => '__return_true',
         ]);
 
@@ -984,6 +1027,34 @@ final class AICB_Plugin {
 
     public function rest_create_session(WP_REST_Request $request): WP_REST_Response {
         return rest_ensure_response($this->create_session_payload());
+    }
+
+    public function rest_suggestions(WP_REST_Request $request): WP_REST_Response {
+        $params = $request->get_json_params();
+        $url = esc_url_raw((string) ($params['url'] ?? ''));
+        $title = sanitize_text_field((string) ($params['title'] ?? ''));
+        $page_text = sanitize_textarea_field((string) ($params['page_text'] ?? ''));
+        $lang = self::normalize_lang((string) ($params['lang'] ?? $this->site_lang()));
+        if ($url === '') {
+            return rest_ensure_response(['questions' => []]);
+        }
+
+        $cache_key = 'aicb_suggest_' . md5(untrailingslashit($url) . '|' . $lang . '|' . $title);
+        $cached = get_transient($cache_key);
+        if (is_array($cached)) {
+            return rest_ensure_response(['questions' => $cached, 'cached' => true]);
+        }
+
+        try {
+            $questions = $this->generate_page_suggestions($url, $title, $page_text, $lang);
+            if ($questions) {
+                set_transient($cache_key, $questions, 12 * HOUR_IN_SECONDS);
+            }
+            return rest_ensure_response(['questions' => $questions, 'cached' => false]);
+        } catch (Throwable $e) {
+            error_log('AICB page suggestion generation failed: ' . $e->getMessage());
+            return rest_ensure_response(['questions' => []]);
+        }
     }
 
     public function rest_chat(WP_REST_Request $request): WP_REST_Response {
@@ -2970,6 +3041,133 @@ final class AICB_Plugin {
             'created_at' => gmdate('Y-m-d H:i:s'),
         ], ['%s', '%d', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%d', '%s']);
         return (int) $wpdb->insert_id;
+    }
+
+    /**
+     * Page-spezifische Einstiegsfragen für das Greeting-ähnliche Popup.
+     */
+    private const PAGE_SUGGESTIONS_SYSTEM = <<<'PROMPT'
+Du erzeugst kurze Einstiegsfragen für ein Chat-Popup auf genau der aktuellen Website-Unterseite.
+Regeln:
+- Erzeuge 2 bis 3 Fragen, die ein Besucher auf DIESER Seite wahrscheinlich stellen würde.
+- Die Fragen müssen konkret zum Seitentitel und Kontext passen.
+- Nutze nur Informationen aus dem Kontext. Erfinde keine Preise, Zahlen, Leistungen, Öffnungszeiten oder Orte.
+- Keine allgemeinen Fragen wie "Wie kann ich helfen?".
+- Keine Kontaktfrage, außer die aktuelle Seite handelt klar von Kontakt, Buchung, Beratung oder Anfrage.
+- Jede Frage ist ein vollständiger, natürlicher Satz in der vorgegebenen Sprache.
+- Maximal 95 Zeichen pro Frage.
+- Keine Emojis, keine Anführungszeichen, kein Markdown.
+Antworte ausschließlich mit JSON: {"questions":["...","...","..."]}
+PROMPT;
+
+    private function generate_page_suggestions(string $url, string $title, string $page_text, string $lang): array {
+        if (trim((string) $this->setting('openai_api_key', '')) === '') {
+            return [];
+        }
+
+        $context = $this->page_suggestion_context($url, $title, $page_text);
+        if (trim($context) === '') {
+            return [];
+        }
+
+        $chat = $this->openai_chat([
+            ['role' => 'system', 'content' => self::PAGE_SUGGESTIONS_SYSTEM],
+            ['role' => 'user', 'content' => implode("\n\n", [
+                'Sprache der Fragen: ' . $this->lang_display_name($lang),
+                'Aktuelle URL: ' . $url,
+                'Aktueller Seitentitel: ' . ($title !== '' ? $title : '(unbekannt)'),
+                "Kontext der aktuellen Seite:\n" . $context,
+            ])],
+        ], ['temperature' => 0.35, 'max_tokens' => 220]);
+
+        $payload = $this->decode_json_object((string) ($chat['answer'] ?? ''));
+        $raw_questions = is_array($payload['questions'] ?? null) ? $payload['questions'] : [];
+        $questions = [];
+        $seen = [];
+        foreach ($raw_questions as $item) {
+            $question = is_array($item) ? (string) ($item['question'] ?? $item['label'] ?? '') : (string) $item;
+            $question = trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags($question)), " \t\n\r\0\x0B\"'");
+            if ($question === '') {
+                continue;
+            }
+            $question = $this->limit_text($question, 110);
+            $key = $this->str_lower(trim($question, " ?!.\t\n\r\0\x0B"));
+            if ($key === '' || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $questions[] = ['question' => $question];
+            if (count($questions) >= 3) {
+                break;
+            }
+        }
+        return count($questions) >= 2 ? $questions : [];
+    }
+
+    private function page_suggestion_context(string $url, string $title, string $page_text): string {
+        $parts = [];
+        if ($title !== '') {
+            $parts[] = 'Seitentitel: ' . $this->limit_text($title, 180);
+        }
+        if ($page_text !== '') {
+            $parts[] = "Sichtbare Seitensignale:\n" . $this->limit_text($page_text, 900);
+        }
+
+        foreach ($this->indexed_rows_for_url($url, $title) as $idx => $row) {
+            $content = trim((string) ($row['content'] ?? ''));
+            if ($content === '') {
+                continue;
+            }
+            $heading = trim((string) ($row['title'] ?? ''));
+            $section = trim((string) ($row['section'] ?? ''));
+            $parts[] = '[' . ($idx + 1) . '] ' . ($heading !== '' ? $heading : $url)
+                . ($section !== '' ? ' - ' . $section : '')
+                . "\n" . $this->limit_text($content, 900);
+            if (count($parts) >= 6) {
+                break;
+            }
+        }
+
+        return $this->limit_text(implode("\n\n", array_filter($parts)), 3600);
+    }
+
+    private function indexed_rows_for_url(string $url, string $title): array {
+        global $wpdb;
+        $table = $wpdb->prefix . 'aicb_chunks';
+        $url_no_query = strtok($url, '?') ?: $url;
+        $path = (string) wp_parse_url($url_no_query, PHP_URL_PATH);
+        $path = $path !== '' ? untrailingslashit($path) : '/';
+
+        if ($path === '' || $path === '/') {
+            $home = untrailingslashit(home_url('/'));
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT source_url, title, section, content FROM {$table}
+                 WHERE source_url = %s OR source_url = %s
+                 ORDER BY id ASC LIMIT 5",
+                $home,
+                trailingslashit($home)
+            ), ARRAY_A);
+        } else {
+            $like = '%' . $wpdb->esc_like($path) . '%';
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT source_url, title, section, content FROM {$table}
+                 WHERE source_url LIKE %s
+                 ORDER BY id ASC LIMIT 5",
+                $like
+            ), ARRAY_A);
+        }
+
+        if ((!$rows || !is_array($rows)) && $title !== '') {
+            $needle = '%' . $wpdb->esc_like($this->limit_text($title, 80)) . '%';
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT source_url, title, section, content FROM {$table}
+                 WHERE title LIKE %s
+                 ORDER BY updated_at DESC, id ASC LIMIT 4",
+                $needle
+            ), ARRAY_A);
+        }
+
+        return is_array($rows) ? $rows : [];
     }
 
     /**

@@ -17,17 +17,17 @@
   --aicb-accent: #8c8875;
   --aicb-accent-strong: #756f5f;
   --aicb-status-dot: #4f8a5b;
-  --aicb-launcher-bg: #8c8875;
+  --aicb-launcher-bg: #736b5b;
   --aicb-bg: #f9f6f1;
   --aicb-panel: #ffffff;
   --aicb-text: #2f2a24;
-  --aicb-avatar-bg: #3a352c;
-  --aicb-avatar-fg: #f8f6f1;
+  --aicb-avatar-bg: #f1ece3;
+  --aicb-avatar-fg: #5f5748;
   --aicb-user-bubble: #ece5da;
   --aicb-bot-bubble: #ffffff;
   --aicb-composer-bg: #ffffff;
   --aicb-composer-border: #e8e2d8;
-  --aicb-composer-button-bg: #3a352c;
+  --aicb-composer-button-bg: #5f5748;
   --aicb-composer-button-text: #f8f6f1;
 
   /* Abgeleitete Töne: Fallback in Grau, sonst aus der Textfarbe gemischt */
@@ -85,8 +85,8 @@
   cursor: pointer;
   color: #fff;
   background: var(--aicb-launcher-bg);
-  box-shadow: 0 14px 34px rgba(17, 16, 13, 0.22);
-  transition: transform 0.2s ease;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 14px 34px rgba(17, 16, 13, 0.2);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .aicb-widget-shell .aicb-launcher:hover {
@@ -94,16 +94,67 @@
 }
 
 .aicb-widget-shell .aicb-launcher-icon {
+  width: 100%;
+  height: 100%;
   display: grid;
   place-items: center;
-  font-size: 24px;
+  font-size: 30px;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif;
+  font-variant-emoji: emoji;
   line-height: 1;
 }
 
 .aicb-widget-shell .aicb-launcher-icon svg {
-  width: 32px;
-  height: 32px;
+  width: 60%;
+  height: 60%;
+  max-width: 38px;
+  max-height: 38px;
   display: block;
+  margin: auto;
+  color: inherit;
+  stroke: currentColor;
+}
+
+.aicb-widget-shell .aicb-launcher-icon svg[fill="#000000"],
+.aicb-widget-shell .aicb-launcher-icon svg [fill="#000000"],
+.aicb-widget-shell .aicb-launcher-icon svg[fill="#000"],
+.aicb-widget-shell .aicb-launcher-icon svg [fill="#000"],
+.aicb-widget-shell .aicb-launcher-icon svg[fill="black"],
+.aicb-widget-shell .aicb-launcher-icon svg [fill="black"],
+.aicb-widget-shell .aicb-avatar svg[fill="#000000"],
+.aicb-widget-shell .aicb-avatar svg [fill="#000000"],
+.aicb-widget-shell .aicb-avatar svg[fill="#000"],
+.aicb-widget-shell .aicb-avatar svg [fill="#000"],
+.aicb-widget-shell .aicb-avatar svg[fill="black"],
+.aicb-widget-shell .aicb-avatar svg [fill="black"],
+.aicb-widget-shell .aicb-row-avatar svg[fill="#000000"],
+.aicb-widget-shell .aicb-row-avatar svg [fill="#000000"],
+.aicb-widget-shell .aicb-row-avatar svg[fill="#000"],
+.aicb-widget-shell .aicb-row-avatar svg [fill="#000"],
+.aicb-widget-shell .aicb-row-avatar svg[fill="black"],
+.aicb-widget-shell .aicb-row-avatar svg [fill="black"] {
+  fill: currentColor;
+}
+
+.aicb-widget-shell .aicb-launcher-icon svg[stroke="#000000"],
+.aicb-widget-shell .aicb-launcher-icon svg [stroke="#000000"],
+.aicb-widget-shell .aicb-launcher-icon svg[stroke="#000"],
+.aicb-widget-shell .aicb-launcher-icon svg [stroke="#000"],
+.aicb-widget-shell .aicb-launcher-icon svg[stroke="black"],
+.aicb-widget-shell .aicb-launcher-icon svg [stroke="black"],
+.aicb-widget-shell .aicb-avatar svg[stroke="#000000"],
+.aicb-widget-shell .aicb-avatar svg [stroke="#000000"],
+.aicb-widget-shell .aicb-avatar svg[stroke="#000"],
+.aicb-widget-shell .aicb-avatar svg [stroke="#000"],
+.aicb-widget-shell .aicb-avatar svg[stroke="black"],
+.aicb-widget-shell .aicb-avatar svg [stroke="black"],
+.aicb-widget-shell .aicb-row-avatar svg[stroke="#000000"],
+.aicb-widget-shell .aicb-row-avatar svg [stroke="#000000"],
+.aicb-widget-shell .aicb-row-avatar svg[stroke="#000"],
+.aicb-widget-shell .aicb-row-avatar svg [stroke="#000"],
+.aicb-widget-shell .aicb-row-avatar svg[stroke="black"],
+.aicb-widget-shell .aicb-row-avatar svg [stroke="black"] {
+  stroke: currentColor;
 }
 
 .aicb-widget-shell.aicb-open .aicb-launcher {
@@ -134,6 +185,46 @@
 
 .aicb-widget-shell .aicb-teaser.aicb-teaser-visible {
   display: flex;
+}
+
+.aicb-widget-shell .aicb-teaser-content {
+  display: block;
+  min-width: 0;
+}
+
+.aicb-widget-shell .aicb-teaser.aicb-teaser-questions {
+  width: min(320px, calc(100vw - 36px));
+  padding: 10px;
+  cursor: default;
+}
+
+.aicb-widget-shell .aicb-teaser.aicb-teaser-questions .aicb-teaser-content {
+  display: grid;
+  gap: 7px;
+  flex: 1 1 auto;
+}
+
+.aicb-widget-shell .aicb-teaser-question {
+  width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--aicb-hairline-soft);
+  border-radius: var(--aicb-radius-md);
+  background: var(--aicb-bg);
+  color: var(--aicb-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.32;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.aicb-widget-shell .aicb-teaser-question:hover {
+  border-color: var(--aicb-accent-strong);
+  background: var(--aicb-panel);
+  transform: translateY(-1px);
 }
 
 .aicb-widget-shell.aicb-open .aicb-teaser {
@@ -209,9 +300,13 @@
   place-items: center;
   flex-shrink: 0;
   overflow: hidden;
+  border: 1px solid var(--aicb-hairline);
   background: var(--aicb-avatar-bg);
   color: var(--aicb-avatar-fg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 1px 2px rgba(17, 16, 13, 0.06);
   font-size: 18px;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif;
+  font-variant-emoji: emoji;
   line-height: 1;
 }
 
@@ -219,6 +314,8 @@
   width: 24px;
   height: 24px;
   display: block;
+  color: inherit;
+  stroke: currentColor;
 }
 
 .aicb-widget-shell .aicb-meta {
@@ -350,9 +447,13 @@
   place-items: center;
   flex-shrink: 0;
   overflow: hidden;
+  border: 1px solid var(--aicb-hairline);
   background: var(--aicb-avatar-bg);
   color: var(--aicb-avatar-fg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 1px 2px rgba(17, 16, 13, 0.05);
   font-size: 15px;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif;
+  font-variant-emoji: emoji;
   line-height: 1;
 }
 
@@ -360,6 +461,8 @@
   width: 21px;
   height: 21px;
   display: block;
+  color: inherit;
+  stroke: currentColor;
 }
 
 /* Folgenachrichten desselben Absenders: Platz halten, Avatar ausblenden */
@@ -549,6 +652,26 @@
 .aicb-widget-shell .aicb-topic-row.aicb-highlight {
   border-color: var(--aicb-accent-strong);
   box-shadow: inset 0 0 0 1px var(--aicb-accent-strong), 0 4px 14px rgba(17, 16, 13, 0.07);
+}
+
+/* KI-generierte, seitenbezogene Fragen: dezent akzentuiert */
+.aicb-widget-shell .aicb-topic-row.aicb-topic-ai {
+  background: color-mix(in srgb, var(--aicb-accent) 8%, var(--aicb-panel));
+  border-color: color-mix(in srgb, var(--aicb-accent) 30%, var(--aicb-hairline-soft));
+}
+
+.aicb-widget-shell .aicb-topic-row.aicb-topic-ai .aicb-chevron {
+  color: var(--aicb-accent-strong);
+}
+
+/* Lead-Zeile im Fragen-Teaser */
+.aicb-widget-shell .aicb-teaser-lead {
+  margin: 0 0 2px;
+  padding-inline-start: 2px;
+  color: var(--aicb-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .aicb-widget-shell .aicb-chevron {
