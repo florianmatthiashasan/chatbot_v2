@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.8.0
+ * Version: 0.8.1
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -31,7 +31,7 @@ final class AICB_Plugin {
     private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.8.0';
+    private const ASSET_VERSION = '0.8.1';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -910,41 +910,14 @@ final class AICB_Plugin {
             return '';
         }
         if (stripos($icon, '<svg') === 0) {
-            return wp_kses($this->normalize_svg_icon($icon), $this->svg_allowed_tags());
+            return $this->sanitize_svg_markup($icon);
         }
         return esc_html($icon);
     }
 
-    private function normalize_svg_icon(string $svg): string {
-        $svg = preg_replace('/xmlns="\\[?(https?:\\/\\/www\\.w3\\.org\\/2000\\/svg)\\]?\\([^"]+\\)"/i', 'xmlns="$1"', $svg) ?? $svg;
-        return preg_replace_callback('/\\b(fill|stroke)=([\'"])(#000000|#000|black|rgb\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*\\)|rgba\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*,\\s*1\\s*\\))\\2/i', function (array $match): string {
-            return $match[1] . '=' . $match[2] . 'currentColor' . $match[2];
-        }, $svg) ?? $svg;
-    }
-
-    /** Erlaubte SVG-Tags für eigene Logos - genutzt beim Speichern und beim Ausgeben. */
-    private function svg_allowed_tags(): array {
-        $attrs = [
-            'fill' => true, 'stroke' => true, 'stroke-width' => true, 'stroke-linecap' => true,
-            'stroke-linejoin' => true, 'stroke-miterlimit' => true, 'transform' => true,
-            'opacity' => true, 'fill-rule' => true, 'clip-rule' => true,
-        ];
-        return [
-            'svg' => array_merge($attrs, ['xmlns' => true, 'viewbox' => true, 'viewBox' => true, 'width' => true, 'height' => true, 'preserveaspectratio' => true]),
-            'g' => $attrs,
-            'path' => array_merge($attrs, ['d' => true]),
-            'rect' => array_merge($attrs, ['x' => true, 'y' => true, 'width' => true, 'height' => true, 'rx' => true, 'ry' => true]),
-            'circle' => array_merge($attrs, ['cx' => true, 'cy' => true, 'r' => true]),
-            'ellipse' => array_merge($attrs, ['cx' => true, 'cy' => true, 'rx' => true, 'ry' => true]),
-            'line' => array_merge($attrs, ['x1' => true, 'y1' => true, 'x2' => true, 'y2' => true]),
-            'polyline' => array_merge($attrs, ['points' => true]),
-            'polygon' => array_merge($attrs, ['points' => true]),
-        ];
-    }
-
     /**
      * Icon speichern: sanitize_text_field würde ein SVG restlos entfernen,
-     * deshalb laufen SVGs über die Tag-Freigabe und nur Text über die
+     * deshalb laufen SVGs über den SVG-Sanitizer und nur Text über die
      * Standard-Bereinigung.
      */
     private function sanitize_icon(string $icon): string {
@@ -953,9 +926,99 @@ final class AICB_Plugin {
             return '';
         }
         if (stripos($trimmed, '<svg') === 0) {
-            return wp_kses($this->normalize_svg_icon($trimmed), $this->svg_allowed_tags());
+            return $this->sanitize_svg_markup($trimmed);
         }
         return sanitize_text_field($trimmed);
+    }
+
+    private function is_black_color(string $value): bool {
+        $v = strtolower(preg_replace('/\s+/', '', $value));
+        return in_array($v, ['#000', '#000000', '#000000ff', 'black', 'rgb(0,0,0)', 'rgba(0,0,0,1)'], true);
+    }
+
+    /**
+     * SVG-Logos sicher bereinigen - OHNE die Gross-/Kleinschreibung zu zerstoeren.
+     * wp_kses ist fuer HTML gedacht und schreibt camelCase-SVG-Tags wie
+     * linearGradient/feDropShadow/viewBox klein -> das macht Gradients/Filter
+     * ungueltig. Deshalb hier ein DOM-basierter Sanitizer, der:
+     *  - gefaehrliche Elemente/Attribute entfernt (script, on*, externe href),
+     *  - Groesse vom Icon entkoppelt (width/height weg, preserveAspectRatio setzen),
+     *    damit CSS die Groesse bestimmt und das Logo IMMER in den Kreis passt,
+     *  - reines Schwarz / fehlende Fuellung auf die Theme-Farbe (currentColor) legt.
+     */
+    private function sanitize_svg_markup(string $svg): string {
+        $svg = trim($svg);
+        if ($svg === '' || stripos($svg, '<svg') === false) {
+            return '';
+        }
+        // Kaputte xmlns-URLs mancher Editoren korrigieren.
+        $svg = preg_replace('/xmlns="\[?(https?:\/\/www\.w3\.org\/2000\/svg)\]?\([^"]*\)"/i', 'xmlns="$1"', $svg) ?? $svg;
+        // DOCTYPE/Entities -> XXE/Billion-Laughs vermeiden.
+        if (preg_match('/<!DOCTYPE|<!ENTITY/i', $svg)) {
+            return '';
+        }
+        if (!class_exists('DOMDocument')) {
+            // Fallback: nur Text/Emoji, kein SVG ohne DOM-Bereinigung.
+            return '';
+        }
+
+        $prev = libxml_use_internal_errors(true);
+        $doc = new DOMDocument();
+        $ok = $doc->loadXML($svg, LIBXML_NONET);
+        libxml_clear_errors();
+        libxml_use_internal_errors($prev);
+        if (!$ok || !$doc->documentElement || strtolower($doc->documentElement->localName) !== 'svg') {
+            return '';
+        }
+        $root = $doc->documentElement;
+
+        $blocked = ['script', 'foreignobject', 'iframe', 'object', 'embed', 'link', 'style', 'animate', 'animatetransform', 'animatemotion', 'set', 'handler', 'audio', 'video'];
+        $draw = ['path', 'circle', 'rect', 'ellipse', 'line', 'polyline', 'polygon'];
+
+        foreach (iterator_to_array($doc->getElementsByTagName('*')) as $el) {
+            $name = strtolower($el->localName);
+            if (in_array($name, $blocked, true)) {
+                if ($el->parentNode) {
+                    $el->parentNode->removeChild($el);
+                }
+                continue;
+            }
+            if ($el->hasAttributes()) {
+                foreach (iterator_to_array($el->attributes) as $attr) {
+                    $an = strtolower($attr->nodeName);
+                    $av = trim((string) $attr->nodeValue);
+                    if (strpos($an, 'on') === 0) {
+                        $el->removeAttribute($attr->nodeName);
+                        continue;
+                    }
+                    if (($an === 'href' || $an === 'xlink:href') && $av !== '' && $av[0] !== '#') {
+                        $el->removeAttribute($attr->nodeName);
+                        continue;
+                    }
+                    if (preg_match('/(javascript|data)\s*:/i', $av) && ($an === 'href' || $an === 'xlink:href' || $an === 'src')) {
+                        $el->removeAttribute($attr->nodeName);
+                        continue;
+                    }
+                    if (($an === 'fill' || $an === 'stroke') && $this->is_black_color($av)) {
+                        $el->setAttribute($attr->nodeName, 'currentColor');
+                    }
+                }
+            }
+            // Zeichenelement ohne Fuellung: Default waere Schwarz -> Theme-Farbe / Outline.
+            if (in_array($name, $draw, true) && !$el->hasAttribute('fill')) {
+                $el->setAttribute('fill', $el->hasAttribute('stroke') ? 'none' : 'currentColor');
+            }
+        }
+
+        // Groesse entkoppeln: CSS bestimmt die Groesse, viewBox bleibt.
+        $root->removeAttribute('width');
+        $root->removeAttribute('height');
+        if (!$root->getAttribute('preserveAspectRatio')) {
+            $root->setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        }
+
+        $out = $doc->saveXML($root);
+        return is_string($out) ? $out : '';
     }
 
     private function default_launcher_icon(): string {
