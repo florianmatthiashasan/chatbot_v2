@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.4.0
+Stable tag: 0.5.0
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -24,6 +24,8 @@ Main features:
 * Memory search, edit and delete
 * Chat statistics and estimated cost overview
 * Optional automatic reindexing when a published post is saved
+* Inhalte-Tab: einzelne veroeffentlichte Beitraege/Seiten per Haekchen zum Indexieren auswaehlen (Entwuerfe werden nie indexiert)
+* PDFs aus der Mediathek auswaehlen und in die Wissensbasis aufnehmen (Textextraktion inkl. FlateDecode und ToUnicode; gescannte Bild-PDFs ohne Textebene werden uebersprungen)
 * Shortcode: [ai_content_chatbot]
 * Chat-Oberflaeche im florianmatthias-Widget-Design: Startansicht mit Themenliste, Antwortkarten mit Bild, Quellenblock und Anker-Scrolling
 * Antwort-Buttons werden von der KI aus dem Gespraech erzeugt (Anrufen, Kontaktseite, Folgefragen)
@@ -45,6 +47,12 @@ The plugin stores embeddings in the WordPress database as JSON vectors. This kee
 
 
 == Changelog ==
+
+= 0.5.0 =
+* Neuer Tab "Inhalte": Statt nur ganzer Post-Types lassen sich jetzt einzelne veroeffentlichte Beitraege und Seiten per Haekchen fuer das Training auswaehlen. Zwei Modi - "Alle veroeffentlichten Inhalte der aktivierten Post Types" (bisheriges Verhalten) oder "Nur die angekreuzten Inhalte". Entwuerfe werden in keinem Modus indexiert.
+* PDFs aus der Mediathek: Ueber den WordPress-Medien-Dialog lassen sich PDFs auswaehlen; ihr Text wird beim Training extrahiert, in Abschnitte zerlegt und in die Wissensbasis aufgenommen. Reine PHP-Extraktion (FlateDecode-Streams, literale/hexadezimale Strings, Tj/TJ, ToUnicode-CMaps). Gescannte Bild-PDFs ohne Textebene sowie unlesbare (Subset-Font-)PDFs werden erkannt und uebersprungen, damit kein Zeichensalat in den Index gelangt.
+* Auto-Reindex beim Speichern respektiert den Selektiv-Modus: abgewaehlte Inhalte werden nicht wieder aufgenommen.
+* Hinweis: Fuer die neue Auswahl ggf. einmal neu trainieren.
 
 = 0.4.0 =
 * Der Bot kennt jetzt die Details. Bisher wurden Tabellen und Listen beim Indexieren zu einem Wortbrei zusammengezogen ("Doppelzimmer180 EURSuite260 EUR") - Preise, Zeiten und Bedingungen waren praktisch nicht auffindbar. Tabellen werden jetzt als Zeilen mit Spaltentrennung, Listen als Aufzaehlung und Ueberschriften als Abschnitte uebernommen.

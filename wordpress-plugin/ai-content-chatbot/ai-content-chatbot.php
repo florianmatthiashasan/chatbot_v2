@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.4.0
+ * Version: 0.5.0
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -18,6 +18,10 @@ final class AICB_Plugin {
     private const FAQ_OPTION_KEY = 'aicb_faqs';
     private const WIDGET_OPTION_KEY = 'aicb_widget_config';
     private const VERSION_OPTION = 'aicb_version';
+    // Feingranulare Inhaltsauswahl fuer das Training.
+    private const INDEX_MODE_OPTION = 'aicb_index_mode';        // 'all' | 'selected'
+    private const SELECTED_POSTS_OPTION = 'aicb_selected_posts'; // array<int> Post-IDs (nur publish)
+    private const SELECTED_PDFS_OPTION = 'aicb_selected_pdfs';   // array<int> Attachment-IDs (PDF)
 
     /**
      * Standard-Logo des Assistenten. Zeichnet sich in der Farbe des Avatars
@@ -26,7 +30,7 @@ final class AICB_Plugin {
      */
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.4.0';
+    private const ASSET_VERSION = '0.5.0';
     // Cosinus-Aehnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -691,6 +695,8 @@ final class AICB_Plugin {
             return;
         }
         $base = plugin_dir_url(__FILE__);
+        // Mediathek-Dialog (wp.media) fuer die PDF-Auswahl im Inhalte-Tab.
+        wp_enqueue_media();
         wp_enqueue_style('aicb-admin', $base . 'assets/admin.css', [], self::ASSET_VERSION);
 
         // Die Live-Vorschau im Widget-Tab nutzt exakt die Frontend-Assets und
@@ -927,6 +933,7 @@ final class AICB_Plugin {
             ['/admin/memory', ['GET', 'POST', 'DELETE'], 'rest_admin_memory'],
             ['/admin/stats', ['GET'], 'rest_admin_stats'],
             ['/admin/post-types', ['GET'], 'rest_post_types'],
+            ['/admin/content', ['GET', 'POST'], 'rest_admin_content'],
         ];
 
         foreach ($admin_routes as [$route, $methods, $callback]) {
@@ -1044,6 +1051,88 @@ final class AICB_Plugin {
 
     public function rest_post_types(): WP_REST_Response {
         return rest_ensure_response(['post_types' => $this->available_post_types()]);
+    }
+
+    /**
+     * Inhalte-Tab: Liste veroeffentlichter Inhalte (mit Auswahlstatus) + gewaehlte PDFs.
+     * GET  -> aktueller Stand. POST -> Auswahl speichern und aktualisierten Stand liefern.
+     * Es werden ausschliesslich veroeffentlichte Inhalte gelistet (keine Entwuerfe).
+     */
+    public function rest_admin_content(WP_REST_Request $request): WP_REST_Response {
+        if ($request->get_method() === 'POST') {
+            $payload = $request->get_json_params();
+            $mode = (($payload['mode'] ?? 'all') === 'selected') ? 'selected' : 'all';
+            $post_ids = array_values(array_unique(array_filter(array_map('intval', (array) ($payload['post_ids'] ?? [])))));
+            $pdf_ids = array_values(array_unique(array_filter(array_map('intval', (array) ($payload['pdf_ids'] ?? [])))));
+
+            update_option(self::INDEX_MODE_OPTION, $mode, false);
+            update_option(self::SELECTED_POSTS_OPTION, $post_ids, false);
+            update_option(self::SELECTED_PDFS_OPTION, $pdf_ids, false);
+        }
+
+        $search = trim((string) $request->get_param('q'));
+        return rest_ensure_response($this->content_overview($search));
+    }
+
+    private function content_overview(string $search = ''): array {
+        $selected_posts = array_flip(array_map('intval', (array) get_option(self::SELECTED_POSTS_OPTION, [])));
+        $per_type_cap = 300;
+
+        $groups = [];
+        foreach ($this->available_post_types_without_selection() as $type) {
+            $args = [
+                'post_type' => $type['name'],
+                'post_status' => 'publish',
+                'posts_per_page' => $per_type_cap,
+                'orderby' => 'title',
+                'order' => 'ASC',
+                'no_found_rows' => false,
+                'ignore_sticky_posts' => true,
+                'suppress_filters' => false,
+            ];
+            if ($search !== '') {
+                $args['s'] = $search;
+            }
+            $query = new WP_Query($args);
+            $items = [];
+            foreach ($query->posts as $post) {
+                $items[] = [
+                    'id' => (int) $post->ID,
+                    'title' => html_entity_decode(get_the_title($post) ?: ('#' . $post->ID), ENT_QUOTES),
+                    'url' => get_permalink($post),
+                    'selected' => isset($selected_posts[(int) $post->ID]),
+                ];
+            }
+            $total = (int) $query->found_posts;
+            wp_reset_postdata();
+
+            if (!$items) {
+                continue;
+            }
+            $groups[] = [
+                'name' => $type['name'],
+                'label' => $type['label'],
+                'total' => $total,
+                'truncated' => $total > count($items),
+                'items' => $items,
+            ];
+        }
+
+        $pdfs = [];
+        foreach ($this->selected_pdf_ids() as $aid) {
+            $pdfs[] = [
+                'id' => (int) $aid,
+                'title' => html_entity_decode(get_the_title($aid) ?: wp_basename((string) get_attached_file($aid)), ENT_QUOTES),
+                'url' => wp_get_attachment_url($aid),
+            ];
+        }
+
+        return [
+            'mode' => $this->index_mode(),
+            'post_types' => $groups,
+            'pdfs' => $pdfs,
+            'selected_count' => count($selected_posts),
+        ];
     }
 
     public function rest_train_start(WP_REST_Request $request): WP_REST_Response {
@@ -1187,7 +1276,13 @@ final class AICB_Plugin {
         if ($post->post_status !== 'publish') {
             return;
         }
-        if (!in_array($post->post_type, $this->enabled_post_type_names(), true)) {
+        // Im Modus "Nur ausgewaehlte" nur nachindexieren, wenn der Post ausgewaehlt ist;
+        // im Modus "Alle" gilt weiterhin die Post-Type-Auswahl aus den Einstellungen.
+        if ($this->index_mode() === 'selected') {
+            if (!in_array($post_id, $this->selected_post_ids_raw(), true)) {
+                return;
+            }
+        } elseif (!in_array($post->post_type, $this->enabled_post_type_names(), true)) {
             return;
         }
         if (!wp_next_scheduled('aicb_reindex_single_post', [$post_id])) {
@@ -1198,6 +1293,11 @@ final class AICB_Plugin {
     public function cron_reindex_single_post(int $post_id): void {
         $post = get_post($post_id);
         if (!$post || $post->post_status !== 'publish') {
+            $this->delete_source_chunks('post:' . $post_id);
+            return;
+        }
+        // Abgewaehlte Inhalte im Selektiv-Modus nicht (wieder) aufnehmen.
+        if ($this->index_mode() === 'selected' && !in_array($post_id, $this->selected_post_ids_raw(), true)) {
             $this->delete_source_chunks('post:' . $post_id);
             return;
         }
@@ -1213,25 +1313,25 @@ final class AICB_Plugin {
             $this->clear_chunks();
         }
 
-        $query = new WP_Query([
-            'post_type' => $this->enabled_post_type_names(),
-            'post_status' => 'publish',
-            'posts_per_page' => -1,
-            'fields' => 'ids',
-            'orderby' => 'ID',
-            'order' => 'ASC',
-            'no_found_rows' => true,
-        ]);
+        // Queue aus ausgewaehlten (bzw. allen veroeffentlichten) Posts + gewaehlten PDFs.
+        $queue = [];
+        foreach ($this->training_post_ids() as $post_id) {
+            $queue[] = ['kind' => 'post', 'id' => (int) $post_id];
+        }
+        foreach ($this->selected_pdf_ids() as $pdf_id) {
+            $queue[] = ['kind' => 'pdf', 'id' => (int) $pdf_id];
+        }
 
+        $mode_label = $this->index_mode() === 'selected' ? 'Nur ausgewaehlte Inhalte' : 'Alle veroeffentlichten Inhalte';
         $job = [
             'job_id' => wp_generate_uuid4(),
             'status' => 'running',
-            'ids' => array_map('intval', $query->posts ?: []),
-            'total' => count($query->posts ?: []),
+            'queue' => $queue,
+            'total' => count($queue),
             'cursor' => 0,
             'processed' => 0,
             'chunks' => 0,
-            'logs' => ['Training gestartet.'],
+            'logs' => [sprintf('Training gestartet (%s, %d Quellen).', $mode_label, count($queue))],
             'faq_indexed' => false,
             'started_at' => gmdate('c'),
             'finished_at' => null,
@@ -1251,21 +1351,39 @@ final class AICB_Plugin {
         }
 
         $batch = max(1, min(20, (int) $this->setting('batch_size', 4)));
-        $ids = $job['ids'] ?? [];
+        $queue = $job['queue'] ?? [];
         $cursor = (int) ($job['cursor'] ?? 0);
-        $slice = array_slice($ids, $cursor, $batch);
+        $slice = array_slice($queue, $cursor, $batch);
 
-        foreach ($slice as $post_id) {
-            $post = get_post((int) $post_id);
+        foreach ($slice as $item) {
+            $kind = (string) ($item['kind'] ?? 'post');
+            $id = (int) ($item['id'] ?? 0);
+            $job['cursor']++;
+
+            if ($kind === 'pdf') {
+                try {
+                    $count = $this->index_pdf($id);
+                    $job['chunks'] += $count;
+                    $job['processed']++;
+                    if ($count > 0) {
+                        $job['logs'][] = sprintf('PDF indexiert: #%d %s (%d Chunks)', $id, get_the_title($id), $count);
+                    } else {
+                        $job['logs'][] = sprintf('PDF ohne Textebene uebersprungen: #%d %s', $id, get_the_title($id));
+                    }
+                } catch (Throwable $e) {
+                    $job['logs'][] = sprintf('PDF-Fehler #%d: %s', $id, $e->getMessage());
+                }
+                continue;
+            }
+
+            $post = get_post($id);
             if (!$post || $post->post_status !== 'publish') {
-                $job['logs'][] = "Uebersprungen: Post {$post_id}";
-                $job['cursor']++;
+                $job['logs'][] = "Uebersprungen: Post {$id}";
                 continue;
             }
             $count = $this->index_post($post);
             $job['chunks'] += $count;
             $job['processed']++;
-            $job['cursor']++;
             $job['logs'][] = sprintf('Indexiert: #%d %s (%d Chunks)', $post->ID, get_the_title($post), $count);
         }
 
@@ -1310,6 +1428,525 @@ final class AICB_Plugin {
             $count += $this->insert_document_chunks('faq:' . $idx, 'faq', home_url('/'), $title, $body);
         }
         return $count;
+    }
+
+    /* ----------------------------------------------------------------------
+     * Feingranulare Auswahl (Inhalte-Tab)
+     * -------------------------------------------------------------------- */
+
+    private function index_mode(): string {
+        return get_option(self::INDEX_MODE_OPTION, 'all') === 'selected' ? 'selected' : 'all';
+    }
+
+    private function selected_post_ids_raw(): array {
+        return array_values(array_filter(array_map('intval', (array) get_option(self::SELECTED_POSTS_OPTION, []))));
+    }
+
+    /** Post-IDs fuer das Training: nur ausgewaehlte (Selektiv) bzw. alle veroeffentlichten (Alle). */
+    private function training_post_ids(): array {
+        if ($this->index_mode() === 'selected') {
+            $ids = [];
+            foreach ($this->selected_post_ids_raw() as $id) {
+                $post = get_post($id);
+                if ($post && $post->post_status === 'publish') {
+                    $ids[] = (int) $id;
+                }
+            }
+            return $ids;
+        }
+
+        $query = new WP_Query([
+            'post_type' => $this->enabled_post_type_names(),
+            'post_status' => 'publish',
+            'posts_per_page' => -1,
+            'fields' => 'ids',
+            'orderby' => 'ID',
+            'order' => 'ASC',
+            'no_found_rows' => true,
+        ]);
+        return array_map('intval', $query->posts ?: []);
+    }
+
+    /** Gueltige, ausgewaehlte PDF-Attachments. */
+    private function selected_pdf_ids(): array {
+        $ids = [];
+        foreach (array_map('intval', (array) get_option(self::SELECTED_PDFS_OPTION, [])) as $id) {
+            if ($id <= 0) {
+                continue;
+            }
+            $post = get_post($id);
+            if ($post && $post->post_type === 'attachment' && get_post_mime_type($id) === 'application/pdf') {
+                $ids[] = $id;
+            }
+        }
+        return array_values(array_unique($ids));
+    }
+
+    /* ----------------------------------------------------------------------
+     * PDF-Indexierung (Mediathek)
+     * -------------------------------------------------------------------- */
+
+    private function index_pdf(int $attachment_id): int {
+        $source_id = 'pdf:' . $attachment_id;
+        $this->delete_source_chunks($source_id);
+
+        if (get_post_mime_type($attachment_id) !== 'application/pdf') {
+            return 0;
+        }
+        $path = get_attached_file($attachment_id);
+        if (!$path || !file_exists($path) || !is_readable($path)) {
+            throw new RuntimeException('PDF-Datei nicht gefunden.');
+        }
+        $bytes = (string) file_get_contents($path);
+        if ($bytes === '') {
+            return 0;
+        }
+
+        $text = $this->normalize_text($this->pdf_to_text($bytes));
+        if (trim($text) === '' || !$this->pdf_looks_like_text($text)) {
+            // Kein lesbarer Textlayer: gescanntes Bild-PDF, verschluesselt oder
+            // Subset-Font ohne ToUnicode (Zeichensalat) - nichts indexieren.
+            return 0;
+        }
+
+        $title = trim((string) get_the_title($attachment_id));
+        if ($title === '') {
+            $title = wp_basename($path);
+        }
+        $url = wp_get_attachment_url($attachment_id) ?: home_url('/');
+        $content = '# ' . $title . "\n\n" . $text . "\n\nQuelle: " . $url;
+        return $this->insert_document_chunks($source_id, 'pdf', $url, $title, $content);
+    }
+
+    /**
+     * Extrahiert Text aus einem PDF (reines PHP, ohne externe Bibliothek).
+     * Unterstuetzt FlateDecode-Streams, literale/hexadezimale Strings, Tj/TJ
+     * sowie ToUnicode-CMaps (bfchar/bfrange). Gescannte (nur Bild-) PDFs und
+     * verschluesselte PDFs liefern keinen Text.
+     */
+    private function pdf_to_text(string $bytes): string {
+        $streams = $this->pdf_decode_streams($bytes);
+        if (!$streams) {
+            return '';
+        }
+        $cmap = $this->pdf_build_tounicode($streams);
+        $parts = [];
+        foreach ($streams as $stream) {
+            if (strpos($stream, 'Tj') === false && strpos($stream, 'TJ') === false) {
+                continue;
+            }
+            $parts[] = $this->pdf_tokenize_text($stream, $cmap['map'], (int) $cmap['code_len']);
+        }
+        return trim(implode("\n", array_filter($parts)));
+    }
+
+    /**
+     * Qualitaetsgate: Erkennt, ob der extrahierte Text echter Fliesstext ist.
+     * PDFs mit Subset-Fonts ohne ToUnicode liefern falsch gemappte Glyphen
+     * (Zeichensalat) - solcher "Text" darf nicht in den Index gelangen.
+     */
+    private function pdf_looks_like_text(string $text): bool {
+        $trim = trim($text);
+        if ($trim === '') {
+            return false;
+        }
+        $nonspace = preg_replace('/\s+/u', '', $trim);
+        $letters = preg_replace('/[^\p{L}]/u', '', $trim);
+        $nonspace_len = function_exists('mb_strlen') ? mb_strlen((string) $nonspace) : strlen((string) $nonspace);
+        $letters_len = function_exists('mb_strlen') ? mb_strlen((string) $letters) : strlen((string) $letters);
+        $letter_ratio = $nonspace_len > 0 ? $letters_len / $nonspace_len : 0.0;
+
+        // Zu wenige Buchstaben (fast nur Symbole/Zahlen) => kein sinnvoller Text.
+        if ($letter_ratio < 0.45) {
+            return false;
+        }
+
+        // Nicht-lateinische Schriften (kyrillisch, arabisch, CJK, Hangul): die
+        // Wortliste greift nicht, ein guter Buchstabenanteil genuegt.
+        if (preg_match('/[\x{0400}-\x{04FF}\x{0600}-\x{06FF}\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}]/u', $trim)) {
+            return $letter_ratio >= 0.5;
+        }
+
+        $lower = ' ' . (function_exists('mb_strtolower') ? mb_strtolower($trim) : strtolower($trim)) . ' ';
+        $token_count = max(1, count(preg_split('/\s+/', trim($lower))));
+
+        // Sehr kurze Texte: zu wenig Statistik, dann reicht ein hoher Buchstabenanteil.
+        if ($token_count < 40) {
+            return $letter_ratio >= 0.6;
+        }
+
+        // Haeufige Funktionswoerter der unterstuetzten lateinischen Sprachen.
+        $common = [
+            'der', 'die', 'das', 'und', 'ist', 'von', 'den', 'mit', 'für', 'ein', 'eine', 'auf', 'sich', 'nicht', 'auch',
+            'the', 'and', 'of', 'to', 'is', 'in', 'for', 'on', 'with', 'are', 'this', 'that', 'as', 'by',
+            'les', 'des', 'une', 'est', 'que', 'pour', 'dans', 'avec', 'sur',
+            'los', 'las', 'una', 'para', 'con', 'por', 'del',
+            'che', 'per', 'una', 'del', 'gli', 'sono',
+            'het', 'een', 'van', 'met', 'voor',
+            'dos', 'das', 'uma', 'não', 'com',
+        ];
+        $hits = 0;
+        foreach (array_unique($common) as $w) {
+            $hits += preg_match_all('/(?<![\p{L}])' . preg_quote($w, '/') . '(?![\p{L}])/u', $lower);
+        }
+        $per_1000 = 1000 * $hits / $token_count;
+
+        return $per_1000 >= 12;
+    }
+
+    /** Findet alle Streams und dekomprimiert sie (Flate/raw). Nur Text-/CMap-Streams behalten. */
+    private function pdf_decode_streams(string $bytes): array {
+        $streams = [];
+        $offset = 0;
+        $len = strlen($bytes);
+        while (($start = strpos($bytes, 'stream', $offset)) !== false) {
+            $p = $start + 6;
+            if ($p < $len && $bytes[$p] === "\r") {
+                $p++;
+            }
+            if ($p < $len && $bytes[$p] === "\n") {
+                $p++;
+            }
+            $end = strpos($bytes, 'endstream', $p);
+            if ($end === false) {
+                break;
+            }
+            $raw = substr($bytes, $p, $end - $p);
+            $raw = preg_replace('/(\r\n|\r|\n)$/', '', $raw);
+            $decoded = $this->pdf_inflate((string) $raw);
+            if ($decoded !== '' && preg_match('/BT|Tj|TJ|bfchar|bfrange|begincmap/', $decoded)) {
+                $streams[] = $decoded;
+            }
+            $offset = $end + 9;
+        }
+        return $streams;
+    }
+
+    private function pdf_inflate(string $raw): string {
+        $out = @gzuncompress($raw);
+        if ($out === false) {
+            $out = @gzinflate($raw);
+        }
+        if ($out === false) {
+            $out = @gzdecode($raw);
+        }
+        if ($out === false) {
+            $out = $raw; // unkomprimierter Content-Stream
+        }
+        return (string) $out;
+    }
+
+    /** Baut aus allen ToUnicode-CMaps eine Abbildung Quellcode(hex) -> UTF-8. */
+    private function pdf_build_tounicode(array $streams): array {
+        $map = [];
+        $code_len = 0;
+
+        foreach ($streams as $s) {
+            if (strpos($s, 'beginbfchar') === false && strpos($s, 'beginbfrange') === false) {
+                continue;
+            }
+
+            if (preg_match_all('/beginbfchar(.*?)endbfchar/s', $s, $blocks)) {
+                foreach ($blocks[1] as $blk) {
+                    if (preg_match_all('/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/', $blk, $m, PREG_SET_ORDER)) {
+                        foreach ($m as $pair) {
+                            $src = strtoupper($pair[1]);
+                            $code_len = max($code_len, intdiv(strlen($src), 2));
+                            $map[$src] = $this->pdf_hex_to_utf8($pair[2]);
+                        }
+                    }
+                }
+            }
+
+            if (preg_match_all('/beginbfrange(.*?)endbfrange/s', $s, $blocks)) {
+                foreach ($blocks[1] as $blk) {
+                    if (preg_match_all('/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(\[[^\]]*\]|<[0-9A-Fa-f]+>)/s', $blk, $ranges, PREG_SET_ORDER)) {
+                        foreach ($ranges as $r) {
+                            $src_len = intdiv(strlen($r[1]), 2);
+                            $code_len = max($code_len, $src_len);
+                            $lo = hexdec($r[1]);
+                            $hi = hexdec($r[2]);
+                            if ($hi - $lo > 65535) {
+                                continue; // Schutz vor absurden Bereichen
+                            }
+                            if ($r[3][0] === '[') {
+                                preg_match_all('/<([0-9A-Fa-f]+)>/', $r[3], $dm);
+                                $i = 0;
+                                for ($c = $lo; $c <= $hi && $i < count($dm[1]); $c++, $i++) {
+                                    $key = strtoupper(str_pad(dechex($c), $src_len * 2, '0', STR_PAD_LEFT));
+                                    $map[$key] = $this->pdf_hex_to_utf8($dm[1][$i]);
+                                }
+                            } else {
+                                $base = hexdec(trim($r[3], '<>'));
+                                $n = 0;
+                                for ($c = $lo; $c <= $hi; $c++, $n++) {
+                                    $key = strtoupper(str_pad(dechex($c), $src_len * 2, '0', STR_PAD_LEFT));
+                                    $map[$key] = $this->pdf_codepoint_to_utf8($base + $n);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return ['map' => $map, 'code_len' => $code_len ?: 1];
+    }
+
+    /** UTF-16BE-Hex (ToUnicode-Ziel) -> UTF-8. */
+    private function pdf_hex_to_utf8(string $hex): string {
+        $hex = preg_replace('/[^0-9A-Fa-f]/', '', $hex);
+        if ($hex === '') {
+            return '';
+        }
+        if (strlen($hex) % 4 !== 0) {
+            $hex = str_pad($hex, (int) (ceil(strlen($hex) / 4) * 4), '0', STR_PAD_LEFT);
+        }
+        $units = str_split($hex, 4);
+        $out = '';
+        for ($i = 0, $c = count($units); $i < $c; $i++) {
+            $cu = hexdec($units[$i]);
+            if ($cu >= 0xD800 && $cu <= 0xDBFF && $i + 1 < $c) {
+                $lo = hexdec($units[$i + 1]);
+                $i++;
+                $cp = 0x10000 + (($cu - 0xD800) << 10) + ($lo - 0xDC00);
+                $out .= $this->pdf_codepoint_to_utf8($cp);
+            } else {
+                $out .= $this->pdf_codepoint_to_utf8($cu);
+            }
+        }
+        return $out;
+    }
+
+    private function pdf_codepoint_to_utf8(int $cp): string {
+        if ($cp <= 0) {
+            return '';
+        }
+        if ($cp < 0x80) {
+            return chr($cp);
+        }
+        if ($cp < 0x800) {
+            return chr(0xC0 | ($cp >> 6)) . chr(0x80 | ($cp & 0x3F));
+        }
+        if ($cp < 0x10000) {
+            return chr(0xE0 | ($cp >> 12)) . chr(0x80 | (($cp >> 6) & 0x3F)) . chr(0x80 | ($cp & 0x3F));
+        }
+        return chr(0xF0 | ($cp >> 18)) . chr(0x80 | (($cp >> 12) & 0x3F))
+            . chr(0x80 | (($cp >> 6) & 0x3F)) . chr(0x80 | ($cp & 0x3F));
+    }
+
+    /** Liest Text-Show-Operatoren aus einem Content-Stream in Dokumentreihenfolge. */
+    private function pdf_tokenize_text(string $content, array $map, int $code_len): string {
+        $has_map = !empty($map);
+        $n = strlen($content);
+        $i = 0;
+        $out = '';
+        $gap = '';
+
+        $append = function (string $text) use (&$out, &$gap): void {
+            if ($text === '') {
+                return;
+            }
+            if ($out === '') {
+                $out = $text;
+            } else {
+                $sep = (strpos($gap, 'T*') !== false || strpos($gap, 'Td') !== false || strpos($gap, 'TD') !== false)
+                    ? "\n"
+                    : ' ';
+                $out .= $sep . $text;
+            }
+            $gap = '';
+        };
+
+        while ($i < $n) {
+            $ch = $content[$i];
+            if ($ch === '(') {
+                [$raw, $i] = $this->pdf_read_literal($content, $i);
+                $append($this->pdf_decode_bytes($raw, $map, $code_len, $has_map));
+                continue;
+            }
+            if ($ch === '<' && ($i + 1 >= $n || $content[$i + 1] !== '<')) {
+                $close = strpos($content, '>', $i);
+                if ($close === false) {
+                    break;
+                }
+                $hex = substr($content, $i + 1, $close - $i - 1);
+                $append($this->pdf_decode_bytes($this->pdf_hex_to_bytes($hex), $map, $code_len, $has_map));
+                $i = $close + 1;
+                continue;
+            }
+            if ($ch === '[') {
+                $close = strpos($content, ']', $i);
+                if ($close === false) {
+                    break;
+                }
+                $arr = substr($content, $i + 1, $close - $i - 1);
+                $append($this->pdf_decode_array($arr, $map, $code_len, $has_map));
+                $i = $close + 1;
+                continue;
+            }
+            $gap .= $ch;
+            $i++;
+        }
+
+        return $out;
+    }
+
+    /** Liest ab Position $i (auf '(') einen balancierten Literal-String; gibt [bytes, next_i]. */
+    private function pdf_read_literal(string $content, int $i): array {
+        $n = strlen($content);
+        $i++; // ueber '('
+        $depth = 1;
+        $buf = '';
+        while ($i < $n) {
+            $ch = $content[$i];
+            if ($ch === '\\') {
+                $next = $i + 1 < $n ? $content[$i + 1] : '';
+                switch ($next) {
+                    case 'n': $buf .= "\n"; $i += 2; break;
+                    case 'r': $buf .= "\r"; $i += 2; break;
+                    case 't': $buf .= "\t"; $i += 2; break;
+                    case 'b': $buf .= "\x08"; $i += 2; break;
+                    case 'f': $buf .= "\x0C"; $i += 2; break;
+                    case '(': $buf .= '('; $i += 2; break;
+                    case ')': $buf .= ')'; $i += 2; break;
+                    case '\\': $buf .= '\\'; $i += 2; break;
+                    case "\r": $i += 2; if ($i < $n && $content[$i] === "\n") { $i++; } break; // Zeilenfortsetzung
+                    case "\n": $i += 2; break;
+                    default:
+                        if ($next !== '' && $next >= '0' && $next <= '7') {
+                            $oct = '';
+                            $j = $i + 1;
+                            while ($j < $n && strlen($oct) < 3 && $content[$j] >= '0' && $content[$j] <= '7') {
+                                $oct .= $content[$j];
+                                $j++;
+                            }
+                            $buf .= chr(octdec($oct) & 0xFF);
+                            $i = $j;
+                        } else {
+                            $buf .= $next;
+                            $i += 2;
+                        }
+                }
+                continue;
+            }
+            if ($ch === '(') {
+                $depth++;
+                $buf .= $ch;
+                $i++;
+                continue;
+            }
+            if ($ch === ')') {
+                $depth--;
+                if ($depth === 0) {
+                    $i++;
+                    break;
+                }
+                $buf .= $ch;
+                $i++;
+                continue;
+            }
+            $buf .= $ch;
+            $i++;
+        }
+        return [$buf, $i];
+    }
+
+    private function pdf_hex_to_bytes(string $hex): string {
+        $hex = preg_replace('/[^0-9A-Fa-f]/', '', $hex);
+        if (strlen($hex) % 2 !== 0) {
+            $hex .= '0';
+        }
+        return (string) @hex2bin($hex);
+    }
+
+    /** Dekodiert eine TJ-Array-Zeichenkette: Strings zusammenfuegen, grosse Kerning-Luecken -> Space. */
+    private function pdf_decode_array(string $arr, array $map, int $code_len, bool $has_map): string {
+        $n = strlen($arr);
+        $i = 0;
+        $out = '';
+        while ($i < $n) {
+            $ch = $arr[$i];
+            if ($ch === '(') {
+                [$raw, $i] = $this->pdf_read_literal($arr, $i);
+                $out .= $this->pdf_decode_bytes($raw, $map, $code_len, $has_map);
+                continue;
+            }
+            if ($ch === '<') {
+                $close = strpos($arr, '>', $i);
+                if ($close === false) {
+                    break;
+                }
+                $out .= $this->pdf_decode_bytes($this->pdf_hex_to_bytes(substr($arr, $i + 1, $close - $i - 1)), $map, $code_len, $has_map);
+                $i = $close + 1;
+                continue;
+            }
+            // Zahl (Kerning): grosse Betraege signalisieren Wortabstand.
+            if ($ch === '-' || $ch === '+' || $ch === '.' || ($ch >= '0' && $ch <= '9')) {
+                $j = $i;
+                while ($j < $n && ($arr[$j] === '-' || $arr[$j] === '+' || $arr[$j] === '.' || ($arr[$j] >= '0' && $arr[$j] <= '9'))) {
+                    $j++;
+                }
+                $num = (float) substr($arr, $i, $j - $i);
+                if (abs($num) >= 100 && ($out === '' || substr($out, -1) !== ' ')) {
+                    $out .= ' ';
+                }
+                $i = $j;
+                continue;
+            }
+            $i++;
+        }
+        return $out;
+    }
+
+    /** Wandelt rohe String-Bytes in UTF-8 um: via ToUnicode-CMap, sonst als CP1252/Latin-1. */
+    private function pdf_decode_bytes(string $raw, array $map, int $code_len, bool $has_map): string {
+        if ($raw === '') {
+            return '';
+        }
+        if ($has_map && $code_len >= 1) {
+            $out = '';
+            $len = strlen($raw);
+            $step = max(1, $code_len);
+            for ($i = 0; $i + $step <= $len; $i += $step) {
+                $chunk = substr($raw, $i, $step);
+                $key = strtoupper(bin2hex($chunk));
+                if (isset($map[$key])) {
+                    $out .= $map[$key];
+                } elseif ($step === 2 && isset($map[strtoupper(bin2hex($chunk[1]))])) {
+                    $out .= $map[strtoupper(bin2hex($chunk[1]))];
+                } else {
+                    $out .= $this->pdf_bytes_latin1(($step === 1) ? $chunk : substr($chunk, -1));
+                }
+            }
+            if ($out !== '') {
+                return $out;
+            }
+        }
+        return $this->pdf_bytes_latin1($raw);
+    }
+
+    /** CP1252/Latin-1-Bytes -> UTF-8 (Fallback ohne Font-Encoding-Info). */
+    private function pdf_bytes_latin1(string $raw): string {
+        static $cp1252 = [
+            0x80 => 0x20AC, 0x82 => 0x201A, 0x83 => 0x0192, 0x84 => 0x201E, 0x85 => 0x2026,
+            0x86 => 0x2020, 0x87 => 0x2021, 0x88 => 0x02C6, 0x89 => 0x2030, 0x8A => 0x0160,
+            0x8B => 0x2039, 0x8C => 0x0152, 0x8E => 0x017D, 0x91 => 0x2018, 0x92 => 0x2019,
+            0x93 => 0x201C, 0x94 => 0x201D, 0x95 => 0x2022, 0x96 => 0x2013, 0x97 => 0x2014,
+            0x98 => 0x02DC, 0x99 => 0x2122, 0x9A => 0x0161, 0x9B => 0x203A, 0x9C => 0x0153,
+            0x9E => 0x017E, 0x9F => 0x0178,
+        ];
+        $out = '';
+        $len = strlen($raw);
+        for ($i = 0; $i < $len; $i++) {
+            $b = ord($raw[$i]);
+            if ($b === 0) {
+                continue;
+            }
+            $cp = ($b >= 0x80 && $b <= 0x9F && isset($cp1252[$b])) ? $cp1252[$b] : $b;
+            $out .= $this->pdf_codepoint_to_utf8($cp);
+        }
+        return $out;
     }
 
     private function insert_document_chunks(string $source_id, string $source_type, string $url, string $title, string $content): int {
@@ -2799,7 +3436,7 @@ PROMPT;
 
     private function public_job(array $job): array {
         $copy = $job;
-        unset($copy['ids']);
+        unset($copy['ids'], $copy['queue']);
         return $copy;
     }
 

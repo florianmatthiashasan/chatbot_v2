@@ -10,6 +10,8 @@
     memory: { items: [], total: 0, q: "" },
     stats: null,
     job: null,
+    content: null,
+    contentSearch: "",
     busy: false,
     notice: "",
     error: "",
@@ -17,6 +19,7 @@
 
   const tabs = [
     ["training", "Training"],
+    ["content", "Inhalte"],
     ["chat", "Test Chat"],
     ["settings", "Einstellungen"],
     ["widget", "Widget"],
@@ -198,6 +201,74 @@
     set({ settings, stats, memory, notice: "Training abgeschlossen." });
   }
 
+  async function loadContent(search) {
+    set({ busy: true, error: "" });
+    try {
+      const q = typeof search === "string" ? search : state.contentSearch;
+      const content = await api(`admin/content?q=${encodeURIComponent(q || "")}`);
+      set({ content, contentSearch: q || "", busy: false });
+    } catch (err) {
+      set({ error: err.message, busy: false });
+    }
+  }
+
+  async function saveContent(retrain) {
+    const rootEl = document.getElementById("aicb-content-form");
+    const mode = rootEl && rootEl.querySelector("[name='index_mode']:checked")
+      ? rootEl.querySelector("[name='index_mode']:checked").value
+      : "all";
+    const postIds = rootEl
+      ? Array.from(rootEl.querySelectorAll("[name='content_post']:checked")).map((el) => Number(el.value))
+      : [];
+    const pdfIds = (state.content && state.content.pdfs ? state.content.pdfs : []).map((p) => Number(p.id));
+    set({ busy: true, error: "", notice: "" });
+    try {
+      const content = await api("admin/content", { method: "POST", body: { mode, post_ids: postIds, pdf_ids: pdfIds } });
+      set({ content, busy: false, notice: "Auswahl gespeichert." });
+      if (retrain) {
+        set({ tab: "training" });
+        startTraining();
+      }
+    } catch (err) {
+      set({ error: err.message, busy: false });
+    }
+  }
+
+  // Mediathek-Dialog fuer PDFs (wp.media). Auswahl wird an state.content.pdfs angehaengt.
+  let pdfFrame = null;
+  function openPdfPicker() {
+    if (typeof wp === "undefined" || !wp.media) {
+      set({ error: "Mediathek konnte nicht geladen werden. Seite neu laden." });
+      return;
+    }
+    if (!pdfFrame) {
+      pdfFrame = wp.media({
+        title: "PDFs aus der Mediathek waehlen",
+        multiple: true,
+        library: { type: "application/pdf" },
+        button: { text: "Auswahl uebernehmen" },
+      });
+      pdfFrame.on("select", () => {
+        const selection = pdfFrame.state().get("selection").toJSON();
+        const current = (state.content && state.content.pdfs) || [];
+        const byId = {};
+        current.forEach((p) => (byId[Number(p.id)] = p));
+        selection.forEach((att) => {
+          if (att.mime !== "application/pdf") return;
+          byId[Number(att.id)] = { id: Number(att.id), title: att.filename || att.title || `PDF ${att.id}`, url: att.url || "" };
+        });
+        const pdfs = Object.values(byId);
+        set({ content: Object.assign({}, state.content, { pdfs }) });
+      });
+    }
+    pdfFrame.open();
+  }
+
+  function removePdf(id) {
+    const pdfs = ((state.content && state.content.pdfs) || []).filter((p) => Number(p.id) !== Number(id));
+    set({ content: Object.assign({}, state.content, { pdfs }) });
+  }
+
   async function saveFaqs(form) {
     const faqs = [];
     form.querySelectorAll("[data-faq-row]").forEach((row) => {
@@ -273,7 +344,7 @@
     return `
       <section class="aicb-panel">
         <div class="aicb-panel-head">
-          <div><h2>Training aus WordPress-Inhalten</h2><p>Indexiert Seiten, Beitraege und alle ausgewaehlten oeffentlichen Post Types. Keine Sitemap noetig.</p>
+          <div><h2>Training aus WordPress-Inhalten</h2><p>Indexiert die im Tab <strong>Inhalte</strong> gewaehlten veroeffentlichten Beitraege/Seiten und PDFs. Standardmaessig werden alle veroeffentlichten Inhalte der aktivierten Post Types genommen. Keine Sitemap noetig.</p>
           <p class="aicb-hint">Nach einem Plugin-Update lohnt sich ein neues Training: Tabellen, Listen und Ueberschriften bleiben jetzt erhalten und die Abschnitte ueberlappen sich, damit Details wie Preise, Zeiten und Bedingungen zuverlaessig gefunden werden.</p></div>
           ${button("Jetzt komplett trainieren", { id: "aicb-start-training", primary: true, disabled: state.busy })}
         </div>
@@ -285,6 +356,78 @@
         </div>
         <div class="aicb-progress"><i style="width:${pct}%"></i></div>
         <div class="aicb-log">${(job.logs || ["Noch kein Training gestartet."]).map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>
+      </section>`;
+  }
+
+  function renderContent() {
+    const c = state.content;
+    if (!c) {
+      return `<section class="aicb-panel"><h2>Inhalte auswaehlen</h2><p>Lade Inhalte ...</p></section>`;
+    }
+    const mode = c.mode === "selected" ? "selected" : "all";
+    const groups = c.post_types || [];
+    const pdfs = c.pdfs || [];
+    const disabledAttr = mode === "all" ? "disabled" : "";
+
+    const groupHtml = groups.length
+      ? groups
+          .map((g) => {
+            const items = (g.items || [])
+              .map(
+                (it) => `
+                <label class="aicb-content-item">
+                  <input type="checkbox" name="content_post" class="aicb-post-${escapeHtml(g.name)}" value="${Number(it.id)}" ${it.selected ? "checked" : ""} ${disabledAttr}>
+                  <span>${escapeHtml(it.title)}</span>
+                  <a href="${escapeHtml(it.url || "#")}" target="_blank" rel="noreferrer">↗</a>
+                </label>`
+              )
+              .join("");
+            return `
+              <div class="aicb-content-group">
+                <h3>${escapeHtml(g.label)} <code>${escapeHtml(g.name)}</code> <span class="aicb-hint">(${Number(g.total)} veroeffentlicht${g.truncated ? ", erste 300" : ""})</span></h3>
+                <label class="aicb-content-toggle"><input type="checkbox" class="aicb-toggle-group" data-group="${escapeHtml(g.name)}" ${disabledAttr}> Alle in dieser Liste an-/abwaehlen</label>
+                <div class="aicb-content-list">${items}</div>
+              </div>`;
+          })
+          .join("")
+      : "<p>Keine veroeffentlichten Inhalte gefunden.</p>";
+
+    const pdfHtml = pdfs.length
+      ? pdfs
+          .map(
+            (p) => `<li data-id="${Number(p.id)}"><span>${escapeHtml(p.title)}</span> <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noreferrer">↗</a> <button type="button" class="button-link aicb-remove-pdf" data-id="${Number(p.id)}">entfernen</button></li>`
+          )
+          .join("")
+      : "<li class='aicb-hint'>Noch keine PDFs ausgewaehlt.</li>";
+
+    return `
+      <section class="aicb-panel" id="aicb-content-form">
+        <div class="aicb-panel-head">
+          <div><h2>Inhalte fuer den Chatbot auswaehlen</h2>
+          <p>Es werden ausschliesslich <strong>veroeffentlichte</strong> Inhalte gelistet. Entwuerfe werden nie indexiert.</p></div>
+        </div>
+
+        <div class="aicb-checks">
+          <label><input type="radio" name="index_mode" value="all" ${mode === "all" ? "checked" : ""}> Alle veroeffentlichten Inhalte der aktivierten Post Types (Einstellungen)</label>
+          <label><input type="radio" name="index_mode" value="selected" ${mode === "selected" ? "checked" : ""}> Nur die unten angekreuzten Inhalte</label>
+        </div>
+
+        <form id="aicb-content-search" class="aicb-inline">
+          <input name="q" placeholder="Inhalte suchen" value="${escapeHtml(state.contentSearch || "")}">
+          <button class="button" type="submit">Suchen</button>
+        </form>
+
+        ${groupHtml}
+
+        <h2 style="margin-top:24px;">PDFs aus der Mediathek</h2>
+        <p class="aicb-hint">Ausgewaehlte PDFs werden beim naechsten Training in die Wissensbasis aufgenommen. Gescannte Bild-PDFs ohne Textebene koennen nicht gelesen werden.</p>
+        <p>${button("PDFs aus Mediathek waehlen", { id: "aicb-pick-pdfs" })}</p>
+        <ul class="aicb-pdf-list">${pdfHtml}</ul>
+
+        <p style="margin-top:20px;">
+          ${button("Auswahl speichern", { id: "aicb-save-content", primary: true })}
+          ${button("Speichern & jetzt trainieren", { id: "aicb-save-train-content" })}
+        </p>
       </section>`;
   }
 
@@ -453,6 +596,7 @@
   }
 
   function renderActiveTab() {
+    if (state.tab === "content") return renderContent();
     if (state.tab === "settings") return renderSettings();
     if (state.tab === "widget") return renderWidget();
     if (state.tab === "faqs") return renderFaqs();
@@ -606,8 +750,29 @@
 
   root.addEventListener("click", (event) => {
     const tab = event.target.closest("[data-tab]");
-    if (tab) set({ tab: tab.dataset.tab, notice: "", error: "" });
+    if (tab) {
+      const target = tab.dataset.tab;
+      set({ tab: target, notice: "", error: "" });
+      if (target === "content" && !state.content) loadContent();
+      return;
+    }
     if (event.target.id === "aicb-start-training") startTraining();
+    if (event.target.id === "aicb-pick-pdfs") {
+      event.preventDefault();
+      openPdfPicker();
+    }
+    if (event.target.id === "aicb-save-content") {
+      event.preventDefault();
+      saveContent(false);
+    }
+    if (event.target.id === "aicb-save-train-content") {
+      event.preventDefault();
+      saveContent(true);
+    }
+    if (event.target.matches(".aicb-remove-pdf")) {
+      event.preventDefault();
+      removePdf(event.target.dataset.id);
+    }
     if (event.target.id === "aicb-add-topic") {
       event.preventDefault();
       document.getElementById("aicb-topic-list").insertAdjacentHTML("beforeend", `<div class="aicb-row" data-topic-row><input name="topic_label" placeholder="Label"><input name="topic_question" placeholder="Frage"><input name="topic_url" placeholder="URL statt Frage (optional)"><label><input name="topic_highlight" type="checkbox"> Highlight</label><button type="button" class="button" data-remove-row>Entfernen</button></div>`);
@@ -640,6 +805,23 @@
   });
   root.addEventListener("change", (event) => {
     if (event.target.closest("#aicb-widget-form")) schedulePreview();
+
+    // Inhalte-Tab: Modusumschaltung aktiviert/deaktiviert die Einzelauswahl.
+    if (event.target.matches("[name='index_mode']")) {
+      const selected = event.target.value === "selected";
+      root.querySelectorAll("[name='content_post'], .aicb-toggle-group").forEach((el) => {
+        el.disabled = !selected;
+      });
+    }
+    // "Alle in dieser Liste" schaltet die Checkboxen der Gruppe um.
+    if (event.target.matches(".aicb-toggle-group")) {
+      const group = event.target.closest(".aicb-content-group");
+      if (group) {
+        group.querySelectorAll("[name='content_post']").forEach((el) => {
+          el.checked = event.target.checked;
+        });
+      }
+    }
   });
 
   root.addEventListener("submit", (event) => {
@@ -658,6 +840,10 @@
     if (event.target.id === "aicb-memory-search") {
       event.preventDefault();
       loadMemory(new FormData(event.target).get("q") || "");
+    }
+    if (event.target.id === "aicb-content-search") {
+      event.preventDefault();
+      loadContent(new FormData(event.target).get("q") || "");
     }
     if (event.target.id === "aicb-test-form") {
       event.preventDefault();
