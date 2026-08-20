@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.6.0
+ * Version: 0.6.1
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -30,7 +30,7 @@ final class AICB_Plugin {
      */
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.6.0';
+    private const ASSET_VERSION = '0.6.1';
     // Cosinus-Aehnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -1585,15 +1585,21 @@ final class AICB_Plugin {
         if (!$path || !file_exists($path) || !is_readable($path)) {
             throw new RuntimeException('PDF-Datei nicht gefunden.');
         }
-        $bytes = (string) file_get_contents($path);
-        if ($bytes === '') {
-            return 0;
+        // 1) Beste Qualitaet: pdftotext (poppler), falls auf dem Host verfuegbar.
+        $text = $this->normalize_text($this->pdf_text_via_pdftotext($path));
+
+        // 2) Fallback: reine PHP-Extraktion (FlateDecode, ToUnicode, Differences).
+        if (trim($text) === '' || !$this->pdf_looks_like_text($text)) {
+            $bytes = (string) file_get_contents($path);
+            if ($bytes === '') {
+                return 0;
+            }
+            $text = $this->normalize_text($this->pdf_to_text($bytes));
         }
 
-        $text = $this->normalize_text($this->pdf_to_text($bytes));
         if (trim($text) === '' || !$this->pdf_looks_like_text($text)) {
             // Kein lesbarer Textlayer: gescanntes Bild-PDF, verschluesselt oder
-            // Subset-Font ohne ToUnicode (Zeichensalat) - nichts indexieren.
+            // Font ohne verwertbare Kodierung - nichts indexieren.
             return 0;
         }
 
@@ -1618,14 +1624,120 @@ final class AICB_Plugin {
             return '';
         }
         $cmap = $this->pdf_build_tounicode($streams);
+        // Fonts mit /Encoding /Differences (Glyphnamen) statt ToUnicode: haeufig
+        // bei Subset-Fonts aus Word/LibreOffice/InDesign. Ohne diese Abbildung
+        // waere der Text Zeichensalat.
+        $diff = $this->pdf_build_differences_map($streams, $bytes);
         $parts = [];
         foreach ($streams as $stream) {
             if (strpos($stream, 'Tj') === false && strpos($stream, 'TJ') === false) {
                 continue;
             }
-            $parts[] = $this->pdf_tokenize_text($stream, $cmap['map'], (int) $cmap['code_len']);
+            $parts[] = $this->pdf_tokenize_text($stream, $cmap['map'], (int) $cmap['code_len'], $diff);
         }
         return trim(implode("\n", array_filter($parts)));
+    }
+
+    /** Ruft pdftotext (poppler) auf, falls verfuegbar. Sonst leerer String. */
+    private function pdf_text_via_pdftotext(string $path): string {
+        if (!function_exists('shell_exec')) {
+            return '';
+        }
+        $disabled = array_map('trim', explode(',', (string) ini_get('disable_functions')));
+        if (in_array('shell_exec', $disabled, true)) {
+            return '';
+        }
+        // -q still, -enc UTF-8, Ausgabe nach stdout ("-").
+        $out = @shell_exec('pdftotext -q -enc UTF-8 ' . escapeshellarg($path) . ' - 2>/dev/null');
+        return is_string($out) ? $out : '';
+    }
+
+    /**
+     * Baut aus allen /Encoding /Differences-Arrays eine Abbildung Byte->UTF-8.
+     * Global gemergt (erste Zuordnung gewinnt) - deckt den haeufigen Fall eines
+     * konsistenten Zeichensatzes ab.
+     */
+    private function pdf_build_differences_map(array $streams, string $bytes): array {
+        $diff = [];
+        $sources = $streams;
+        $sources[] = $bytes; // Font-Dicts liegen oft unkomprimiert vor.
+        foreach ($sources as $text) {
+            if (strpos($text, '/Differences') === false) {
+                continue;
+            }
+            if (!preg_match_all('/\/Differences\s*\[(.*?)\]/s', $text, $blocks)) {
+                continue;
+            }
+            foreach ($blocks[1] as $arr) {
+                if (!preg_match_all('/(\d+)|\/([A-Za-z0-9._]+)/', $arr, $toks, PREG_SET_ORDER)) {
+                    continue;
+                }
+                $code = 0;
+                foreach ($toks as $t) {
+                    if (($t[1] ?? '') !== '') {
+                        $code = (int) $t[1];
+                    } else {
+                        $cp = $this->pdf_glyph_to_codepoint($t[2]);
+                        if ($cp !== null && $code >= 0 && $code <= 255 && !isset($diff[$code])) {
+                            $diff[$code] = $this->pdf_codepoint_to_utf8($cp);
+                        }
+                        $code++;
+                    }
+                }
+            }
+        }
+        return $diff;
+    }
+
+    /** Adobe-Glyphname -> Unicode-Codepoint (Teilmenge + uniXXXX + Einzelzeichen). */
+    private function pdf_glyph_to_codepoint(string $name): ?int {
+        if ($name === '' || $name === '.notdef') {
+            return null;
+        }
+        static $agl = [
+            'space' => 32, 'exclam' => 33, 'quotedbl' => 34, 'numbersign' => 35, 'dollar' => 36,
+            'percent' => 37, 'ampersand' => 38, 'quotesingle' => 39, 'parenleft' => 40, 'parenright' => 41,
+            'asterisk' => 42, 'plus' => 43, 'comma' => 44, 'hyphen' => 45, 'period' => 46, 'slash' => 47,
+            'zero' => 48, 'one' => 49, 'two' => 50, 'three' => 51, 'four' => 52, 'five' => 53, 'six' => 54,
+            'seven' => 55, 'eight' => 56, 'nine' => 57, 'colon' => 58, 'semicolon' => 59, 'less' => 60,
+            'equal' => 61, 'greater' => 62, 'question' => 63, 'at' => 64, 'bracketleft' => 91,
+            'backslash' => 92, 'bracketright' => 93, 'asciicircum' => 94, 'underscore' => 95, 'grave' => 96,
+            'braceleft' => 123, 'bar' => 124, 'braceright' => 125, 'asciitilde' => 126,
+            'quoteleft' => 0x2018, 'quoteright' => 0x2019, 'quotedblleft' => 0x201C, 'quotedblright' => 0x201D,
+            'quotesinglbase' => 0x201A, 'quotedblbase' => 0x201E, 'bullet' => 0x2022, 'endash' => 0x2013,
+            'emdash' => 0x2014, 'ellipsis' => 0x2026, 'guillemotleft' => 0xAB, 'guillemotright' => 0xBB,
+            'guilsinglleft' => 0x2039, 'guilsinglright' => 0x203A, 'Euro' => 0x20AC, 'trademark' => 0x2122,
+            'degree' => 0xB0, 'plusminus' => 0xB1, 'section' => 0xA7, 'paragraph' => 0xB6,
+            'periodcentered' => 0xB7, 'cent' => 0xA2, 'sterling' => 0xA3, 'yen' => 0xA5, 'copyright' => 0xA9,
+            'registered' => 0xAE, 'ordfeminine' => 0xAA, 'ordmasculine' => 0xBA,
+            'germandbls' => 0xDF, 'adieresis' => 0xE4, 'odieresis' => 0xF6, 'udieresis' => 0xFC,
+            'Adieresis' => 0xC4, 'Odieresis' => 0xD6, 'Udieresis' => 0xDC,
+            'aacute' => 0xE1, 'agrave' => 0xE0, 'acircumflex' => 0xE2, 'atilde' => 0xE3, 'aring' => 0xE5,
+            'ae' => 0xE6, 'ccedilla' => 0xE7, 'eacute' => 0xE9, 'egrave' => 0xE8, 'ecircumflex' => 0xEA,
+            'edieresis' => 0xEB, 'iacute' => 0xED, 'igrave' => 0xEC, 'icircumflex' => 0xEE, 'idieresis' => 0xEF,
+            'ntilde' => 0xF1, 'oacute' => 0xF3, 'ograve' => 0xF2, 'ocircumflex' => 0xF4, 'otilde' => 0xF5,
+            'oslash' => 0xF8, 'uacute' => 0xFA, 'ugrave' => 0xF9, 'ucircumflex' => 0xFB, 'yacute' => 0xFD,
+            'ydieresis' => 0xFF, 'Aacute' => 0xC1, 'Agrave' => 0xC0, 'Acircumflex' => 0xC2, 'Atilde' => 0xC3,
+            'Aring' => 0xC5, 'AE' => 0xC6, 'Ccedilla' => 0xC7, 'Eacute' => 0xC9, 'Egrave' => 0xC8,
+            'Ecircumflex' => 0xCA, 'Edieresis' => 0xCB, 'Iacute' => 0xCD, 'Igrave' => 0xCC, 'Ntilde' => 0xD1,
+            'Oacute' => 0xD3, 'Ograve' => 0xD2, 'Ocircumflex' => 0xD4, 'Otilde' => 0xD5, 'Oslash' => 0xD8,
+            'Uacute' => 0xDA, 'Ugrave' => 0xD9, 'Ucircumflex' => 0xDB, 'Yacute' => 0xDD,
+            'fi' => 0xFB01, 'fl' => 0xFB02,
+        ];
+        if (isset($agl[$name])) {
+            return $agl[$name];
+        }
+        if (strlen($name) === 1) {
+            return ord($name); // A-Z, a-z, ASCII-Symbole
+        }
+        if (preg_match('/^uni([0-9A-Fa-f]{4})$/', $name, $m)) {
+            return hexdec($m[1]);
+        }
+        if (preg_match('/^u([0-9A-Fa-f]{4,6})$/', $name, $m)) {
+            return hexdec($m[1]);
+        }
+        // Namen wie "g12" / "cid34" o. ae. sind ohne Font nicht aufloesbar.
+        return null;
     }
 
     /**
@@ -1824,7 +1936,7 @@ final class AICB_Plugin {
     }
 
     /** Liest Text-Show-Operatoren aus einem Content-Stream in Dokumentreihenfolge. */
-    private function pdf_tokenize_text(string $content, array $map, int $code_len): string {
+    private function pdf_tokenize_text(string $content, array $map, int $code_len, array $diff = []): string {
         $has_map = !empty($map);
         $n = strlen($content);
         $i = 0;
@@ -1850,7 +1962,7 @@ final class AICB_Plugin {
             $ch = $content[$i];
             if ($ch === '(') {
                 [$raw, $i] = $this->pdf_read_literal($content, $i);
-                $append($this->pdf_decode_bytes($raw, $map, $code_len, $has_map));
+                $append($this->pdf_decode_bytes($raw, $map, $code_len, $has_map, $diff));
                 continue;
             }
             if ($ch === '<' && ($i + 1 >= $n || $content[$i + 1] !== '<')) {
@@ -1859,7 +1971,7 @@ final class AICB_Plugin {
                     break;
                 }
                 $hex = substr($content, $i + 1, $close - $i - 1);
-                $append($this->pdf_decode_bytes($this->pdf_hex_to_bytes($hex), $map, $code_len, $has_map));
+                $append($this->pdf_decode_bytes($this->pdf_hex_to_bytes($hex), $map, $code_len, $has_map, $diff));
                 $i = $close + 1;
                 continue;
             }
@@ -1869,7 +1981,7 @@ final class AICB_Plugin {
                     break;
                 }
                 $arr = substr($content, $i + 1, $close - $i - 1);
-                $append($this->pdf_decode_array($arr, $map, $code_len, $has_map));
+                $append($this->pdf_decode_array($arr, $map, $code_len, $has_map, $diff));
                 $i = $close + 1;
                 continue;
             }
@@ -1949,7 +2061,7 @@ final class AICB_Plugin {
     }
 
     /** Dekodiert eine TJ-Array-Zeichenkette: Strings zusammenfuegen, grosse Kerning-Luecken -> Space. */
-    private function pdf_decode_array(string $arr, array $map, int $code_len, bool $has_map): string {
+    private function pdf_decode_array(string $arr, array $map, int $code_len, bool $has_map, array $diff = []): string {
         $n = strlen($arr);
         $i = 0;
         $out = '';
@@ -1957,7 +2069,7 @@ final class AICB_Plugin {
             $ch = $arr[$i];
             if ($ch === '(') {
                 [$raw, $i] = $this->pdf_read_literal($arr, $i);
-                $out .= $this->pdf_decode_bytes($raw, $map, $code_len, $has_map);
+                $out .= $this->pdf_decode_bytes($raw, $map, $code_len, $has_map, $diff);
                 continue;
             }
             if ($ch === '<') {
@@ -1965,7 +2077,7 @@ final class AICB_Plugin {
                 if ($close === false) {
                     break;
                 }
-                $out .= $this->pdf_decode_bytes($this->pdf_hex_to_bytes(substr($arr, $i + 1, $close - $i - 1)), $map, $code_len, $has_map);
+                $out .= $this->pdf_decode_bytes($this->pdf_hex_to_bytes(substr($arr, $i + 1, $close - $i - 1)), $map, $code_len, $has_map, $diff);
                 $i = $close + 1;
                 continue;
             }
@@ -1987,8 +2099,11 @@ final class AICB_Plugin {
         return $out;
     }
 
-    /** Wandelt rohe String-Bytes in UTF-8 um: via ToUnicode-CMap, sonst als CP1252/Latin-1. */
-    private function pdf_decode_bytes(string $raw, array $map, int $code_len, bool $has_map): string {
+    /**
+     * Wandelt rohe String-Bytes in UTF-8 um. Reihenfolge: ToUnicode-CMap ->
+     * /Differences-Abbildung (Glyphnamen) -> CP1252/Latin-1.
+     */
+    private function pdf_decode_bytes(string $raw, array $map, int $code_len, bool $has_map, array $diff = []): string {
         if ($raw === '') {
             return '';
         }
@@ -2003,8 +2118,26 @@ final class AICB_Plugin {
                     $out .= $map[$key];
                 } elseif ($step === 2 && isset($map[strtoupper(bin2hex($chunk[1]))])) {
                     $out .= $map[strtoupper(bin2hex($chunk[1]))];
+                } elseif ($step === 1 && isset($diff[ord($chunk)])) {
+                    $out .= $diff[ord($chunk)];
                 } else {
                     $out .= $this->pdf_bytes_latin1(($step === 1) ? $chunk : substr($chunk, -1));
+                }
+            }
+            if ($out !== '') {
+                return $out;
+            }
+        }
+        // Keine CMap: erst /Differences (byteweise) versuchen, sonst Latin-1.
+        if (!empty($diff)) {
+            $out = '';
+            $len = strlen($raw);
+            for ($i = 0; $i < $len; $i++) {
+                $b = ord($raw[$i]);
+                if (isset($diff[$b])) {
+                    $out .= $diff[$b];
+                } elseif ($b >= 0x20) {
+                    $out .= $this->pdf_bytes_latin1($raw[$i]);
                 }
             }
             if ($out !== '') {

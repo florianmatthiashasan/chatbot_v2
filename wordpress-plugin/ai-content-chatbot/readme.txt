@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.6.0
+Stable tag: 0.6.1
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -48,6 +48,11 @@ The plugin stores embeddings in the WordPress database as JSON vectors. This kee
 
 
 == Changelog ==
+
+= 0.6.1 =
+* PDF-Extraktion deutlich verbessert: Fonts mit /Encoding /Differences (Glyphnamen) werden jetzt korrekt aufgeloest - genau die Subset-Fonts aus Word/LibreOffice/InDesign, die zuvor als Zeichensalat verworfen wurden, liefern nun sauberen Text (inkl. Umlauten und korrekter Worttrennung ueber Kerning).
+* Falls auf dem Server "pdftotext" (poppler) verfuegbar ist, wird es bevorzugt genutzt (beste Qualitaet); sonst greift die reine PHP-Extraktion.
+* Die Qualitaetspruefung bleibt aktiv: echte Bild-/Scan-PDFs ohne Textebene und weiterhin unlesbare Fonts (z. B. CID ohne ToUnicode) werden weiterhin sauber uebersprungen, statt Muell zu indexieren.
 
 = 0.6.0 =
 * Feedback-Leiste "War das hilfreich?" mit 👍/👎 unter jeder Antwort im Widget (mehrsprachig, einmalige Abstimmung pro Antwort).
