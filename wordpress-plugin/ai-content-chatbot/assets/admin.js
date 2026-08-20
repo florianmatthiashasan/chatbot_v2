@@ -234,7 +234,7 @@
     }
   }
 
-  // Mediathek-Dialog fuer PDFs (wp.media). Auswahl wird an state.content.pdfs angehaengt.
+  // Mediathek-Dialog für PDFs (wp.media). Auswahl wird an state.content.pdfs angehängt.
   let pdfFrame = null;
   function openPdfPicker() {
     if (typeof wp === "undefined" || !wp.media) {
@@ -243,10 +243,10 @@
     }
     if (!pdfFrame) {
       pdfFrame = wp.media({
-        title: "PDFs aus der Mediathek waehlen",
+        title: "PDFs aus der Mediathek wählen",
         multiple: true,
         library: { type: "application/pdf" },
-        button: { text: "Auswahl uebernehmen" },
+        button: { text: "Auswahl übernehmen" },
       });
       pdfFrame.on("select", () => {
         const selection = pdfFrame.state().get("selection").toJSON();
@@ -295,7 +295,7 @@
   }
 
   async function deleteMemory(id) {
-    if (!confirm("Diesen Chunk wirklich loeschen?")) return;
+    if (!confirm("Diesen Chunk wirklich löschen?")) return;
     try {
       await api("admin/memory", { method: "DELETE", body: { id } });
       await loadMemory(state.memory.q);
@@ -344,8 +344,8 @@
     return `
       <section class="aicb-panel">
         <div class="aicb-panel-head">
-          <div><h2>Training aus WordPress-Inhalten</h2><p>Indexiert die im Tab <strong>Inhalte</strong> gewaehlten veroeffentlichten Beitraege/Seiten und PDFs. Standardmaessig werden alle veroeffentlichten Inhalte der aktivierten Post Types genommen. Keine Sitemap noetig.</p>
-          <p class="aicb-hint">Nach einem Plugin-Update lohnt sich ein neues Training: Tabellen, Listen und Ueberschriften bleiben jetzt erhalten und die Abschnitte ueberlappen sich, damit Details wie Preise, Zeiten und Bedingungen zuverlaessig gefunden werden.</p></div>
+          <div><h2>Training aus WordPress-Inhalten</h2><p>Indexiert die im Tab <strong>Inhalte</strong> gewählten veröffentlichten Beiträge/Seiten und PDFs. Standardmäßig werden alle veröffentlichten Inhalte der aktivierten Post Types genommen. Keine Sitemap nötig.</p>
+          <p class="aicb-hint">Nach einem Plugin-Update lohnt sich ein neues Training: Tabellen, Listen und Überschriften bleiben jetzt erhalten und die Abschnitte überlappen sich, damit Details wie Preise, Zeiten und Bedingungen zuverlässig gefunden werden.</p></div>
           ${button("Jetzt komplett trainieren", { id: "aicb-start-training", primary: true, disabled: state.busy })}
         </div>
         <div class="aicb-metrics">
@@ -362,7 +362,7 @@
   function renderContent() {
     const c = state.content;
     if (!c) {
-      return `<section class="aicb-panel"><h2>Inhalte auswaehlen</h2><p>Lade Inhalte ...</p></section>`;
+      return `<section class="aicb-panel"><h2>Inhalte auswählen</h2><p>Lade Inhalte ...</p></section>`;
     }
     const mode = c.mode === "selected" ? "selected" : "all";
     const groups = c.post_types || [];
@@ -384,13 +384,13 @@
               .join("");
             return `
               <div class="aicb-content-group">
-                <h3>${escapeHtml(g.label)} <code>${escapeHtml(g.name)}</code> <span class="aicb-hint">(${Number(g.total)} veroeffentlicht${g.truncated ? ", erste 300" : ""})</span></h3>
-                <label class="aicb-content-toggle"><input type="checkbox" class="aicb-toggle-group" data-group="${escapeHtml(g.name)}" ${disabledAttr}> Alle in dieser Liste an-/abwaehlen</label>
+                <h3>${escapeHtml(g.label)} <code>${escapeHtml(g.name)}</code> <span class="aicb-hint">(${Number(g.total)} veröffentlicht${g.truncated ? ", erste 300" : ""})</span></h3>
+                <label class="aicb-content-toggle"><input type="checkbox" class="aicb-toggle-group" data-group="${escapeHtml(g.name)}" ${disabledAttr}> Alle in dieser Liste an-/abwählen</label>
                 <div class="aicb-content-list">${items}</div>
               </div>`;
           })
           .join("")
-      : "<p>Keine veroeffentlichten Inhalte gefunden.</p>";
+      : "<p>Keine veröffentlichten Inhalte gefunden.</p>";
 
     const pdfHtml = pdfs.length
       ? pdfs
@@ -398,17 +398,17 @@
             (p) => `<li data-id="${Number(p.id)}"><span>${escapeHtml(p.title)}</span> <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noreferrer">↗</a> <button type="button" class="button-link aicb-remove-pdf" data-id="${Number(p.id)}">entfernen</button></li>`
           )
           .join("")
-      : "<li class='aicb-hint'>Noch keine PDFs ausgewaehlt.</li>";
+      : "<li class='aicb-hint'>Noch keine PDFs ausgewählt.</li>";
 
     return `
       <section class="aicb-panel" id="aicb-content-form">
         <div class="aicb-panel-head">
-          <div><h2>Inhalte fuer den Chatbot auswaehlen</h2>
-          <p>Es werden ausschliesslich <strong>veroeffentlichte</strong> Inhalte gelistet. Entwuerfe werden nie indexiert.</p></div>
+          <div><h2>Inhalte für den Chatbot auswählen</h2>
+          <p>Es werden ausschließlich <strong>veröffentlichte</strong> Inhalte gelistet. Entwürfe werden nie indexiert.</p></div>
         </div>
 
         <div class="aicb-checks">
-          <label><input type="radio" name="index_mode" value="all" ${mode === "all" ? "checked" : ""}> Alle veroeffentlichten Inhalte der aktivierten Post Types (Einstellungen)</label>
+          <label><input type="radio" name="index_mode" value="all" ${mode === "all" ? "checked" : ""}> Alle veröffentlichten Inhalte der aktivierten Post Types (Einstellungen)</label>
           <label><input type="radio" name="index_mode" value="selected" ${mode === "selected" ? "checked" : ""}> Nur die unten angekreuzten Inhalte</label>
         </div>
 
@@ -420,8 +420,8 @@
         ${groupHtml}
 
         <h2 style="margin-top:24px;">PDFs aus der Mediathek</h2>
-        <p class="aicb-hint">Ausgewaehlte PDFs werden beim naechsten Training in die Wissensbasis aufgenommen. Gescannte Bild-PDFs ohne Textebene koennen nicht gelesen werden.</p>
-        <p>${button("PDFs aus Mediathek waehlen", { id: "aicb-pick-pdfs" })}</p>
+        <p class="aicb-hint">Ausgewählte PDFs werden beim nächsten Training in die Wissensbasis aufgenommen. Gescannte Bild-PDFs ohne Textebene können nicht gelesen werden.</p>
+        <p>${button("PDFs aus Mediathek wählen", { id: "aicb-pick-pdfs" })}</p>
         <ul class="aicb-pdf-list">${pdfHtml}</ul>
 
         <p style="margin-top:20px;">
@@ -452,11 +452,11 @@
         <div class="aicb-checks">
           <label><input type="checkbox" name="auto_index_on_save" ${s.auto_index_on_save ? "checked" : ""}> Bei Speichern automatisch nachindexieren</label>
           <label><input type="checkbox" name="widget_enabled" ${s.widget_enabled ? "checked" : ""}> Floating Widget aktivieren</label>
-          <label><input type="checkbox" name="include_excerpts" ${s.include_excerpts ? "checked" : ""}> Auszuege einbeziehen</label>
+          <label><input type="checkbox" name="include_excerpts" ${s.include_excerpts ? "checked" : ""}> Auszüge einbeziehen</label>
           <label><input type="checkbox" name="include_taxonomies" ${s.include_taxonomies ? "checked" : ""}> Taxonomien einbeziehen</label>
         </div>
         <div class="aicb-posttypes">
-          <h3>Post Types fuer Training</h3>
+          <h3>Post Types für Training</h3>
           ${postTypes.map((pt) => `<label><input type="checkbox" name="enabled_post_types" value="${escapeHtml(pt.name)}" ${pt.selected ? "checked" : ""}> ${escapeHtml(pt.label)} <code>${escapeHtml(pt.name)}</code></label>`).join("")}
         </div>
         ${field("System Prompt", `<textarea name="system_prompt" rows="8">${escapeHtml(s.system_prompt || "")}</textarea>`)}
@@ -492,14 +492,14 @@
       <form class="aicb-panel aicb-form" id="aicb-widget-form">
         <h2>Widget Design</h2>
         <p class="aicb-hint">Textfelder leer lassen: dann erscheinen sie automatisch in der Sprache der Website
-        (Deutsch, Englisch, Franzoesisch, Spanisch, Italienisch, Niederlaendisch, Portugiesisch, Tuerkisch,
+        (Deutsch, Englisch, Französisch, Spanisch, Italienisch, Niederländisch, Portugiesisch, Türkisch,
         Polnisch, Russisch, Arabisch). Der Bot antwortet immer in der Sprache, in der gefragt wird.</p>
         <div class="aicb-grid two">
           ${field("Titel", `<input name="title" value="${escapeHtml(c.title || "")}">`)}
           ${field("Statuszeile", `<input name="status" value="${escapeHtml(c.status || "")}">`)}
           ${field("Intro", `<input name="intro" value="${escapeHtml(c.intro || "")}">`)}
           ${field("Placeholder", `<input name="placeholder" value="${escapeHtml(c.placeholder || "")}">`)}
-          ${field("Themen-Ueberschrift", `<input name="topics_label" value="${escapeHtml(c.topics_label || "")}">`)}
+          ${field("Themen-Überschrift", `<input name="topics_label" value="${escapeHtml(c.topics_label || "")}">`)}
           ${field("Datenschutz-Linktext", `<input name="privacy_label" value="${escapeHtml(c.privacy_label || "")}">`)}
         </div>
         ${field("Icon: Emoji oder SVG-Logo (leer = kein Avatar)", `<textarea name="icon" rows="3">${escapeHtml(c.icon || "")}</textarea>`)}
@@ -519,11 +519,11 @@
             <label><input name="topic_highlight" type="checkbox" ${topic.highlight ? "checked" : ""}> Highlight</label>
             <button type="button" class="button" data-remove-row>Entfernen</button>
           </div>`).join("")}</div>
-        <p>${button("Topic hinzufuegen", { id: "aicb-add-topic" })} ${button("Widget speichern", { primary: true, submit: true })}</p>
+        <p>${button("Topic hinzufügen", { id: "aicb-add-topic" })} ${button("Widget speichern", { primary: true, submit: true })}</p>
       </form>
       <aside class="aicb-panel aicb-preview">
         <h2>Live-Vorschau</h2>
-        <p class="aicb-hint">Aenderungen erscheinen hier sofort. Gespeichert wird erst mit
+        <p class="aicb-hint">Änderungen erscheinen hier sofort. Gespeichert wird erst mit
         &bdquo;Widget speichern&ldquo;. Du kannst im Fenster auch echt chatten.</p>
         <div id="aicb-preview-host"></div>
         <p class="aicb-preview-actions">
@@ -545,7 +545,7 @@
             <textarea name="faq_answer" rows="4" placeholder="Antwort">${escapeHtml(faq.answer || "")}</textarea>
             <button type="button" class="button" data-remove-row>Entfernen</button>
           </div>`).join("")}</div>
-        <p>${button("FAQ hinzufuegen", { id: "aicb-add-faq" })} ${button("FAQs speichern", { primary: true, submit: true })}</p>
+        <p>${button("FAQ hinzufügen", { id: "aicb-add-faq" })} ${button("FAQs speichern", { primary: true, submit: true })}</p>
       </form>`;
   }
 
@@ -561,7 +561,7 @@
           <div class="aicb-memory-item" data-memory-row data-id="${Number(item.id)}">
             <div class="aicb-memory-meta"><input name="memory_title" value="${escapeHtml(item.title || "")}"><a href="${escapeHtml(item.source_url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(item.source_type || "")}</a></div>
             <textarea name="memory_content" rows="5">${escapeHtml(item.content || "")}</textarea>
-            <p><button type="button" class="button button-primary" data-save-memory>Speichern</button> <button type="button" class="button" data-delete-memory>Loeschen</button></p>
+            <p><button type="button" class="button button-primary" data-save-memory>Speichern</button> <button type="button" class="button" data-delete-memory>Löschen</button></p>
           </div>`).join("") || "<p>Keine Chunks gefunden.</p>"}</div>
       </section>`;
   }
@@ -579,7 +579,7 @@
           <div><strong>${overview.week_chats || 0}</strong><span>Chats 7 Tage</span></div>
           <div><strong>${overview.month_chats || 0}</strong><span>Chats 30 Tage</span></div>
           <div><strong>${overview.total_chats || 0}</strong><span>Chats gesamt</span></div>
-          <div><strong>$${usage.estimated_cost_usd || 0}</strong><span>Geschaetzte Kosten</span></div>
+          <div><strong>$${usage.estimated_cost_usd || 0}</strong><span>Geschätzte Kosten</span></div>
         </div>
 
         <h3>Feedback der Besucher</h3>
@@ -632,7 +632,7 @@
     return "--aicb-" + key.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
   }
 
-  // Konfiguration aus dem Formular - leere Felder fallen auf das Sprachpaket zurueck.
+  // Konfiguration aus dem Formular - leere Felder fallen auf das Sprachpaket zurück.
   function previewConfig() {
     const base = AICBAdmin.widgetConfig || {};
     const defaults = AICBAdmin.copyDefaults || {};
@@ -726,13 +726,13 @@
     shell.aicbPreview.reset();
     shell.aicbPreview.demo({
       question: "Wie kann ich euch erreichen?",
-      answer: "Unsere Rezeption ist **taeglich von 8 bis 20 Uhr** erreichbar, telefonisch unter Tel. +43 5223 5855.\n\nQuellen:\n" + url,
+      answer: "Unsere Rezeption ist **täglich von 8 bis 20 Uhr** erreichbar, telefonisch unter Tel. +43 5223 5855.\n\nQuellen:\n" + url,
       rich: {
         version: 1,
         cards: [{
           title: "Kontakt & Anfahrt",
-          description: "Oeffnungszeiten, Anreise und Parkplaetze auf einen Blick.",
-          details: ["Taeglich 8-20 Uhr"],
+          description: "Öffnungszeiten, Anreise und Parkplätze auf einen Blick.",
+          details: ["Täglich 8-20 Uhr"],
           url: url,
         }],
         actions: [

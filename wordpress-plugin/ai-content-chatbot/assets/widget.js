@@ -2,7 +2,7 @@
  * AI Content Chatbot - Widget-Logik
  * Gleiche Bedienung wie das florianmatthias-Chat-Widget: Themenliste in der
  * Startansicht, Markdown und Quellenblock in den Antworten, Karten mit
- * Aktionsbuttons, Anker-Scrolling und Begruessungs-Popup.
+ * Aktionsbuttons, Anker-Scrolling und Begrüßungs-Popup.
  */
 (function () {
   if (!window.AICBWidget) return;
@@ -17,7 +17,7 @@
   var cfg = window.AICBWidget.config || {};
   var copy = cfg.copy || {};
   var contact = cfg.contact || {};
-  // Alle Systemtexte kommen sprachaufgeloest vom Server (Sprachpakete im Plugin).
+  // Alle Systemtexte kommen sprachaufgelöst vom Server (Sprachpakete im Plugin).
   var strings = cfg.strings || {};
 
   var FALLBACK_STRINGS = {
@@ -33,7 +33,7 @@
     return (value || "").toString().trim() || FALLBACK_STRINGS[key];
   }
 
-  // Sprachcode der Seite - vollstaendig, damit das Backend jede Sprache kennt.
+  // Sprachcode der Seite - vollständig, damit das Backend jede Sprache kennt.
   function lang() {
     var value = (cfg.lang || document.documentElement.getAttribute("lang") || navigator.language || "en")
       .toString()
@@ -114,7 +114,7 @@
     return svg;
   }
 
-  // Eigenes SVG des Betreibers wird bereinigt uebernommen, sonst Emoji/Text.
+  // Eigenes SVG des Betreibers wird bereinigt übernommen, sonst Emoji/Text.
   function sanitizeSvg(markup) {
     var trimmed = (markup || "").trim();
     if (trimmed.toLowerCase().indexOf("<svg") !== 0) return null;
@@ -189,7 +189,7 @@
       question: "War das hilfreich?",
       yes: "Hilfreich",
       no: "Nicht hilfreich",
-      thanks: "Danke fuer dein Feedback!",
+      thanks: "Danke für dein Feedback!",
     };
     return (fb[key] || "").toString().trim() || fallback[key];
   }
@@ -246,7 +246,7 @@
     return /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|\*\*(\S(?:[^\n]*?\S)?)\*\*|__(\S(?:[^\n]*?\S)?)__|`([^`\n]+)`|\*(\S(?:[^*\n]*?\S)?)\*/g;
   }
 
-  // Quellen-Ueberschrift in allen Sprachen des Plugins erkennen.
+  // Quellen-Überschrift in allen Sprachen des Plugins erkennen.
   function sourcesHeadingRegex() {
     var labels = str("sources_labels").map(function (label) {
       return String(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -337,7 +337,7 @@
     });
   }
 
-  // Trennt einen abschliessenden "Quellen:"-Block vom Antworttext ab.
+  // Trennt einen abschließenden "Quellen:"-Block vom Antworttext ab.
   function splitSources(input) {
     var value = (input || "").toString();
     var lines = value.split("\n");
@@ -480,7 +480,7 @@
     function createBubble(value, sender) {
       var bubble = document.createElement("div");
       bubble.className = "aicb-bubble";
-      // dir=auto: eine arabische Antwort laeuft rechtsbuendig, auch wenn die
+      // dir=auto: eine arabische Antwort läuft rechtsbündig, auch wenn die
       // Seite links-nach-rechts ist.
       bubble.setAttribute("dir", "auto");
       setBubbleContent(bubble, value, sender === "user");
@@ -540,8 +540,8 @@
       return wrap;
     }
 
-    // Link-Aktionen sind echte <a>: nur so uebergibt der Browser tel:/mailto:
-    // zuverlaessig an Telefon- bzw. Mail-App.
+    // Link-Aktionen sind echte <a>: nur so übergibt der Browser tel:/mailto:
+    // zuverlässig an Telefon- bzw. Mail-App.
     function createAction(action, isPrimary) {
       var url = safeUrl(action.url);
       var isLink = !!url && action.type !== "question";
@@ -753,7 +753,7 @@
         });
     }
 
-    /* --- Panel oeffnen und schliessen ------------------------------------- */
+    /* --- Panel öffnen und schließen ------------------------------------- */
     function hideTeaser(remember) {
       if (teaserEl) teaserEl.classList.remove("aicb-teaser-visible");
       if (remember) writeStore("localStorage", TEASER_KEY, "1");
@@ -800,7 +800,7 @@
     });
     window.addEventListener("resize", updateSpacer);
 
-    // Begruessungs-Popup: einmal pro Besucher.
+    // Begrüßungs-Popup: einmal pro Besucher.
     var greeting = cfg.greeting || {};
     if (!inline && teaserEl && greeting.enabled && (greeting.text || "").trim()) {
       if (readStore("localStorage", TEASER_KEY, "") !== "1") {
@@ -823,7 +823,7 @@
       shell.classList.add("aicb-open");
     }
 
-    // Kleine API fuer die Live-Vorschau im Admin: Beispielnachrichten anzeigen,
+    // Kleine API für die Live-Vorschau im Admin: Beispielnachrichten anzeigen,
     // ohne die Chat-API zu belasten.
     shell.aicbPreview = {
       demo: function (sample) {

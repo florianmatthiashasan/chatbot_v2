@@ -257,7 +257,7 @@
   margin-bottom: 8px;
 }
 
-/* Checkbox und Entfernen-Button duerfen nicht schrumpfen */
+/* Checkbox und Entfernen-Button dürfen nicht schrumpfen */
 .aicb-row > label {
   display: flex;
   align-items: center;
@@ -427,7 +427,7 @@
   }
 }
 
-/* --- Inhalte-Tab (Auswahl von Beitraegen/Seiten + PDFs) ------------------- */
+/* --- Inhalte-Tab (Auswahl von Beiträgen/Seiten + PDFs) ------------------- */
 .aicb-admin .aicb-content-group {
   margin: 18px 0;
   padding-top: 6px;

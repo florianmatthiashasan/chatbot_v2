@@ -13,7 +13,7 @@
 }
 
 .aicb-widget-shell {
-  /* Farben - werden vom Plugin als Inline-Variablen ueberschrieben */
+  /* Farben - werden vom Plugin als Inline-Variablen überschrieben */
   --aicb-accent: #8c8875;
   --aicb-accent-strong: #756f5f;
   --aicb-status-dot: #4f8a5b;
@@ -30,7 +30,7 @@
   --aicb-composer-button-bg: #3a352c;
   --aicb-composer-button-text: #f8f6f1;
 
-  /* Abgeleitete Toene: Fallback in Grau, sonst aus der Textfarbe gemischt */
+  /* Abgeleitete Töne: Fallback in Grau, sonst aus der Textfarbe gemischt */
   --aicb-hairline: rgba(47, 42, 36, 0.12);
   --aicb-hairline-soft: rgba(47, 42, 36, 0.09);
   --aicb-hover-soft: rgba(47, 42, 36, 0.06);
@@ -72,7 +72,7 @@
   width: min(100%, 420px);
 }
 
-/* --- Launcher und Begruessungs-Popup -------------------------------------- */
+/* --- Launcher und Begrüßungs-Popup -------------------------------------- */
 .aicb-widget-shell .aicb-launcher {
   width: 60px;
   height: 60px;
@@ -175,7 +175,7 @@
   box-shadow: 0 24px 60px rgba(17, 16, 13, 0.2);
 }
 
-/* display: grid schlaegt sonst das hidden-Attribut - Panel bliebe immer offen */
+/* display: grid schlägt sonst das hidden-Attribut - Panel bliebe immer offen */
 .aicb-widget-shell .aicb-panel[hidden] {
   display: none;
 }
@@ -695,7 +695,7 @@
   stroke-linejoin: round;
 }
 
-/* --- Eingabe und Fusszeile ------------------------------------------------ */
+/* --- Eingabe und Fußzeile ------------------------------------------------ */
 .aicb-widget-shell .aicb-composer-area {
   background: var(--aicb-panel);
   border-top: 1px solid var(--aicb-hairline);
@@ -771,7 +771,7 @@
   transform: translateY(-1px);
 }
 
-/* Leeres Eingabefeld: Button tritt optisch zurueck */
+/* Leeres Eingabefeld: Button tritt optisch zurück */
 .aicb-widget-shell .aicb-send.aicb-idle {
   background: var(--aicb-idle-bg);
   color: var(--aicb-idle-fg);
@@ -868,7 +868,7 @@
   }
 }
 
-/* --- Rechts-nach-links (Arabisch, Hebraeisch ...) -------------------------- */
+/* --- Rechts-nach-links (Arabisch, Hebräisch ...) -------------------------- */
 .aicb-widget-shell[dir="rtl"].aicb-mode-floating {
   right: auto;
   left: 24px;

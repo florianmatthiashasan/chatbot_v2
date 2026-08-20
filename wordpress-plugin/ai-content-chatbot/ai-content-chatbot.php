@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.7.0
+ * Version: 0.7.1
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -18,24 +18,24 @@ final class AICB_Plugin {
     private const FAQ_OPTION_KEY = 'aicb_faqs';
     private const WIDGET_OPTION_KEY = 'aicb_widget_config';
     private const VERSION_OPTION = 'aicb_version';
-    // Feingranulare Inhaltsauswahl fuer das Training.
+    // Feingranulare Inhaltsauswahl für das Training.
     private const INDEX_MODE_OPTION = 'aicb_index_mode';        // 'all' | 'selected'
     private const SELECTED_POSTS_OPTION = 'aicb_selected_posts'; // array<int> Post-IDs (nur publish)
     private const SELECTED_PDFS_OPTION = 'aicb_selected_pdfs';   // array<int> Attachment-IDs (PDF)
 
     /**
      * Standard-Logo des Assistenten. Zeichnet sich in der Farbe des Avatars
-     * (currentColor), laesst sich im Widget-Tab durch ein eigenes SVG oder ein
+     * (currentColor), lässt sich im Widget-Tab durch ein eigenes SVG oder ein
      * Emoji ersetzen.
      */
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.7.0';
-    // Cosinus-Aehnlichkeit: darunter gilt ein Treffer als themenfremd.
+    private const ASSET_VERSION = '0.7.1';
+    // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
-    // Kleinere Chunks finden Details praeziser, die Ueberlappung haelt
-    // Zusammenhaenge ueber die Grenze hinweg zusammen.
+    // Kleinere Chunks finden Details präziser, die Überlappung hält
+    // Zusammenhänge über die Grenze hinweg zusammen.
     private const CHUNK_TARGET_TOKENS = 380;
     private const CHUNK_OVERLAP_TOKENS = 70;
     private const SESSION_TTL = 86400;
@@ -160,37 +160,37 @@ final class AICB_Plugin {
 
     public static function default_system_prompt(): string {
         return "Du bist der Assistent dieser Website und antwortest zu Inhalten nur auf Basis des bereitgestellten Kontexts.\n"
-            . "Wenn etwas nicht im Kontext steht, sage ehrlich, dass du es nicht weisst.\n"
-            . "Antworte praezise, nenne konkrete Fakten und gib Quellen als direkte URLs aus.";
+            . "Wenn etwas nicht im Kontext steht, sage ehrlich, dass du es nicht weißt.\n"
+            . "Antworte präzise, nenne konkrete Fakten und gib Quellen als direkte URLs aus.";
     }
 
     /**
-     * Oberflaechentexte pro Sprache. Genutzt wird das Paket der Seitensprache;
+     * Oberflächentexte pro Sprache. Genutzt wird das Paket der Seitensprache;
      * im Admin gesetzte Texte haben Vorrang. Unbekannte Sprachen fallen auf
-     * Englisch zurueck.
+     * Englisch zurück.
      */
     private const LANG_PACKS = [
         'de' => [
             'title' => 'Haben Sie Fragen?',
             'status' => 'Antwortet sofort',
-            'intro' => 'Hallo! Ich finde gerne eine direkte Antwort fuer dich.',
+            'intro' => 'Hallo! Ich finde gerne eine direkte Antwort für dich.',
             'topics_label' => 'Beliebte Themen',
             'placeholder' => 'Schreibe deine Frage ...',
-            'disclaimer' => 'Der Assistent kann Fehler machen. Bitte pruefe wichtige Informationen.',
+            'disclaimer' => 'Der Assistent kann Fehler machen. Bitte prüfe wichtige Informationen.',
             'privacy_label' => 'Datenschutz',
             'greeting' => 'Hallo! Wie kann ich helfen?',
             'action_contact' => 'Kontakt aufnehmen',
             'action_email' => 'E-Mail schreiben',
             'action_details' => 'Mehr Details',
-            'action_details_q' => 'Kannst du das genauer erklaeren?',
+            'action_details_q' => 'Kannst du das genauer erklären?',
             'steps' => ['Denke nach ...', 'Suche im Index ...', 'Formuliere Antwort ...'],
             'error' => 'Es ist ein Fehler aufgetreten: ',
             'sources' => 'Quellen',
             'aria_minimize' => 'Chat minimieren',
-            'aria_close' => 'Chat schliessen',
+            'aria_close' => 'Chat schließen',
             'aria_send' => 'Nachricht senden',
-            'aria_open' => 'Chat oeffnen',
-            'aria_teaser_close' => 'Hinweis schliessen',
+            'aria_open' => 'Chat öffnen',
+            'aria_teaser_close' => 'Hinweis schließen',
             'no_index' => 'Ich bin noch nicht auf die Inhalte dieser Website trainiert. Zu allgemeinen Fragen helfe ich dir aber gerne weiter.',
         ],
         'en' => [
@@ -455,7 +455,7 @@ final class AICB_Plugin {
     /** Alle Quellen-Bezeichnungen, damit der Quellenblock in jeder Sprache erkannt wird. */
     /**
      * Sprache der Nutzernachricht erkennen. Das Modell alleine entscheidet das
-     * unzuverlaessig, sobald Verlauf und Kontext in einer anderen Sprache
+     * unzuverlässig, sobald Verlauf und Kontext in einer anderen Sprache
      * stehen - dann antwortet es in der Sprache der Website statt in der des
      * Nutzers. Deshalb wird die Sprache hier bestimmt und vorgegeben.
      */
@@ -480,10 +480,10 @@ final class AICB_Plugin {
         'zh' => '/[\x{4E00}-\x{9FFF}]/u',
     ];
 
-    // Haeufige Funktionswoerter. Kurze Nachrichten entscheidet oft ein einziges
-    // Wort ("merhaba", "danke"), deshalb sind Gruesse mit aufgenommen.
+    // Häufige Funktionswörter. Kurze Nachrichten entscheidet oft ein einziges
+    // Wort ("merhaba", "danke"), deshalb sind Grüße mit aufgenommen.
     private const LANG_STOPWORDS = [
-        'de' => ['der', 'die', 'das', 'und', 'ist', 'sind', 'ich', 'du', 'ihr', 'wir', 'nicht', 'wie', 'was', 'wo', 'wann', 'warum', 'kann', 'koennen', 'können', 'habt', 'haben', 'hat', 'mit', 'von', 'für', 'fuer', 'auf', 'eine', 'einen', 'mehr', 'gibt', 'bitte', 'danke', 'hallo', 'guten', 'tag', 'preis', 'preise', 'kosten', 'zimmer'],
+        'de' => ['der', 'die', 'das', 'und', 'ist', 'sind', 'ich', 'du', 'ihr', 'wir', 'nicht', 'wie', 'was', 'wo', 'wann', 'warum', 'kann', 'können', 'können', 'habt', 'haben', 'hat', 'mit', 'von', 'für', 'für', 'auf', 'eine', 'einen', 'mehr', 'gibt', 'bitte', 'danke', 'hallo', 'guten', 'tag', 'preis', 'preise', 'kosten', 'zimmer'],
         'en' => ['the', 'is', 'are', 'how', 'what', 'where', 'when', 'why', 'can', 'you', 'your', 'we', 'do', 'does', 'have', 'has', 'please', 'thanks', 'thank', 'yes', 'with', 'for', 'about', 'more', 'there', 'hi', 'hello', 'hey', 'price', 'prices', 'cost', 'opening', 'hours'],
         'tr' => ['bir', 'və', 've', 'için', 'icin', 'nasıl', 'nasil', 'var', 'yok', 'nerede', 'zaman', 'merhaba', 'selam', 'teşekkür', 'tesekkur', 'evet', 'hayır', 'hayir', 'ile', 'daha', 'çok', 'cok', 'mı', 'mi', 'mu', 'mü', 'fiyat', 'fiyatlar', 'oda', 'saat'],
         'fr' => ['le', 'la', 'les', 'des', 'une', 'est', 'vous', 'je', 'nous', 'comment', 'quel', 'quelle', 'pour', 'avec', 'merci', 'oui', 'non', 'plus', 'bonjour', 'salut', 'prix', 'ouvert'],
@@ -494,7 +494,7 @@ final class AICB_Plugin {
         'pl' => ['jak', 'co', 'gdzie', 'czy', 'nie', 'tak', 'dla', 'jest', 'są', 'sa', 'dziękuję', 'dziekuje', 'cześć', 'czesc', 'dzień', 'dobry', 'cena', 'ceny', 'pokój', 'pokoj'],
     ];
 
-    // Diakritika als Zusatzsignal - "ı" und "ğ" gibt es praktisch nur im Tuerkischen.
+    // Diakritika als Zusatzsignal - "ı" und "ğ" gibt es praktisch nur im Türkischen.
     private const LANG_HINT_CHARS = [
         'tr' => ['ı', 'ş', 'ğ'],
         'de' => ['ä', 'ö', 'ü', 'ß'],
@@ -566,7 +566,7 @@ final class AICB_Plugin {
     /** Beschriftungen der Feedback-Leiste (👍/👎) je Sprache, Fallback Englisch. */
     private function feedback_labels(string $lang): array {
         $map = [
-            'de' => ['question' => 'War das hilfreich?', 'yes' => 'Hilfreich', 'no' => 'Nicht hilfreich', 'thanks' => 'Danke fuer dein Feedback!'],
+            'de' => ['question' => 'War das hilfreich?', 'yes' => 'Hilfreich', 'no' => 'Nicht hilfreich', 'thanks' => 'Danke für dein Feedback!'],
             'en' => ['question' => 'Was this helpful?', 'yes' => 'Helpful', 'no' => 'Not helpful', 'thanks' => 'Thanks for your feedback!'],
             'fr' => ['question' => 'Cela vous a-t-il aide ?', 'yes' => 'Utile', 'no' => 'Pas utile', 'thanks' => 'Merci pour votre retour !'],
             'es' => ['question' => 'Te resulto util?', 'yes' => 'Util', 'no' => 'No util', 'thanks' => 'Gracias por tu opinion!'],
@@ -600,7 +600,7 @@ final class AICB_Plugin {
                 'composerButtonBg' => '#3a352c',
                 'composerButtonText' => '#f8f6f1',
             ],
-            // Leere Texte werden automatisch aus dem Sprachpaket der Seite gefuellt.
+            // Leere Texte werden automatisch aus dem Sprachpaket der Seite gefüllt.
             'copy' => [
                 'icon' => self::DEFAULT_ICON_SVG,
                 'title' => '',
@@ -625,10 +625,10 @@ final class AICB_Plugin {
     }
 
     /**
-     * Update-Migration. Beim Sprung auf 0.3.0 wuerden zwei Altlasten die neue
+     * Update-Migration. Beim Sprung auf 0.3.0 würden zwei Altlasten die neue
      * Sprachlogik aushebeln: der auf Deutsch festgenagelte System-Prompt und die
      * deutschen Standardtexte im Widget. Beides wird nur ersetzt, wenn es noch
-     * unveraendert dem alten Standard entspricht - eigene Texte bleiben.
+     * unverändert dem alten Standard entspricht - eigene Texte bleiben.
      */
     public function maybe_upgrade(): void {
         if ((string) get_option(self::VERSION_OPTION, '') === self::ASSET_VERSION) {
@@ -636,15 +636,15 @@ final class AICB_Plugin {
         }
 
         $legacy_prompt = "Du bist ein Assistent, der nur auf Basis des bereitgestellten WordPress-Kontexts antwortet.\n"
-            . "Wenn etwas nicht im Kontext steht, sage ehrlich, dass du es nicht weisst.\n"
-            . "Antworte praezise auf Deutsch, nenne konkrete Fakten und gib Quellen als direkte URLs aus.";
+            . "Wenn etwas nicht im Kontext steht, sage ehrlich, dass du es nicht weißt.\n"
+            . "Antworte präzise auf Deutsch, nenne konkrete Fakten und gib Quellen als direkte URLs aus.";
         $settings = $this->settings();
         $settings_changed = false;
         if (trim((string) ($settings['system_prompt'] ?? '')) === trim($legacy_prompt)) {
             $settings['system_prompt'] = self::default_system_prompt();
             $settings_changed = true;
         }
-        // Alte Standardwerte anheben - mehr Kontext heisst mehr Details in der
+        // Alte Standardwerte anheben - mehr Kontext heißt mehr Details in der
         // Antwort. Selbst gesetzte Werte bleiben unangetastet.
         if ((int) ($settings['retriever_k'] ?? 0) === 8) {
             $settings['retriever_k'] = 12;
@@ -661,10 +661,10 @@ final class AICB_Plugin {
         $legacy_copy = [
             'title' => ['Haben Sie Fragen?'],
             'status' => ['Antwortet sofort'],
-            'intro' => ['Hallo! Ich finde gerne eine direkte Antwort fuer dich.'],
+            'intro' => ['Hallo! Ich finde gerne eine direkte Antwort für dich.'],
             'topics_label' => ['Beliebte Themen'],
             'placeholder' => ['Schreibe deine Frage ...', 'Frage schreiben...'],
-            'disclaimer' => ['Der Assistent kann Fehler machen. Bitte pruefe wichtige Informationen.'],
+            'disclaimer' => ['Der Assistent kann Fehler machen. Bitte prüfe wichtige Informationen.'],
             'privacy_label' => ['Datenschutz'],
         ];
         $widget = get_option(self::WIDGET_OPTION_KEY, null);
@@ -691,7 +691,7 @@ final class AICB_Plugin {
             }
         }
 
-        // Migration: feedback-Spalte fuer 👍/👎 nachziehen (idempotent).
+        // Migration: feedback-Spalte für 👍/👎 nachziehen (idempotent).
         global $wpdb;
         $events = $wpdb->prefix . 'aicb_events';
         $has_feedback = $wpdb->get_var($wpdb->prepare(
@@ -726,7 +726,7 @@ final class AICB_Plugin {
             return;
         }
         $base = plugin_dir_url(__FILE__);
-        // Mediathek-Dialog (wp.media) fuer die PDF-Auswahl im Inhalte-Tab.
+        // Mediathek-Dialog (wp.media) für die PDF-Auswahl im Inhalte-Tab.
         wp_enqueue_media();
         wp_enqueue_style('aicb-admin', $base . 'assets/admin.css', [], self::ASSET_VERSION);
 
@@ -746,8 +746,8 @@ final class AICB_Plugin {
             'siteUrl' => home_url('/'),
             'previewHtml' => $this->widget_shell_markup('inline'),
             'widgetConfig' => $this->public_widget_config(),
-            // Sprachpaket der Seite: fuellt leere Felder in der Vorschau genauso
-            // wie spaeter im Frontend.
+            // Sprachpaket der Seite: füllt leere Felder in der Vorschau genauso
+            // wie später im Frontend.
             'copyDefaults' => $this->lang_pack($this->site_lang()),
         ]);
     }
@@ -884,7 +884,7 @@ final class AICB_Plugin {
         return esc_html($icon);
     }
 
-    /** Erlaubte SVG-Tags fuer eigene Logos - genutzt beim Speichern und beim Ausgeben. */
+    /** Erlaubte SVG-Tags für eigene Logos - genutzt beim Speichern und beim Ausgeben. */
     private function svg_allowed_tags(): array {
         $attrs = [
             'fill' => true, 'stroke' => true, 'stroke-width' => true, 'stroke-linecap' => true,
@@ -905,8 +905,8 @@ final class AICB_Plugin {
     }
 
     /**
-     * Icon speichern: sanitize_text_field wuerde ein SVG restlos entfernen,
-     * deshalb laufen SVGs ueber die Tag-Freigabe und nur Text ueber die
+     * Icon speichern: sanitize_text_field würde ein SVG restlos entfernen,
+     * deshalb laufen SVGs über die Tag-Freigabe und nur Text über die
      * Standard-Bereinigung.
      */
     private function sanitize_icon(string $icon): string {
@@ -1002,7 +1002,7 @@ final class AICB_Plugin {
         $offered = array_slice($offered, -10);
 
         if ($question === '') {
-            return new WP_REST_Response(['error' => 'Keine Frage uebergeben.'], 400);
+            return new WP_REST_Response(['error' => 'Keine Frage übergeben.'], 400);
         }
 
         $session_payload = $this->ensure_session_payload((string) ($params['session_token'] ?? ''));
@@ -1044,7 +1044,7 @@ final class AICB_Plugin {
         if ($event_id <= 0 || $token === '') {
             return new WP_REST_Response(['error' => 'event_id und session_token erforderlich.'], 400);
         }
-        // 1 = hilfreich, -1 = nicht hilfreich, 0 = zuruecknehmen.
+        // 1 = hilfreich, -1 = nicht hilfreich, 0 = zurücknehmen.
         $value = $raw_value > 0 ? 1 : ($raw_value < 0 ? -1 : 0);
         $hash = $this->hash_token($token);
 
@@ -1057,7 +1057,7 @@ final class AICB_Plugin {
             return new WP_REST_Response(['error' => 'Antwort nicht gefunden.'], 404);
         }
         if (!hash_equals((string) $owner, $hash)) {
-            return new WP_REST_Response(['error' => 'Keine Berechtigung fuer diese Antwort.'], 403);
+            return new WP_REST_Response(['error' => 'Keine Berechtigung für diese Antwort.'], 403);
         }
 
         $wpdb->update($events, ['feedback' => $value], ['id' => $event_id], ['%d'], ['%d']);
@@ -1126,9 +1126,9 @@ final class AICB_Plugin {
     }
 
     /**
-     * Inhalte-Tab: Liste veroeffentlichter Inhalte (mit Auswahlstatus) + gewaehlte PDFs.
+     * Inhalte-Tab: Liste veröffentlichter Inhalte (mit Auswahlstatus) + gewählte PDFs.
      * GET  -> aktueller Stand. POST -> Auswahl speichern und aktualisierten Stand liefern.
-     * Es werden ausschliesslich veroeffentlichte Inhalte gelistet (keine Entwuerfe).
+     * Es werden ausschließlich veröffentlichte Inhalte gelistet (keine Entwürfe).
      */
     public function rest_admin_content(WP_REST_Request $request): WP_REST_Response {
         if ($request->get_method() === 'POST') {
@@ -1364,7 +1364,7 @@ final class AICB_Plugin {
         if ($post->post_status !== 'publish') {
             return;
         }
-        // Im Modus "Nur ausgewaehlte" nur nachindexieren, wenn der Post ausgewaehlt ist;
+        // Im Modus "Nur ausgewählte" nur nachindexieren, wenn der Post ausgewählt ist;
         // im Modus "Alle" gilt weiterhin die Post-Type-Auswahl aus den Einstellungen.
         if ($this->index_mode() === 'selected') {
             if (!in_array($post_id, $this->selected_post_ids_raw(), true)) {
@@ -1384,7 +1384,7 @@ final class AICB_Plugin {
             $this->delete_source_chunks('post:' . $post_id);
             return;
         }
-        // Abgewaehlte Inhalte im Selektiv-Modus nicht (wieder) aufnehmen.
+        // Abgewählte Inhalte im Selektiv-Modus nicht (wieder) aufnehmen.
         if ($this->index_mode() === 'selected' && !in_array($post_id, $this->selected_post_ids_raw(), true)) {
             $this->delete_source_chunks('post:' . $post_id);
             return;
@@ -1401,7 +1401,7 @@ final class AICB_Plugin {
             $this->clear_chunks();
         }
 
-        // Queue aus ausgewaehlten (bzw. allen veroeffentlichten) Posts + gewaehlten PDFs.
+        // Queue aus ausgewählten (bzw. allen veröffentlichten) Posts + gewählten PDFs.
         $queue = [];
         foreach ($this->training_post_ids() as $post_id) {
             $queue[] = ['kind' => 'post', 'id' => (int) $post_id];
@@ -1410,7 +1410,7 @@ final class AICB_Plugin {
             $queue[] = ['kind' => 'pdf', 'id' => (int) $pdf_id];
         }
 
-        $mode_label = $this->index_mode() === 'selected' ? 'Nur ausgewaehlte Inhalte' : 'Alle veroeffentlichten Inhalte';
+        $mode_label = $this->index_mode() === 'selected' ? 'Nur ausgewählte Inhalte' : 'Alle veröffentlichten Inhalte';
         $job = [
             'job_id' => wp_generate_uuid4(),
             'status' => 'running',
@@ -1456,7 +1456,7 @@ final class AICB_Plugin {
                     if ($count > 0) {
                         $job['logs'][] = sprintf('PDF indexiert: #%d %s (%d Chunks)', $id, get_the_title($id), $count);
                     } else {
-                        $job['logs'][] = sprintf('PDF ohne Textebene uebersprungen: #%d %s', $id, get_the_title($id));
+                        $job['logs'][] = sprintf('PDF ohne Textebene übersprungen: #%d %s', $id, get_the_title($id));
                     }
                 } catch (Throwable $e) {
                     $job['logs'][] = sprintf('PDF-Fehler #%d: %s', $id, $e->getMessage());
@@ -1466,7 +1466,7 @@ final class AICB_Plugin {
 
             $post = get_post($id);
             if (!$post || $post->post_status !== 'publish') {
-                $job['logs'][] = "Uebersprungen: Post {$id}";
+                $job['logs'][] = "Übersprungen: Post {$id}";
                 continue;
             }
             $count = $this->index_post($post);
@@ -1530,7 +1530,7 @@ final class AICB_Plugin {
         return array_values(array_filter(array_map('intval', (array) get_option(self::SELECTED_POSTS_OPTION, []))));
     }
 
-    /** Post-IDs fuer das Training: nur ausgewaehlte (Selektiv) bzw. alle veroeffentlichten (Alle). */
+    /** Post-IDs für das Training: nur ausgewählte (Selektiv) bzw. alle veröffentlichten (Alle). */
     private function training_post_ids(): array {
         if ($this->index_mode() === 'selected') {
             $ids = [];
@@ -1555,7 +1555,7 @@ final class AICB_Plugin {
         return array_map('intval', $query->posts ?: []);
     }
 
-    /** Gueltige, ausgewaehlte PDF-Attachments. */
+    /** Gültige, ausgewählte PDF-Attachments. */
     private function selected_pdf_ids(): array {
         $ids = [];
         foreach (array_map('intval', (array) get_option(self::SELECTED_PDFS_OPTION, [])) as $id) {
@@ -1585,11 +1585,11 @@ final class AICB_Plugin {
         if (!$path || !file_exists($path) || !is_readable($path)) {
             throw new RuntimeException('PDF-Datei nicht gefunden.');
         }
-        // 1) Beste & robusteste Extraktion: gebuendelte Bibliothek (Smalot/PdfParser).
+        // 1) Beste & robusteste Extraktion: gebündelte Bibliothek (Smalot/PdfParser).
         //    Beherrscht CID/Type0, ToUnicode, Differences, CFF und Positionierung.
         $text = $this->normalize_text($this->pdf_text_via_smalot($path));
 
-        // 2) Fallback: pdftotext (poppler), falls auf dem Host verfuegbar.
+        // 2) Fallback: pdftotext (poppler), falls auf dem Host verfügbar.
         if (trim($text) === '' || !$this->pdf_looks_like_text($text)) {
             $text = $this->normalize_text($this->pdf_text_via_pdftotext($path));
         }
@@ -1603,7 +1603,7 @@ final class AICB_Plugin {
         }
 
         if (trim($text) === '' || !$this->pdf_looks_like_text($text)) {
-            // Kein lesbarer Textlayer: gescanntes Bild-PDF, verschluesselt oder
+            // Kein lesbarer Textlayer: gescanntes Bild-PDF, verschlüsselt oder
             // Font ohne verwertbare Kodierung - nichts indexieren.
             return 0;
         }
@@ -1619,9 +1619,9 @@ final class AICB_Plugin {
 
     /**
      * Extrahiert Text aus einem PDF (reines PHP, ohne externe Bibliothek).
-     * Unterstuetzt FlateDecode-Streams, literale/hexadezimale Strings, Tj/TJ
+     * Unterstützt FlateDecode-Streams, literale/hexadezimale Strings, Tj/TJ
      * sowie ToUnicode-CMaps (bfchar/bfrange). Gescannte (nur Bild-) PDFs und
-     * verschluesselte PDFs liefern keinen Text.
+     * verschlüsselte PDFs liefern keinen Text.
      */
     private function pdf_to_text(string $bytes): string {
         $streams = $this->pdf_decode_streams($bytes);
@@ -1629,9 +1629,9 @@ final class AICB_Plugin {
             return '';
         }
         $cmap = $this->pdf_build_tounicode($streams);
-        // Fonts mit /Encoding /Differences (Glyphnamen) statt ToUnicode: haeufig
+        // Fonts mit /Encoding /Differences (Glyphnamen) statt ToUnicode: häufig
         // bei Subset-Fonts aus Word/LibreOffice/InDesign. Ohne diese Abbildung
-        // waere der Text Zeichensalat.
+        // wäre der Text Zeichensalat.
         $diff = $this->pdf_build_differences_map($streams, $bytes);
         $parts = [];
         foreach ($streams as $stream) {
@@ -1644,8 +1644,8 @@ final class AICB_Plugin {
     }
 
     /**
-     * Extrahiert Text mit der gebuendelten Bibliothek Smalot/PdfParser (reines PHP).
-     * Wird lazy geladen und nur beim Indexieren eines PDFs benoetigt.
+     * Extrahiert Text mit der gebündelten Bibliothek Smalot/PdfParser (reines PHP).
+     * Wird lazy geladen und nur beim Indexieren eines PDFs benötigt.
      */
     private function pdf_text_via_smalot(string $path): string {
         if (!class_exists('\\Smalot\\PdfParser\\Parser')) {
@@ -1677,7 +1677,7 @@ final class AICB_Plugin {
         }
     }
 
-    /** Ruft pdftotext (poppler) auf, falls verfuegbar. Sonst leerer String. */
+    /** Ruft pdftotext (poppler) auf, falls verfügbar. Sonst leerer String. */
     private function pdf_text_via_pdftotext(string $path): string {
         if (!function_exists('shell_exec')) {
             return '';
@@ -1693,7 +1693,7 @@ final class AICB_Plugin {
 
     /**
      * Baut aus allen /Encoding /Differences-Arrays eine Abbildung Byte->UTF-8.
-     * Global gemergt (erste Zuordnung gewinnt) - deckt den haeufigen Fall eines
+     * Global gemergt (erste Zuordnung gewinnt) - deckt den häufigen Fall eines
      * konsistenten Zeichensatzes ab.
      */
     private function pdf_build_differences_map(array $streams, string $bytes): array {
@@ -1775,12 +1775,12 @@ final class AICB_Plugin {
         if (preg_match('/^u([0-9A-Fa-f]{4,6})$/', $name, $m)) {
             return hexdec($m[1]);
         }
-        // Namen wie "g12" / "cid34" o. ae. sind ohne Font nicht aufloesbar.
+        // Namen wie "g12" / "cid34" o. ä. sind ohne Font nicht auflösbar.
         return null;
     }
 
     /**
-     * Qualitaetsgate: Erkennt, ob der extrahierte Text echter Fliesstext ist.
+     * Qualitätsgate: Erkennt, ob der extrahierte Text echter Fließtext ist.
      * PDFs mit Subset-Fonts ohne ToUnicode liefern falsch gemappte Glyphen
      * (Zeichensalat) - solcher "Text" darf nicht in den Index gelangen.
      */
@@ -1801,7 +1801,7 @@ final class AICB_Plugin {
         }
 
         // Nicht-lateinische Schriften (kyrillisch, arabisch, CJK, Hangul): die
-        // Wortliste greift nicht, ein guter Buchstabenanteil genuegt.
+        // Wortliste greift nicht, ein guter Buchstabenanteil genügt.
         if (preg_match('/[\x{0400}-\x{04FF}\x{0600}-\x{06FF}\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}]/u', $trim)) {
             return $letter_ratio >= 0.5;
         }
@@ -1814,7 +1814,7 @@ final class AICB_Plugin {
             return $letter_ratio >= 0.6;
         }
 
-        // Haeufige Funktionswoerter der unterstuetzten lateinischen Sprachen.
+        // Häufige Funktionswörter der unterstützten lateinischen Sprachen.
         $common = [
             'der', 'die', 'das', 'und', 'ist', 'von', 'den', 'mit', 'für', 'ein', 'eine', 'auf', 'sich', 'nicht', 'auch',
             'the', 'and', 'of', 'to', 'is', 'in', 'for', 'on', 'with', 'are', 'this', 'that', 'as', 'by',
@@ -2034,7 +2034,7 @@ final class AICB_Plugin {
     /** Liest ab Position $i (auf '(') einen balancierten Literal-String; gibt [bytes, next_i]. */
     private function pdf_read_literal(string $content, int $i): array {
         $n = strlen($content);
-        $i++; // ueber '('
+        $i++; // über '('
         $depth = 1;
         $buf = '';
         while ($i < $n) {
@@ -2099,7 +2099,7 @@ final class AICB_Plugin {
         return (string) @hex2bin($hex);
     }
 
-    /** Dekodiert eine TJ-Array-Zeichenkette: Strings zusammenfuegen, grosse Kerning-Luecken -> Space. */
+    /** Dekodiert eine TJ-Array-Zeichenkette: Strings zusammenfügen, große Kerning-Lücken -> Space. */
     private function pdf_decode_array(string $arr, array $map, int $code_len, bool $has_map, array $diff = []): string {
         $n = strlen($arr);
         $i = 0;
@@ -2120,7 +2120,7 @@ final class AICB_Plugin {
                 $i = $close + 1;
                 continue;
             }
-            // Zahl (Kerning): grosse Betraege signalisieren Wortabstand.
+            // Zahl (Kerning): große Beträge signalisieren Wortabstand.
             if ($ch === '-' || $ch === '+' || $ch === '.' || ($ch >= '0' && $ch <= '9')) {
                 $j = $i;
                 while ($j < $n && ($arr[$j] === '-' || $arr[$j] === '+' || $arr[$j] === '.' || ($arr[$j] >= '0' && $arr[$j] <= '9'))) {
@@ -2291,9 +2291,9 @@ final class AICB_Plugin {
     }
 
     /**
-     * Kleinere Abschnitte mit Ueberlappung. Kleiner heisst: eine konkrete
+     * Kleinere Abschnitte mit Überlappung. Kleiner heißt: eine konkrete
      * Angabe (Preis, Uhrzeit, Bedingung) dominiert den Chunk und wird bei der
-     * Suche auch gefunden. Die Ueberlappung sorgt dafuer, dass ein Detail an
+     * Suche auch gefunden. Die Überlappung sorgt dafür, dass ein Detail an
      * der Grenze zweier Abschnitte nicht verloren geht.
      */
     private function chunk_text(string $text, string $title): array {
@@ -2318,7 +2318,7 @@ final class AICB_Plugin {
                         'section' => $section['title'],
                         'content' => $this->format_chunk($title, $section['title'], $buffer),
                     ];
-                    // Der letzte Absatz wandert in den naechsten Chunk mit.
+                    // Der letzte Absatz wandert in den nächsten Chunk mit.
                     $overlap = $this->chunk_overlap_tail($buffer);
                     $buffer = trim($overlap === '' ? $paragraph : $overlap . "\n\n" . $paragraph);
                 } else {
@@ -2335,7 +2335,7 @@ final class AICB_Plugin {
         return $chunks;
     }
 
-    /** Letzter Absatz eines Chunks als Ueberlappung fuer den naechsten. */
+    /** Letzter Absatz eines Chunks als Überlappung für den nächsten. */
     private function chunk_overlap_tail(string $buffer): string {
         $parts = preg_split("/\n{2,}/", trim($buffer)) ?: [];
         if (!$parts) {
@@ -2343,7 +2343,7 @@ final class AICB_Plugin {
         }
         $tail = trim((string) end($parts));
         if ($tail === '' || $this->estimate_tokens($tail) > self::CHUNK_OVERLAP_TOKENS) {
-            // Zu langer Absatz: nur die letzten Saetze mitnehmen.
+            // Zu langer Absatz: nur die letzten Sätze mitnehmen.
             $sentences = preg_split('/(?<=[.!?])\s+/u', $tail) ?: [];
             $tail = '';
             while ($sentences && $this->estimate_tokens($tail) < self::CHUNK_OVERLAP_TOKENS) {
@@ -2385,11 +2385,11 @@ final class AICB_Plugin {
         $count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$chunks_table}");
         $pack = $this->lang_pack($lang);
 
-        // Auch ohne Index wird geantwortet: Begruessungen und Small Talk sollen
+        // Auch ohne Index wird geantwortet: Begrüßungen und Small Talk sollen
         // funktionieren, statt eine Fehlermeldung auszuwerfen.
         $matches = [];
         if ($count > 0) {
-            // Mit Originalfrage und umformulierter Variante suchen: das faengt
+            // Mit Originalfrage und umformulierter Variante suchen: das fängt
             // Folgefragen und fremdsprachige Fragen gleichzeitig ab.
             $queries = [$question];
             $rewritten = $this->rewrite_followup($question, $history);
@@ -2403,13 +2403,13 @@ final class AICB_Plugin {
         }
 
         // Schwache Treffer fliegen raus - bei "hallo" passt kein Abschnitt und
-        // die Tokens waeren verschenkt.
+        // die Tokens wären verschenkt.
         $relevant = array_values(array_filter(
             $matches,
             fn($row) => (float) ($row['score'] ?? 0) >= self::CONTEXT_MIN_SCORE
         ));
 
-        // Sprache der aktuellen Nachricht schlaegt die Sprache der Website.
+        // Sprache der aktuellen Nachricht schlägt die Sprache der Website.
         $target_lang = $this->detect_message_lang($question) ?: $lang;
         $context = $relevant ? $this->build_context($relevant) : '';
         $messages = $this->build_chat_messages($question, $history, $context, $target_lang, $count > 0);
@@ -2422,12 +2422,12 @@ final class AICB_Plugin {
         $candidates = $this->card_candidates($relevant, $answer);
         $actions = $this->build_actions($candidates, $question, $answer, $history, $target_lang, $relevant, $offered);
 
-        // Aehnlichkeitswerte allein trennen Begruessung und fremdsprachige
+        // Ähnlichkeitswerte allein trennen Begrüßung und fremdsprachige
         // Fachfrage nicht (gemessen: 0.32 vs 0.31). Deshalb meldet der
-        // Button-Call, ob die Antwort ueberhaupt eine inhaltliche Auskunft ist.
+        // Button-Call, ob die Antwort überhaupt eine inhaltliche Auskunft ist.
         $is_content = $actions['content'] === null ? true : (bool) $actions['content'];
-        // Ohne KI-Urteil (kein Key, Call gescheitert) faellt die Karte auf den
-        // besten Treffer zurueck; mit Urteil zaehlt allein die Wahl des Modells.
+        // Ohne KI-Urteil (kein Key, Call gescheitert) fällt die Karte auf den
+        // besten Treffer zurück; mit Urteil zählt allein die Wahl des Modells.
         $card_row = $actions['card'];
         if ($card_row === null && $actions['content'] === null && $candidates) {
             $card_row = $candidates[0];
@@ -2468,7 +2468,7 @@ final class AICB_Plugin {
     }
 
     /**
-     * Kurze Folgefragen ("und die Preise?") fuer die Suche eigenstaendig machen.
+     * Kurze Folgefragen ("und die Preise?") für die Suche eigenständig machen.
      * Nur bei kurzen Nachrichten mit Vorgeschichte - sonst ein Call zu viel.
      */
     private function rewrite_followup(string $question, array $history): string {
@@ -2495,9 +2495,9 @@ final class AICB_Plugin {
             $chat = $this->openai_chat([
                 ['role' => 'system', 'content' =>
                     'Du formulierst die letzte Nutzernachricht so um, dass sie ohne den Chatverlauf '
-                    . 'verstaendlich ist. Behalte die Sprache der Nachricht. Fuege keine neuen '
-                    . 'Informationen hinzu. Ist die Nachricht eine Begruessung oder Small Talk, gib sie '
-                    . 'unveraendert zurueck. Antworte nur mit der umformulierten Nachricht.'],
+                    . 'verständlich ist. Behalte die Sprache der Nachricht. Füge keine neuen '
+                    . 'Informationen hinzu. Ist die Nachricht eine Begrüßung oder Small Talk, gib sie '
+                    . 'unverändert zurück. Antworte nur mit der umformulierten Nachricht.'],
                 ['role' => 'user', 'content' => implode("\n", $lines) . "\n\nLetzte Nachricht: " . $question],
             ], ['temperature' => 0, 'max_tokens' => 120]);
             $rewritten = trim((string) ($chat['answer'] ?? ''));
@@ -2508,7 +2508,7 @@ final class AICB_Plugin {
     }
 
     /**
-     * Kandidaten fuer die Antwortkarte. Ausgewaehlt wird spaeter vom Modell -
+     * Kandidaten für die Antwortkarte. Ausgewählt wird später vom Modell -
      * hier fallen nur die Seiten raus, die als Karte nie Sinn ergeben.
      */
     private function card_candidates(array $matches, string $answer): array {
@@ -2521,7 +2521,7 @@ final class AICB_Plugin {
             if (count($candidates) >= 3) {
                 break;
             }
-            // Bei Begruessungen und Small Talk passt kein Abschnitt wirklich.
+            // Bei Begrüßungen und Small Talk passt kein Abschnitt wirklich.
             if ((float) ($row['score'] ?? 0) < self::CARD_MIN_SCORE) {
                 continue;
             }
@@ -2557,7 +2557,7 @@ final class AICB_Plugin {
                 return true;
             }
         }
-        // Startseite: nichts, was man als Detailseite verlinken moechte.
+        // Startseite: nichts, was man als Detailseite verlinken möchte.
         $path = trim((string) wp_parse_url($url, PHP_URL_PATH), '/');
         return $path === '';
     }
@@ -2592,7 +2592,7 @@ final class AICB_Plugin {
         $body = [];
         foreach ($lines as $line) {
             $trimmed = trim($line);
-            // Die Chunk-Kopfzeilen und die Ueberschriften selbst sind kein Teaser.
+            // Die Chunk-Kopfzeilen und die Überschriften selbst sind kein Teaser.
             if ($trimmed === '' || stripos($trimmed, 'Document:') === 0 || stripos($trimmed, 'Section:') === 0) {
                 continue;
             }
@@ -2636,7 +2636,7 @@ final class AICB_Plugin {
             return true;
         }
         $markers = [
-            'keine passenden informationen', 'keine informationen', 'weiss ich nicht', 'weiß ich nicht',
+            'keine passenden informationen', 'keine informationen', 'weiß ich nicht', 'weiß ich nicht',
             'nicht im kontext', 'kann ich nicht beantworten', 'liegen mir nicht vor',
             'no relevant information', 'i do not know', "i don't know", 'not in the context',
         ];
@@ -2649,18 +2649,18 @@ final class AICB_Plugin {
     }
 
     /**
-     * Nachrichtenliste fuer die Chat-API. Der Verlauf wird als echte Rollen
-     * uebergeben, damit sich der Bot wie ein normaler Chat verhaelt und
+     * Nachrichtenliste für die Chat-API. Der Verlauf wird als echte Rollen
+     * übergeben, damit sich der Bot wie ein normaler Chat verhält und
      * Folgefragen versteht.
      */
     private function build_chat_messages(string $question, array $history, string $context, string $lang, bool $has_index): array {
         $behaviour = "Verhalten:\n"
-            . "- Du fuehrst ein normales, fortlaufendes Gespraech. Begruessungen, Dank, Small Talk und "
+            . "- Du führst ein normales, fortlaufendes Gespräch. Begrüßungen, Dank, Small Talk und "
             . "Fragen zu dir selbst beantwortest du kurz, freundlich und direkt.\n"
-            . "- Bei Begruessung oder Small Talk nennst du keine Quellen und sagst nicht, dass "
+            . "- Bei Begrüßung oder Small Talk nennst du keine Quellen und sagst nicht, dass "
             . "Informationen fehlen. Frage stattdessen freundlich, wobei du helfen kannst.\n"
             . "- Inhaltliche Fragen zu dieser Website, dem Unternehmen, den Produkten oder Leistungen "
-            . "beantwortest du ausschliesslich mit dem bereitgestellten Kontext. Steht die Information "
+            . "beantwortest du ausschließlich mit dem bereitgestellten Kontext. Steht die Information "
             . "dort nicht, sage klar, dass du sie nicht hast - erfinde nichts und nutze kein Weltwissen.\n"
             . "- Beziehe dich auf den bisherigen Verlauf. Folgefragen wie \"und die Preise?\" beziehen "
             . "sich auf das zuletzt besprochene Thema.\n"
@@ -2669,7 +2669,7 @@ final class AICB_Plugin {
             . "Bedingungen, Ausstattung. Fasse nicht vage zusammen, wenn genaue Angaben dastehen.\n"
             . "- Stehen mehrere Varianten im Kontext (z. B. mehrere Zimmer, Tarife oder Pakete), "
             . "nenne sie einzeln mit ihren jeweiligen Angaben statt nur einer Sammelaussage.\n"
-            . "- Halte Antworten kompakt: kurze Absaetze, bei Aufzaehlungen Listen.";
+            . "- Halte Antworten kompakt: kurze Absätze, bei Aufzählungen Listen.";
 
         $target_name = $this->lang_display_name($lang);
         $language_rule = "MANDATORY LANGUAGE RULE - this overrides every other instruction:\n"
@@ -2702,13 +2702,13 @@ final class AICB_Plugin {
         }
 
         if ($context !== '') {
-            $context_note = "Kontext aus dieser Website (nur fuer inhaltliche Fragen verwenden):\n" . $context;
+            $context_note = "Kontext aus dieser Website (nur für inhaltliche Fragen verwenden):\n" . $context;
         } elseif ($has_index) {
             $context_note = 'Kontext aus dieser Website: keine passenden Abschnitte gefunden. '
                 . 'Bei einer inhaltlichen Frage sage das offen; bei Small Talk antworte einfach normal.';
         } else {
             $context_note = 'Kontext aus dieser Website: der Index ist noch leer. '
-                . 'Beantworte inhaltliche Fragen nicht aus dem Gedaechtnis, sondern sage, dass du dazu '
+                . 'Beantworte inhaltliche Fragen nicht aus dem Gedächtnis, sondern sage, dass du dazu '
                 . 'noch keine Informationen hast; Small Talk beantworte normal.';
         }
 
@@ -2723,13 +2723,13 @@ final class AICB_Plugin {
 
     /**
      * @param array $query_vectors Ein Vektor oder eine Liste von Vektoren. Bei
-     *                             mehreren zaehlt pro Abschnitt der beste Treffer.
+     *                             mehreren zählt pro Abschnitt der beste Treffer.
      */
     private function search_chunks(array $query_vectors): array {
         global $wpdb;
         $table = $wpdb->prefix . 'aicb_chunks';
         $limit = max(1, min(24, (int) $this->setting('retriever_k', 12)));
-        // Einzelvektor auch akzeptieren, damit Aufrufer beides uebergeben koennen.
+        // Einzelvektor auch akzeptieren, damit Aufrufer beides übergeben können.
         $vectors = (isset($query_vectors[0]) && is_array($query_vectors[0])) ? $query_vectors : [$query_vectors];
         $rows = $wpdb->get_results("SELECT id, source_id, source_url, title, section, content, embedding FROM {$table} WHERE embedding IS NOT NULL", ARRAY_A);
         $scored = [];
@@ -2756,8 +2756,8 @@ final class AICB_Plugin {
 
     /**
      * Zu jedem Treffer den direkt angrenzenden Abschnitt derselben Seite
-     * ergaenzen. Details stehen oft eine Zeile weiter: die Tabelle im einen
-     * Chunk, die Fussnote mit den Bedingungen im naechsten.
+     * ergänzen. Details stehen oft eine Zeile weiter: die Tabelle im einen
+     * Chunk, die Fußnote mit den Bedingungen im nächsten.
      */
     private function with_neighbour_chunks(array $top, array $all, int $limit): array {
         if (!$top) {
@@ -2805,7 +2805,7 @@ final class AICB_Plugin {
                 continue;
             }
             if (strlen($content) > 3000) {
-                $content = substr($content, 0, 3000) . "\n...[gekuerzt]";
+                $content = substr($content, 0, 3000) . "\n...[gekürzt]";
             }
             $entry = '[' . ($idx + 1) . '] Quelle: ' . ($row['source_url'] ?: home_url('/')) . ' | Titel: ' . $row['title'] . ' | Abschnitt: ' . $row['section'] . "\n" . $content;
             if ($chars + strlen($entry) > $max && $parts) {
@@ -2973,7 +2973,7 @@ final class AICB_Plugin {
     }
 
     /**
-     * Buttons unter der Antwort. Zuerst von der KI aus dem Gespraech erzeugt,
+     * Buttons unter der Antwort. Zuerst von der KI aus dem Gespräch erzeugt,
      * bei Fehlern die statischen Texte.
      */
     private function build_actions(array $candidates, string $question, string $answer, array $history, string $lang, array $matches, array $offered = []): array {
@@ -3014,30 +3014,30 @@ final class AICB_Plugin {
     }
 
     private const AI_ACTIONS_SYSTEM = <<<'PROMPT'
-WICHTIGSTE FORMREGEL: label ist eine Menue-Beschriftung aus ZWEI bis DREI Woertern. Zaehle die Woerter, bevor du antwortest. Vier oder mehr Woerter sind verboten, ebenso Fragen und ganze Saetze.
+WICHTIGSTE FORMREGEL: label ist eine Menü-Beschriftung aus ZWEI bis DREI Wörtern. Zähle die Wörter, bevor du antwortest. Vier oder mehr Wörter sind verboten, ebenso Fragen und ganze Sätze.
 
 Du erzeugst die Klick-Buttons, die unter der Antwort eines Chat-Assistenten auf einer Firmen-Website stehen.
 Regeln:
-- Zwei bis drei Buttons, die genau zu diesem Gespraech passen und den Nutzer einen Schritt weiterbringen.
-- Jeder Button oeffnet ein NEUES Thema, das im bisherigen Gespraech noch nicht vorkam. Wiederhole nie die aktuelle Frage, eine fruehere Frage oder den Inhalt der Antwort - auch nicht anders formuliert.
-- Die Buttons sollen neugierig machen: nenne Themen, die der Nutzer wahrscheinlich als naechstes interessant findet.
-- label: zwei bis drei Woerter, hoechstens 24 Zeichen. Es ist eine Menue-Beschriftung, keine Frage und kein Satz. Gut: "Zimmer ansehen", "Preise & Pauschalen", "Anfahrt", "Termin anfragen". Schlecht: "Wo befindet sich die Zentrale?", "Ich moechte mehr wissen". Keine Emojis, kein Satzzeichen am Ende, niemals abgeschnittene Wortgruppen.
-- question: die Nachricht, die beim Klick als Nutzerfrage gesendet wird - ein vollstaendiger, eigenstaendig verstaendlicher Satz.
-- SPRACHE, wichtigste Regel: Schreibe ALLE Werte von label und question ausschliesslich in der Sprache, die im Kontext unter "Sprache der Buttons" steht. Diese Anweisung ist auf Deutsch, das aendert daran nichts; auch aeltere Nachrichten im Gespraech aendern daran nichts. Ist die Sprache Tuerkisch, heisst ein Anruf-Button "Ara" und nicht "Anrufen".
+- Zwei bis drei Buttons, die genau zu diesem Gespräch passen und den Nutzer einen Schritt weiterbringen.
+- Jeder Button öffnet ein NEUES Thema, das im bisherigen Gespräch noch nicht vorkam. Wiederhole nie die aktuelle Frage, eine frühere Frage oder den Inhalt der Antwort - auch nicht anders formuliert.
+- Die Buttons sollen neugierig machen: nenne Themen, die der Nutzer wahrscheinlich als nächstes interessant findet.
+- label: zwei bis drei Wörter, höchstens 24 Zeichen. Es ist eine Menü-Beschriftung, keine Frage und kein Satz. Gut: "Zimmer ansehen", "Preise & Pauschalen", "Anfahrt", "Termin anfragen". Schlecht: "Wo befindet sich die Zentrale?", "Ich möchte mehr wissen". Keine Emojis, kein Satzzeichen am Ende, niemals abgeschnittene Wortgruppen.
+- question: die Nachricht, die beim Klick als Nutzerfrage gesendet wird - ein vollständiger, eigenständig verständlicher Satz.
+- SPRACHE, wichtigste Regel: Schreibe ALLE Werte von label und question ausschließlich in der Sprache, die im Kontext unter "Sprache der Buttons" steht. Diese Anweisung ist auf Deutsch, das ändert daran nichts; auch ältere Nachrichten im Gespräch ändern daran nichts. Ist die Sprache Türkisch, heißt ein Anruf-Button "Ara" und nicht "Anrufen".
 - Erfinde nichts: keine Preise, Zahlen, Angebote, Telefonnummern oder URLs, die nicht im Kontext stehen.
-- Aktions-Buttons (type "link") nur mit einem target, das der Kontext unter "Verfuegbare Aktionen" auflistet: "card", "contact", "phone" oder "email". Die Adresse setzt das System, du gibst nie eine URL oder Nummer aus. Bei type "link" kein question angeben.
-- Wenn "phone" verfuegbar ist und Anrufen im Gespraech sinnvoll waere (Beratung, Termin, dringende Rueckfrage, Kontaktwunsch), setze einen Anruf-Button an die erste Stelle; das Label nennt das Anrufen.
-- Hoechstens zwei Aktions-Buttons, jedes target nur einmal.
+- Aktions-Buttons (type "link") nur mit einem target, das der Kontext unter "Verfügbare Aktionen" auflistet: "card", "contact", "phone" oder "email". Die Adresse setzt das System, du gibst nie eine URL oder Nummer aus. Bei type "link" kein question angeben.
+- Wenn "phone" verfügbar ist und Anrufen im Gespräch sinnvoll wäre (Beratung, Termin, dringende Rückfrage, Kontaktwunsch), setze einen Anruf-Button an die erste Stelle; das Label nennt das Anrufen.
+- Höchstens zwei Aktions-Buttons, jedes target nur einmal.
 - Mindestens ein Button muss type "question" sein und unter den Aktions-Buttons stehen.
 - Keine zwei Buttons mit gleicher Bedeutung.
-Gib zusaetzlich an:
-- "card": Nummer der Seite aus "Verfuegbare Seiten", die als Karte unter der Antwort erscheinen soll.
-  Waehle nur eine Seite, die genau das Thema der Antwort vertieft und dem Nutzer echten Mehrwert bringt.
-  Passt keine Seite wirklich zum Inhalt der Antwort, ist die Antwort allgemein, eine Begruessung oder eine
+Gib zusätzlich an:
+- "card": Nummer der Seite aus "Verfügbare Seiten", die als Karte unter der Antwort erscheinen soll.
+  Wähle nur eine Seite, die genau das Thema der Antwort vertieft und dem Nutzer echten Mehrwert bringt.
+  Passt keine Seite wirklich zum Inhalt der Antwort, ist die Antwort allgemein, eine Begrüßung oder eine
   Absage, gib 0 an. Im Zweifel immer 0 - eine unpassende Karte ist schlechter als keine.
 - "lang": ISO-639-1-Code der Sprache, in der die Antwort des Assistenten geschrieben ist.
-- "content": true, wenn die Antwort eine inhaltliche Auskunft zu Website, Unternehmen, Produkten oder Leistungen gibt. false, wenn sie nur Begruessung, Dank, Small Talk, Rueckfrage oder die Aussage ist, dass keine Informationen vorliegen.
-Antworte ausschliesslich mit JSON in dieser Form: {"card": 0, "lang": "de", "content": true, "actions": [{"label": "...", "type": "question", "question": "..."}]}
+- "content": true, wenn die Antwort eine inhaltliche Auskunft zu Website, Unternehmen, Produkten oder Leistungen gibt. false, wenn sie nur Begrüßung, Dank, Small Talk, Rückfrage oder die Aussage ist, dass keine Informationen vorliegen.
+Antworte ausschließlich mit JSON in dieser Form: {"card": 0, "lang": "de", "content": true, "actions": [{"label": "...", "type": "question", "question": "..."}]}
 PROMPT;
 
     private function ai_quick_actions(array $candidates, string $question, string $answer, array $history, string $lang, array $matches, array $offered = []): array {
@@ -3052,7 +3052,7 @@ PROMPT;
         $configured_email = sanitize_email((string) ($settings['contact_email'] ?? ''));
 
         // Nummer/Adresse aus der Antwort nur, wenn sie in den Quellen belegt ist -
-        // sonst waehlt der Button eine erfundene Nummer.
+        // sonst wählt der Button eine erfundene Nummer.
         $phone = $this->phone_from_text($answer);
         if ($phone !== '' && !$this->phone_in_sources($phone, $sources)) {
             $phone = '';
@@ -3072,10 +3072,10 @@ PROMPT;
         ];
 
         $available = array_filter([
-            $candidates ? 'card (oeffnet die Seite, die du unter "card" auswaehlst)' : '',
+            $candidates ? 'card (öffnet die Seite, die du unter "card" auswählst)' : '',
             $targets['contact'] !== '' ? 'contact (Kontaktseite des Unternehmens)' : '',
-            $phone !== '' ? 'phone (waehlt ' . $phone . ' direkt auf dem Geraet)' : '',
-            $email !== '' ? 'email (oeffnet eine Mail an ' . $email . ')' : '',
+            $phone !== '' ? 'phone (wählt ' . $phone . ' direkt auf dem Gerät)' : '',
+            $email !== '' ? 'email (öffnet eine Mail an ' . $email . ')' : '',
         ]);
 
         $history_lines = [];
@@ -3101,10 +3101,10 @@ PROMPT;
         }
 
         $context = ['Sprache der Buttons: ' . $this->lang_display_name($lang)];
-        $context[] = 'Verfuegbare Aktionen (die Klammertexte sind nur Erklaerungen, nie als Label '
-            . 'uebernehmen): ' . ($available ? implode(', ', $available) : 'keine');
+        $context[] = 'Verfügbare Aktionen (die Klammertexte sind nur Erklärungen, nie als Label '
+            . 'übernehmen): ' . ($available ? implode(', ', $available) : 'keine');
         if ($history_lines) {
-            $context[] = "Bisheriges Gespraech:\n" . implode("\n", $history_lines);
+            $context[] = "Bisheriges Gespräch:\n" . implode("\n", $history_lines);
         }
         if ($topics) {
             $context[] = 'Themen des Unternehmens: ' . implode(', ', array_slice($topics, 0, 8));
@@ -3117,13 +3117,13 @@ PROMPT;
                     . (trim((string) ($row['section'] ?? '')) !== '' ? ' - Abschnitt: ' . $row['section'] : '')
                     . ' - ' . ($path ?: $row['source_url']);
             }
-            $context[] = "Verfuegbare Seiten (fuer \"card\"):\n" . implode("\n", $lines);
+            $context[] = "Verfügbare Seiten (für \"card\"):\n" . implode("\n", $lines);
         } else {
-            $context[] = 'Verfuegbare Seiten: keine - "card" muss 0 sein.';
+            $context[] = 'Verfügbare Seiten: keine - "card" muss 0 sein.';
         }
         $shown = array_slice(array_filter(array_map('trim', $offered)), -10);
         if ($shown) {
-            $context[] = "Diese Buttons wurden im Gespraech schon angezeigt - biete keinen davon noch "
+            $context[] = "Diese Buttons wurden im Gespräch schon angezeigt - biete keinen davon noch "
                 . "einmal an, auch nicht anders formuliert:\n- " . implode("\n- ", $shown);
         }
         $context[] = 'Aktuelle Frage des Nutzers: ' . $this->limit_text($question, 300);
@@ -3141,14 +3141,14 @@ PROMPT;
         $detected = self::normalize_lang((string) ($payload['lang'] ?? ''));
         $is_content = array_key_exists('content', $payload) ? (bool) $payload['content'] : null;
 
-        // Karte: nur die vom Modell gewaehlte Seite, sonst keine.
+        // Karte: nur die vom Modell gewählte Seite, sonst keine.
         $choice = (int) ($payload['card'] ?? 0);
         $chosen = ($choice >= 1 && $choice <= count($candidates)) ? $candidates[$choice - 1] : null;
         if ($chosen) {
             $targets['card'] = esc_url_raw((string) $chosen['source_url']);
         }
 
-        // Aktionen stehen vor den Folgefragen - sie gehoeren optisch zur Karte.
+        // Aktionen stehen vor den Folgefragen - sie gehören optisch zur Karte.
         $links = [];
         $questions = [];
         $used = [];
@@ -3188,7 +3188,7 @@ PROMPT;
             }
             if ($type === 'link') {
                 $url = $targets[$target] ?? '';
-                // Modell-URLs werden nie uebernommen - nur die bekannten Ziele.
+                // Modell-URLs werden nie übernommen - nur die bekannten Ziele.
                 if ($url === '' || isset($used[$target]) || count($links) >= 2) {
                     continue;
                 }
@@ -3200,7 +3200,7 @@ PROMPT;
                 continue;
             }
             $follow_up = trim(preg_replace('/\s+/', ' ', (string) ($item['question'] ?? '')));
-            // Ohne Fragetext ist es ein missglueckter Aktions-Button ("Anrufen").
+            // Ohne Fragetext ist es ein missglückter Aktions-Button ("Anrufen").
             if ($this->str_len($follow_up) < 6) {
                 continue;
             }
@@ -3236,7 +3236,7 @@ PROMPT;
     }
 
     /**
-     * mbstring ist nicht auf jedem Hoster installiert - ohne Fallback waere ein
+     * mbstring ist nicht auf jedem Hoster installiert - ohne Fallback wäre ein
      * Fatal Error im Chat die Folge.
      */
     private function str_len(string $value): int {
@@ -3311,7 +3311,7 @@ PROMPT;
 
     /**
      * Verglichen wird gegen echte Nummern-Kandidaten im Quelltext, nicht gegen
-     * alle Ziffern am Stueck - sonst gilt eine erfundene Nummer als belegt.
+     * alle Ziffern am Stück - sonst gilt eine erfundene Nummer als belegt.
      */
     private function phone_in_sources(string $number, string $sources): bool {
         $digits = preg_replace('/\D/', '', $number);
@@ -3338,25 +3338,25 @@ PROMPT;
         return '';
     }
 
-    // Woerter, mit denen ein Satz beginnt - als Beschriftung unbrauchbar.
+    // Wörter, mit denen ein Satz beginnt - als Beschriftung unbrauchbar.
     private const LABEL_SENTENCE_STARTERS = [
         'wo', 'wie', 'was', 'wann', 'warum', 'wer', 'welche', 'welcher', 'welches', 'ist', 'sind',
-        'gibt', 'kann', 'haben', 'habt', 'ich', 'du', 'sie', 'wir', 'moechte', 'möchte', 'how',
+        'gibt', 'kann', 'haben', 'habt', 'ich', 'du', 'sie', 'wir', 'möchte', 'möchte', 'how',
         'what', 'where', 'when', 'why', 'who', 'which', 'can', 'do', 'does', 'is', 'are', 'i',
         'you', 'we', 'nasıl', 'nasil', 'nerede', 'hangi', 'kim', 'quel', 'quelle', 'comment',
         'donde', 'dónde', 'como', 'cómo', 'dove', 'quanto',
     ];
 
-    // Fuellwoerter, mit denen ein Label nicht enden darf.
+    // Füllwörter, mit denen ein Label nicht enden darf.
     private const LABEL_TAIL_STOPWORDS = [
         'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einen', 'einem', 'einer',
-        'und', 'oder', 'zu', 'zum', 'zur', 'in', 'im', 'an', 'am', 'auf', 'fuer', 'für', 'mit',
+        'und', 'oder', 'zu', 'zum', 'zur', 'in', 'im', 'an', 'am', 'auf', 'für', 'für', 'mit',
         'von', 'bei', 'sich', 'wie', 'wo', 'was', 'ist', 'sind', 'the', 'a', 'an', 'and', 'or',
         'to', 'for', 'with', 'of', 'on', 'at', 'is', 'are', 'how', 'what', 'where', 'my', 'your',
         've', 'ile', 'için', 'icin', 'bir', 'de', 'la', 'le', 'les', 'des', 'el', 'il', 'et',
     ];
 
-    /** Button-Beschriftung: kurze Menue-Bezeichnung, nie ein Satz oder Fragment. */
+    /** Button-Beschriftung: kurze Menü-Bezeichnung, nie ein Satz oder Fragment. */
     private function clean_action_label(string $value): string {
         $label = trim(preg_replace('/\s+/u', ' ', $value), " \t\n\r\0\x0B\"'");
         $label = trim(preg_replace('/[.!?;:,\-\x{2026}]+$/u', '', $label));
@@ -3364,7 +3364,7 @@ PROMPT;
             return '';
         }
         $words = explode(' ', $label);
-        // Ein Satz laesst sich nicht zu einem guten Label kuerzen.
+        // Ein Satz lässt sich nicht zu einem guten Label kürzen.
         if (count($words) > 5) {
             return '';
         }
@@ -3387,7 +3387,7 @@ PROMPT;
         return trim(preg_replace('/[.!?;:,\-]+$/u', '', implode(' ', $words)));
     }
 
-    /** Wortmenge fuer den Aehnlichkeitsvergleich (ohne Fuellwoerter). */
+    /** Wortmenge für den Ähnlichkeitsvergleich (ohne Füllwörter). */
     private function compare_tokens(string $text): array {
         preg_match_all('/[\p{L}\p{N}]{3,}/u', $this->str_lower($text), $found);
         $tokens = array_unique($found[0] ?? []);
@@ -3396,7 +3396,7 @@ PROMPT;
 
     /**
      * True, wenn der Button wiederholt, was schon gefragt oder gezeigt wurde.
-     * Gegen die aktuelle Frage wird milder geprueft (viele sinnvolle Folgefragen
+     * Gegen die aktuelle Frage wird milder geprüft (viele sinnvolle Folgefragen
      * teilen ein Wort mit ihr), gegen bereits gezeigte Buttons strenger.
      */
     private function is_repeat_action(string $text, array $token_sets, float $ratio = 0.75, int $min_overlap = 2): bool {
@@ -3600,18 +3600,18 @@ PROMPT;
 
     /**
      * HTML zu Text, aber mit Struktur. wp_strip_all_tags alleine macht aus
-     * Tabellen und Listen einen Fliesstext-Brei - genau dort stehen aber die
+     * Tabellen und Listen einen Fließtext-Brei - genau dort stehen aber die
      * Details: Preise, Zeiten, Leistungen, Bedingungen.
      */
     private function clean_text(string $html): string {
         $html = (string) $html;
         $html = preg_replace('#<(script|style|noscript|template)[^>]*>.*?</\1>#is', ' ', $html);
 
-        // Ueberschriften als Markdown, damit die Abschnittslogik sie erkennt.
+        // Überschriften als Markdown, damit die Abschnittslogik sie erkennt.
         for ($level = 1; $level <= 6; $level++) {
             $html = preg_replace('#<h' . $level . '[^>]*>(.*?)</h' . $level . '>#is', "\n\n" . str_repeat('#', $level) . ' $1' . "\n", $html);
         }
-        // Listenpunkte behalten ihren Aufzaehlungscharakter.
+        // Listenpunkte behalten ihren Aufzählungscharakter.
         $html = preg_replace('#<li[^>]*>#i', "\n- ", $html);
         $html = preg_replace('#</li>#i', "\n", $html);
         // Tabellen: Zellen mit | trennen, Zeilen umbrechen.
@@ -3620,7 +3620,7 @@ PROMPT;
         $html = preg_replace('#</t[dh]>#i', '', $html);
         $html = preg_replace('#</tr>#i', "\n", $html);
         $html = preg_replace('#</(caption|table)>#i', "\n\n", $html);
-        // Definitionslisten und Absaetze.
+        // Definitionslisten und Absätze.
         $html = preg_replace('#<dt[^>]*>#i', "\n- ", $html);
         $html = preg_replace('#</dt>#i', ': ', $html);
         $html = preg_replace('#<br\s*/?>#i', "\n", $html);
@@ -3628,7 +3628,7 @@ PROMPT;
 
         $text = wp_strip_all_tags($html, false);
         $text = $this->normalize_text($text);
-        // Aufzaehlungen sauber halten: keine leeren Punkte, keine Doppelstriche.
+        // Aufzählungen sauber halten: keine leeren Punkte, keine Doppelstriche.
         $text = preg_replace('/\n-\s*\n/', "\n", $text);
         $text = preg_replace('/^-\s*$/m', '', $text);
         $text = preg_replace('/\n{2,}(?=- )/', "\n", $text);
