@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.5.0
+ * Version: 0.6.0
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -30,7 +30,7 @@ final class AICB_Plugin {
      */
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.5.0';
+    private const ASSET_VERSION = '0.6.0';
     // Cosinus-Aehnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -113,11 +113,13 @@ final class AICB_Plugin {
             input_tokens int(11) NOT NULL DEFAULT 0,
             output_tokens int(11) NOT NULL DEFAULT 0,
             model varchar(96) NULL,
+            feedback tinyint(4) NOT NULL DEFAULT 0,
             created_at datetime NOT NULL,
             PRIMARY KEY  (id),
             KEY created_at (created_at),
             KEY status (status),
-            KEY user_id (user_id)
+            KEY user_id (user_id),
+            KEY feedback (feedback)
         ) {$charset};");
 
         if (!get_option(self::OPTION_KEY)) {
@@ -561,6 +563,24 @@ final class AICB_Plugin {
         return array_values(array_unique($labels));
     }
 
+    /** Beschriftungen der Feedback-Leiste (👍/👎) je Sprache, Fallback Englisch. */
+    private function feedback_labels(string $lang): array {
+        $map = [
+            'de' => ['question' => 'War das hilfreich?', 'yes' => 'Hilfreich', 'no' => 'Nicht hilfreich', 'thanks' => 'Danke fuer dein Feedback!'],
+            'en' => ['question' => 'Was this helpful?', 'yes' => 'Helpful', 'no' => 'Not helpful', 'thanks' => 'Thanks for your feedback!'],
+            'fr' => ['question' => 'Cela vous a-t-il aide ?', 'yes' => 'Utile', 'no' => 'Pas utile', 'thanks' => 'Merci pour votre retour !'],
+            'es' => ['question' => 'Te resulto util?', 'yes' => 'Util', 'no' => 'No util', 'thanks' => 'Gracias por tu opinion!'],
+            'it' => ['question' => 'E stato utile?', 'yes' => 'Utile', 'no' => 'Non utile', 'thanks' => 'Grazie per il feedback!'],
+            'nl' => ['question' => 'Was dit nuttig?', 'yes' => 'Nuttig', 'no' => 'Niet nuttig', 'thanks' => 'Bedankt voor je feedback!'],
+            'pt' => ['question' => 'Isto foi util?', 'yes' => 'Util', 'no' => 'Nao util', 'thanks' => 'Obrigado pelo seu feedback!'],
+            'tr' => ['question' => 'Bu yardimci oldu mu?', 'yes' => 'Yardimci', 'no' => 'Yardimci degil', 'thanks' => 'Geri bildirimin icin tesekkurler!'],
+            'pl' => ['question' => 'Czy to bylo pomocne?', 'yes' => 'Pomocne', 'no' => 'Niepomocne', 'thanks' => 'Dziekujemy za opinie!'],
+            'ru' => ['question' => 'Это было полезно?', 'yes' => 'Полезно', 'no' => 'Не полезно', 'thanks' => 'Спасибо за отзыв!'],
+            'ar' => ['question' => 'هل كان هذا مفيدا؟', 'yes' => 'مفيد', 'no' => 'غير مفيد', 'thanks' => 'شكرا على ملاحظاتك!'],
+        ];
+        return $map[$lang] ?? $map['en'];
+    }
+
     public static function default_widget_config(): array {
         return [
             'theme' => [
@@ -669,6 +689,17 @@ final class AICB_Plugin {
             if ($changed) {
                 update_option(self::WIDGET_OPTION_KEY, $widget, false);
             }
+        }
+
+        // Migration: feedback-Spalte fuer 👍/👎 nachziehen (idempotent).
+        global $wpdb;
+        $events = $wpdb->prefix . 'aicb_events';
+        $has_feedback = $wpdb->get_var($wpdb->prepare(
+            "SHOW COLUMNS FROM {$events} LIKE %s",
+            'feedback'
+        ));
+        if (!$has_feedback) {
+            $wpdb->query("ALTER TABLE {$events} ADD COLUMN feedback tinyint(4) NOT NULL DEFAULT 0, ADD KEY feedback (feedback)");
         }
 
         update_option(self::VERSION_OPTION, self::ASSET_VERSION, false);
@@ -923,6 +954,12 @@ final class AICB_Plugin {
             'permission_callback' => '__return_true',
         ]);
 
+        register_rest_route(self::REST_NS, '/feedback', [
+            'methods' => 'POST',
+            'callback' => [$this, 'rest_feedback'],
+            'permission_callback' => '__return_true',
+        ]);
+
         $admin_routes = [
             ['/admin/settings', ['GET', 'POST'], 'rest_admin_settings'],
             ['/admin/widget', ['GET', 'POST'], 'rest_admin_widget'],
@@ -973,12 +1010,13 @@ final class AICB_Plugin {
 
         try {
             $answer_payload = $this->answer_question($question, $history, $lang, $offered);
-            $this->record_event($session_hash, $question, $answer_payload['answer'], 'ok', null, $answer_payload['usage']);
+            $event_id = $this->record_event($session_hash, $question, $answer_payload['answer'], 'ok', null, $answer_payload['usage']);
             $this->touch_session($session_hash);
             return rest_ensure_response([
                 'answer' => $answer_payload['answer'],
                 'sources' => $answer_payload['sources'],
                 'rich' => $answer_payload['rich'],
+                'event_id' => $event_id,
                 'session_token' => $session_payload['token'],
                 'session_expires_at' => $session_payload['expires_at'],
             ]);
@@ -990,6 +1028,40 @@ final class AICB_Plugin {
                 'session_expires_at' => $session_payload['expires_at'],
             ], 500);
         }
+    }
+
+    /**
+     * Nimmt die 👍/👎-Bewertung zu einer Antwort entgegen. Nur der Besitzer der
+     * Session (passender session_token) darf sein eigenes Event bewerten.
+     */
+    public function rest_feedback(WP_REST_Request $request): WP_REST_Response {
+        global $wpdb;
+        $params = $request->get_json_params();
+        $event_id = (int) ($params['event_id'] ?? 0);
+        $raw_value = (int) ($params['value'] ?? 0);
+        $token = trim((string) ($params['session_token'] ?? ''));
+
+        if ($event_id <= 0 || $token === '') {
+            return new WP_REST_Response(['error' => 'event_id und session_token erforderlich.'], 400);
+        }
+        // 1 = hilfreich, -1 = nicht hilfreich, 0 = zuruecknehmen.
+        $value = $raw_value > 0 ? 1 : ($raw_value < 0 ? -1 : 0);
+        $hash = $this->hash_token($token);
+
+        $events = $wpdb->prefix . 'aicb_events';
+        $owner = $wpdb->get_var($wpdb->prepare(
+            "SELECT session_hash FROM {$events} WHERE id = %d",
+            $event_id
+        ));
+        if ($owner === null) {
+            return new WP_REST_Response(['error' => 'Antwort nicht gefunden.'], 404);
+        }
+        if (!hash_equals((string) $owner, $hash)) {
+            return new WP_REST_Response(['error' => 'Keine Berechtigung fuer diese Antwort.'], 403);
+        }
+
+        $wpdb->update($events, ['feedback' => $value], ['id' => $event_id], ['%d'], ['%d']);
+        return rest_ensure_response(['status' => 'ok', 'value' => $value]);
     }
 
     public function rest_admin_settings(WP_REST_Request $request): WP_REST_Response {
@@ -1247,6 +1319,21 @@ final class AICB_Plugin {
         }
         arsort($top);
 
+        // Feedback (👍/👎) auswerten.
+        $helpful = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$events} WHERE feedback = 1");
+        $not_helpful = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$events} WHERE feedback = -1");
+        $rated = $helpful + $not_helpful;
+        $helpful_month = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$events} WHERE feedback = 1 AND created_at >= %s", $since_month));
+        $not_helpful_month = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$events} WHERE feedback = -1 AND created_at >= %s", $since_month));
+        $feedback = [
+            'helpful' => $helpful,
+            'not_helpful' => $not_helpful,
+            'rated' => $rated,
+            'satisfaction' => $rated > 0 ? (int) round(100 * $helpful / $rated) : null,
+            'helpful_month' => $helpful_month,
+            'not_helpful_month' => $not_helpful_month,
+        ];
+
         return rest_ensure_response([
             'overview' => [
                 'week_chats' => (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$events} WHERE created_at >= %s", $since_week)),
@@ -1255,6 +1342,7 @@ final class AICB_Plugin {
                 'answered' => $answered,
                 'chunks' => (int) $wpdb->get_var("SELECT COUNT(*) FROM {$chunks}"),
             ],
+            'feedback' => $feedback,
             'top_questions' => array_slice(array_map(fn($q, $c) => ['question' => $q, 'count' => $c], array_keys($top), $top), 0, 10),
             'daily' => $daily,
             'usage' => [
@@ -2694,7 +2782,7 @@ final class AICB_Plugin {
         ));
     }
 
-    private function record_event(?string $session_hash, string $question, ?string $answer, string $status, ?string $error, array $usage): void {
+    private function record_event(?string $session_hash, string $question, ?string $answer, string $status, ?string $error, array $usage): int {
         global $wpdb;
         $wpdb->insert($wpdb->prefix . 'aicb_events', [
             'session_hash' => $session_hash,
@@ -2706,8 +2794,10 @@ final class AICB_Plugin {
             'input_tokens' => (int) ($usage['prompt_tokens'] ?? 0),
             'output_tokens' => (int) ($usage['completion_tokens'] ?? 0),
             'model' => $this->setting('chat_model', 'gpt-4o-mini'),
+            'feedback' => 0,
             'created_at' => gmdate('Y-m-d H:i:s'),
-        ], ['%s', '%d', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s']);
+        ], ['%s', '%d', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%d', '%s']);
+        return (int) $wpdb->insert_id;
     }
 
     /**
@@ -3287,6 +3377,7 @@ PROMPT;
             'error' => $pack['error'],
             'sources' => $pack['sources'],
             'sources_labels' => $this->sources_labels(),
+            'feedback' => $this->feedback_labels($lang),
         ];
         $config['contact'] = [
             'url' => esc_url_raw((string) ($settings['contact_url'] ?? '')),

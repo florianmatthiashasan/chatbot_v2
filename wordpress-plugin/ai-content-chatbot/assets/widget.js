@@ -182,6 +182,61 @@
     ], "aicb-action-icon");
   }
 
+  /* --- Feedback (War das hilfreich?) -------------------------------------- */
+  function fbLabel(key) {
+    var fb = (strings && strings.feedback) || {};
+    var fallback = {
+      question: "War das hilfreich?",
+      yes: "Hilfreich",
+      no: "Nicht hilfreich",
+      thanks: "Danke fuer dein Feedback!",
+    };
+    return (fb[key] || "").toString().trim() || fallback[key];
+  }
+
+  function thumbIcon(up) {
+    var d = up
+      ? "M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"
+      : "M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17";
+    return svgNode([d], "aicb-feedback-icon");
+  }
+
+  // Feedback-Leiste unter einer Antwort. Ein Klick sendet die Bewertung einmalig.
+  function feedbackRow(eventId) {
+    var wrap = document.createElement("div");
+    wrap.className = "aicb-feedback";
+
+    var question = document.createElement("span");
+    question.className = "aicb-feedback-q";
+    question.textContent = fbLabel("question");
+    wrap.appendChild(question);
+
+    var voted = false;
+    function makeButton(up) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "aicb-feedback-btn aicb-feedback-" + (up ? "up" : "down");
+      btn.setAttribute("aria-label", up ? fbLabel("yes") : fbLabel("no"));
+      btn.appendChild(thumbIcon(up));
+      btn.addEventListener("click", function () {
+        if (voted) return;
+        voted = true;
+        wrap.classList.add("aicb-voted");
+        btn.classList.add("aicb-chosen");
+        var token = readStore("localStorage", SESSION_KEY, "");
+        api("feedback", { event_id: eventId, value: up ? 1 : -1, session_token: token }).catch(function () {});
+        var thanks = document.createElement("span");
+        thanks.className = "aicb-feedback-thanks";
+        thanks.textContent = fbLabel("thanks");
+        wrap.appendChild(thanks);
+      });
+      return btn;
+    }
+    wrap.appendChild(makeButton(true));
+    wrap.appendChild(makeButton(false));
+    return wrap;
+  }
+
   /* --- Text: Links, Markdown, Quellenblock -------------------------------- */
   function urlRegex() {
     return /\b(?:https?:\/\/|www\.)[^\s<>()]+/gi;
@@ -532,8 +587,10 @@
       return nodes;
     }
 
-    function addMessage(value, sender, rich) {
-      var row = appendRow(createRow(sender, [createBubble(value, sender)].concat(richNodes(rich))));
+    function addMessage(value, sender, rich, eventId) {
+      var extra = richNodes(rich);
+      if (sender === "bot" && eventId) extra.push(feedbackRow(eventId));
+      var row = appendRow(createRow(sender, [createBubble(value, sender)].concat(extra)));
       if (sender === "user") {
         anchorRow = row;
         keepAnchorInView(true);
@@ -573,17 +630,18 @@
       return { row: row, bubble: bubble };
     }
 
-    function finishTyping(entry, value, rich) {
+    function finishTyping(entry, value, rich, eventId) {
       timers.forEach(clearTimeout);
       timers = [];
       if (!entry || !entry.bubble.isConnected) {
-        addMessage(value, "bot", rich);
+        addMessage(value, "bot", rich, eventId);
         return;
       }
       entry.bubble.classList.remove("aicb-typing");
       setBubbleContent(entry.bubble, value, false);
       var stack = entry.row.querySelector(".aicb-stack");
       richNodes(rich).forEach(function (node) { stack.appendChild(node); });
+      if (eventId) stack.appendChild(feedbackRow(eventId));
       if (anchorRow) keepAnchorInView(false);
       else scrollToBottom();
     }
@@ -681,7 +739,7 @@
         .then(function (data) {
           if (data.session_token) writeStore("localStorage", SESSION_KEY, data.session_token);
           var answer = data.answer || "";
-          finishTyping(typing, answer, data.rich);
+          finishTyping(typing, answer, data.rich, data.event_id);
           history.push({ role: "user", content: question });
           history.push({ role: "assistant", content: answer });
           setHistory(history);

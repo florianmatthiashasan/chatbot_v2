@@ -890,3 +890,63 @@
     left: 14px;
   }
 }
+
+/* --- Feedback-Leiste (War das hilfreich?) ------------------------------- */
+.aicb-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding-left: 2px;
+  flex-wrap: wrap;
+}
+.aicb-feedback-q {
+  font-size: 12px;
+  color: var(--aicb-muted);
+}
+.aicb-feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--aicb-hairline);
+  border-radius: 8px;
+  background: var(--aicb-panel);
+  color: var(--aicb-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.aicb-feedback-btn:hover {
+  color: var(--aicb-text);
+  border-color: var(--aicb-soft);
+  background: var(--aicb-hover-soft);
+}
+.aicb-feedback-icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.aicb-feedback-btn.aicb-chosen.aicb-feedback-up {
+  color: #ffffff;
+  background: var(--aicb-status-dot, #4f8a5b);
+  border-color: var(--aicb-status-dot, #4f8a5b);
+}
+.aicb-feedback-btn.aicb-chosen.aicb-feedback-down {
+  color: #ffffff;
+  background: #b23b3b;
+  border-color: #b23b3b;
+}
+.aicb-feedback.aicb-voted .aicb-feedback-btn:not(.aicb-chosen) {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.aicb-feedback-thanks {
+  font-size: 12px;
+  color: var(--aicb-muted);
+}

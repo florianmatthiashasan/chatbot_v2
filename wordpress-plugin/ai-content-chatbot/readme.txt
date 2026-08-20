@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.5.0
+Stable tag: 0.6.0
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -22,7 +22,8 @@ Main features:
 * Widget theme and quick-topic editor with live preview of the real chat window
 * FAQ manager
 * Memory search, edit and delete
-* Chat statistics and estimated cost overview
+* Chat statistics and estimated cost overview - inklusive Feedback-Auswertung (👍/👎, Zufriedenheit)
+* Feedback-Leiste "War das hilfreich?" unter jeder Antwort; die Auswertung erscheint sauber im Statistik-Tab
 * Optional automatic reindexing when a published post is saved
 * Inhalte-Tab: einzelne veroeffentlichte Beitraege/Seiten per Haekchen zum Indexieren auswaehlen (Entwuerfe werden nie indexiert)
 * PDFs aus der Mediathek auswaehlen und in die Wissensbasis aufnehmen (Textextraktion inkl. FlateDecode und ToUnicode; gescannte Bild-PDFs ohne Textebene werden uebersprungen)
@@ -47,6 +48,12 @@ The plugin stores embeddings in the WordPress database as JSON vectors. This kee
 
 
 == Changelog ==
+
+= 0.6.0 =
+* Feedback-Leiste "War das hilfreich?" mit 👍/👎 unter jeder Antwort im Widget (mehrsprachig, einmalige Abstimmung pro Antwort).
+* Die Bewertung wird der jeweiligen Antwort zugeordnet und nur vom Besitzer der Session gespeichert (Missbrauchsschutz ueber den Session-Token).
+* Statistik-Tab zeigt die Auswertung sauber: 👍 hilfreich, 👎 nicht hilfreich, Zufriedenheit (Anteil positiv), Gesamtzahl der Bewertungen sowie die letzten 30 Tage.
+* DB: neue Spalte `feedback` in der Events-Tabelle (automatische Migration bestehender Installationen).
 
 = 0.5.0 =
 * Neuer Tab "Inhalte": Statt nur ganzer Post-Types lassen sich jetzt einzelne veroeffentlichte Beitraege und Seiten per Haekchen fuer das Training auswaehlen. Zwei Modi - "Alle veroeffentlichten Inhalte der aktivierten Post Types" (bisheriges Verhalten) oder "Nur die angekreuzten Inhalte". Entwuerfe werden in keinem Modus indexiert.

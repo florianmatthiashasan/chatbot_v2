@@ -570,6 +570,8 @@
     const s = state.stats || {};
     const overview = s.overview || {};
     const usage = s.usage || {};
+    const fb = s.feedback || {};
+    const satisfaction = fb.satisfaction === null || fb.satisfaction === undefined ? "–" : `${fb.satisfaction}%`;
     return `
       <section class="aicb-panel">
         <h2>Statistiken & Kosten</h2>
@@ -579,6 +581,16 @@
           <div><strong>${overview.total_chats || 0}</strong><span>Chats gesamt</span></div>
           <div><strong>$${usage.estimated_cost_usd || 0}</strong><span>Geschaetzte Kosten</span></div>
         </div>
+
+        <h3>Feedback der Besucher</h3>
+        <div class="aicb-metrics">
+          <div><strong>👍 ${fb.helpful || 0}</strong><span>Hilfreich</span></div>
+          <div><strong>👎 ${fb.not_helpful || 0}</strong><span>Nicht hilfreich</span></div>
+          <div><strong>${satisfaction}</strong><span>Zufriedenheit</span></div>
+          <div><strong>${fb.rated || 0}</strong><span>Bewertungen gesamt</span></div>
+        </div>
+        <p class="aicb-hint">Letzte 30 Tage: 👍 ${fb.helpful_month || 0} · 👎 ${fb.not_helpful_month || 0}. „Zufriedenheit" = Anteil positiver Bewertungen.</p>
+
         <h3>Top Fragen</h3>
         <div class="aicb-table">${(s.top_questions || []).map((item) => `<div><span>${escapeHtml(item.question)}</span><strong>${item.count}</strong></div>`).join("") || "<p>Noch keine Fragen.</p>"}</div>
       </section>`;
