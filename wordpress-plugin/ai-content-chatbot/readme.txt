@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.7.8
+Stable tag: 0.7.9
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -51,8 +51,12 @@ Die PDF-Textextraktion nutzt die mitgelieferte Bibliothek Smalot/PdfParser (MIT-
 
 == Changelog ==
 
+= 0.7.9 =
+* Fragen-Popup (Greeting-Stil) zuverlaessiger: erscheint jetzt einmal pro Sitzung je Seite, auch wenn das klassische Greeting deaktiviert ist (Greeting nur noch Fallback).
+* Avatar-Feinschliff: Header-Avatar zurueck auf Normalgroesse; der Avatar in den Chat-Nachrichten etwas kleiner.
+
 = 0.7.8 =
-* Icon-Feinschliff: Launcher-Icon (vor dem Öffnen) etwas größer und mittig; Avatar-Icon im geöffneten Chat-Header etwas kleiner, damit es sauber in den Kreis passt.
+* Icon-Feinschliff: Launcher-Icon (vor dem Oeffnen) etwas groesser und mittig; Avatar-Icon im geoeffneten Chat-Header etwas kleiner.
 
 = 0.7.7 =
 * Icon-Fix: Eigene SVG-Logos werden zuverlässig in der Widget-Farbe dargestellt (nie mehr durchgehend schwarz) - Schwarz und fehlende Füllungen werden auf currentColor gesetzt, Umrisse bleiben Umrisse, echte Markenfarben bleiben erhalten. Icon im Chat-Kreis größer und sauber zentriert.

@@ -567,6 +567,7 @@
     var timers = [];
     var teaserStorageKey = TEASER_KEY;
     var teaserMemoryValue = "1";
+    var teaserStore = "localStorage"; // Greeting: dauerhaft, Fragen: pro Session
     var pageQuestions = [];        // KI-generierte Fragen zur aktuellen Seite
     var lastSuggestUrl = "";       // URL, fuer die zuletzt Fragen geladen wurden
     var routeTimer = null;
@@ -918,7 +919,7 @@
     /* --- Panel öffnen und schließen ------------------------------------- */
     function hideTeaser(remember) {
       if (teaserEl) teaserEl.classList.remove("aicb-teaser-visible");
-      if (remember) writeStore("localStorage", teaserStorageKey, teaserMemoryValue);
+      if (remember) writeStore(teaserStore, teaserStorageKey, teaserMemoryValue);
     }
 
     function open() {
@@ -978,6 +979,7 @@
       var greeting = cfg.greeting || {};
       if (inline || !teaserEl || !greeting.enabled || !(greeting.text || "").trim()) return false;
       var currentGreetingKey = greetingKey(greeting);
+      teaserStore = "localStorage";
       teaserStorageKey = TEASER_KEY;
       teaserMemoryValue = currentGreetingKey;
       if (readStore("localStorage", TEASER_KEY, "") === currentGreetingKey) return true;
@@ -990,9 +992,12 @@
     function showQuestionTeaser(items, page) {
       if (inline || !teaserEl || !teaserTextEl || !Array.isArray(items) || !items.length) return false;
       var currentKey = suggestionsKey(items, page);
+      // Fragen-Popup pro Browser-Session einmal je Seite -> zuverlaessig sichtbar,
+      // aber nicht bei jedem Klick erneut aufdringlich.
+      teaserStore = "sessionStorage";
       teaserStorageKey = SUGGESTIONS_KEY;
       teaserMemoryValue = currentKey;
-      if (readStore("localStorage", SUGGESTIONS_KEY, "") === currentKey) return true;
+      if (readStore("sessionStorage", SUGGESTIONS_KEY, "") === currentKey) return true;
 
       clearTeaserContent();
       teaserEl.classList.add("aicb-teaser-questions");
@@ -1027,14 +1032,15 @@
 
     var greetingOn = !cfg.greeting || cfg.greeting.enabled;
 
-    // Ergebnis der KI-Fragen anwenden: in die Topics-Liste UND (falls Popup
-    // erlaubt und Chat zu) in den Teaser.
+    // Ergebnis der KI-Fragen anwenden: immer in die Topics-Liste; und (wenn Chat
+    // zu) ins Popup. Das Fragen-Popup erscheint zuverlaessig, auch wenn das
+    // klassische Greeting deaktiviert ist - das Greeting ist nur der Fallback.
     function applySuggestions(items, page) {
       pageQuestions = (Array.isArray(items) ? items : []).slice(0, 3);
       renderTopics();
-      if (!inline && teaserEl && greetingOn && !shell.classList.contains("aicb-open")) {
-        if (!showQuestionTeaser(pageQuestions, page)) showGreetingTeaser();
-      }
+      if (inline || !teaserEl || shell.classList.contains("aicb-open")) return;
+      if (showQuestionTeaser(pageQuestions, page)) return;
+      if (greetingOn) showGreetingTeaser();
     }
 
     function currentPath() {

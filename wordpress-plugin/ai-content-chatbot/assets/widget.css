@@ -311,8 +311,8 @@
 }
 
 .aicb-widget-shell .aicb-avatar svg {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   display: block;
   color: inherit;
   stroke: currentColor;
@@ -458,8 +458,8 @@
 }
 
 .aicb-widget-shell .aicb-row-avatar svg {
-  width: 21px;
-  height: 21px;
+  width: 17px;
+  height: 17px;
   display: block;
   color: inherit;
   stroke: currentColor;
