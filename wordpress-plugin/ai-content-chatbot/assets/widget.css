@@ -105,10 +105,10 @@
 }
 
 .aicb-widget-shell .aicb-launcher-icon svg {
-  width: 60%;
-  height: 60%;
-  max-width: 38px;
-  max-height: 38px;
+  width: 68%;
+  height: 68%;
+  max-width: 44px;
+  max-height: 44px;
   display: block;
   margin: auto;
   color: inherit;
@@ -311,8 +311,8 @@
 }
 
 .aicb-widget-shell .aicb-avatar svg {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   display: block;
   color: inherit;
   stroke: currentColor;
