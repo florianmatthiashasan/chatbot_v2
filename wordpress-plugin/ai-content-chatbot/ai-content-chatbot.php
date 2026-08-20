@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.6.1
+ * Version: 0.7.0
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -30,7 +30,7 @@ final class AICB_Plugin {
      */
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.6.1';
+    private const ASSET_VERSION = '0.7.0';
     // Cosinus-Aehnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -1585,16 +1585,21 @@ final class AICB_Plugin {
         if (!$path || !file_exists($path) || !is_readable($path)) {
             throw new RuntimeException('PDF-Datei nicht gefunden.');
         }
-        // 1) Beste Qualitaet: pdftotext (poppler), falls auf dem Host verfuegbar.
-        $text = $this->normalize_text($this->pdf_text_via_pdftotext($path));
+        // 1) Beste & robusteste Extraktion: gebuendelte Bibliothek (Smalot/PdfParser).
+        //    Beherrscht CID/Type0, ToUnicode, Differences, CFF und Positionierung.
+        $text = $this->normalize_text($this->pdf_text_via_smalot($path));
 
-        // 2) Fallback: reine PHP-Extraktion (FlateDecode, ToUnicode, Differences).
+        // 2) Fallback: pdftotext (poppler), falls auf dem Host verfuegbar.
+        if (trim($text) === '' || !$this->pdf_looks_like_text($text)) {
+            $text = $this->normalize_text($this->pdf_text_via_pdftotext($path));
+        }
+
+        // 3) Letzter Fallback: eingebaute reine PHP-Extraktion.
         if (trim($text) === '' || !$this->pdf_looks_like_text($text)) {
             $bytes = (string) file_get_contents($path);
-            if ($bytes === '') {
-                return 0;
+            if ($bytes !== '') {
+                $text = $this->normalize_text($this->pdf_to_text($bytes));
             }
-            $text = $this->normalize_text($this->pdf_to_text($bytes));
         }
 
         if (trim($text) === '' || !$this->pdf_looks_like_text($text)) {
@@ -1636,6 +1641,40 @@ final class AICB_Plugin {
             $parts[] = $this->pdf_tokenize_text($stream, $cmap['map'], (int) $cmap['code_len'], $diff);
         }
         return trim(implode("\n", array_filter($parts)));
+    }
+
+    /**
+     * Extrahiert Text mit der gebuendelten Bibliothek Smalot/PdfParser (reines PHP).
+     * Wird lazy geladen und nur beim Indexieren eines PDFs benoetigt.
+     */
+    private function pdf_text_via_smalot(string $path): string {
+        if (!class_exists('\\Smalot\\PdfParser\\Parser')) {
+            $autoload = plugin_dir_path(__FILE__) . 'vendor/autoload.php';
+            if (!is_readable($autoload)) {
+                return '';
+            }
+            require_once $autoload;
+            if (!class_exists('\\Smalot\\PdfParser\\Parser')) {
+                return '';
+            }
+        }
+        try {
+            // Bilder nicht im Speicher halten - spart RAM bei bildlastigen PDFs.
+            if (class_exists('\\Smalot\\PdfParser\\Config')) {
+                $config = new \Smalot\PdfParser\Config();
+                if (method_exists($config, 'setRetainImageContent')) {
+                    $config->setRetainImageContent(false);
+                }
+                $parser = new \Smalot\PdfParser\Parser([], $config);
+            } else {
+                $parser = new \Smalot\PdfParser\Parser();
+            }
+            $pdf = $parser->parseFile($path);
+            return (string) $pdf->getText();
+        } catch (\Throwable $e) {
+            error_log('AICB Smalot PDF-Parsing fehlgeschlagen (' . wp_basename($path) . '): ' . $e->getMessage());
+            return '';
+        }
     }
 
     /** Ruft pdftotext (poppler) auf, falls verfuegbar. Sonst leerer String. */

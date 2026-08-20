@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.6.1
+Stable tag: 0.7.0
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -26,7 +26,7 @@ Main features:
 * Feedback-Leiste "War das hilfreich?" unter jeder Antwort; die Auswertung erscheint sauber im Statistik-Tab
 * Optional automatic reindexing when a published post is saved
 * Inhalte-Tab: einzelne veroeffentlichte Beitraege/Seiten per Haekchen zum Indexieren auswaehlen (Entwuerfe werden nie indexiert)
-* PDFs aus der Mediathek auswaehlen und in die Wissensbasis aufnehmen (Textextraktion inkl. FlateDecode und ToUnicode; gescannte Bild-PDFs ohne Textebene werden uebersprungen)
+* PDFs aus der Mediathek auswaehlen und in die Wissensbasis aufnehmen - robuste Textextraktion ueber die gebuendelte Bibliothek Smalot/PdfParser (CID/Type0, ToUnicode, Differences, CFF, Positionierung); gescannte Bild-PDFs ohne Textebene werden uebersprungen
 * Shortcode: [ai_content_chatbot]
 * Chat-Oberflaeche im florianmatthias-Widget-Design: Startansicht mit Themenliste, Antwortkarten mit Bild, Quellenblock und Anker-Scrolling
 * Antwort-Buttons werden von der KI aus dem Gespraech erzeugt (Anrufen, Kontaktseite, Folgefragen)
@@ -46,8 +46,15 @@ Main features:
 
 The plugin stores embeddings in the WordPress database as JSON vectors. This keeps the plugin standalone and easy to install. For very large sites, a dedicated vector database can be added later.
 
+Die PDF-Textextraktion nutzt die mitgelieferte Bibliothek Smalot/PdfParser (MIT-Lizenz) samt symfony/polyfill-mbstring (MIT). Beide liegen unter vendor/ und benoetigen kein Composer beim Nutzer.
+
 
 == Changelog ==
+
+= 0.7.0 =
+* PDF-Extraktion grundlegend robuster: Das Plugin bringt jetzt die Bibliothek Smalot/PdfParser mit (reines PHP, kein Composer noetig). Damit werden auch anspruchsvolle PDFs korrekt gelesen - CID-/Type0-Fonts, Type1/CFF-Subsets, ToUnicode und /Differences, inklusive korrekter Wort- und Zeilentrennung. Getestet an realen Dateien (mehrseitige Weinkarte mit Preisen, Projekt-Statusdokument), die zuvor gar nicht oder nur als Zeichensalat erkannt wurden - jetzt sauber im Index.
+* Extraktions-Reihenfolge: Smalot (immer verfuegbar) -> pdftotext (falls auf dem Host vorhanden) -> eingebaute PHP-Extraktion. Danach greift weiterhin die Qualitaetspruefung.
+* Hinweis: Nach dem Update die PDFs im Inhalte-Tab (falls noch nicht geschehen) auswaehlen und einmal neu trainieren.
 
 = 0.6.1 =
 * PDF-Extraktion deutlich verbessert: Fonts mit /Encoding /Differences (Glyphnamen) werden jetzt korrekt aufgeloest - genau die Subset-Fonts aus Word/LibreOffice/InDesign, die zuvor als Zeichensalat verworfen wurden, liefern nun sauberen Text (inkl. Umlauten und korrekter Worttrennung ueber Kerning).
