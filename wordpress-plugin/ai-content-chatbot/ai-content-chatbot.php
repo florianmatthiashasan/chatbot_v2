@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.8.2
+ * Version: 0.8.3
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -31,7 +31,7 @@ final class AICB_Plugin {
     private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.8.2';
+    private const ASSET_VERSION = '0.8.3';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -2648,12 +2648,11 @@ final class AICB_Plugin {
         // Fachfrage nicht (gemessen: 0.32 vs 0.31). Deshalb meldet der
         // Button-Call, ob die Antwort überhaupt eine inhaltliche Auskunft ist.
         $is_content = $actions['content'] === null ? true : (bool) $actions['content'];
-        // Ohne KI-Urteil (kein Key, Call gescheitert) fällt die Karte auf den
-        // besten Treffer zurück; mit Urteil zählt allein die Wahl des Modells.
+        // Karte NUR, wenn das Modell aktiv eine wirklich passende Seite gewählt
+        // hat. Nie den besten Suchtreffer als Notlösung aufdrängen - eine
+        // unpassende Karte (z. B. ein Projekt bei einer Frage zur UID) ist
+        // schlechter als gar keine.
         $card_row = $actions['card'];
-        if ($card_row === null && $actions['content'] === null && $candidates) {
-            $card_row = $candidates[0];
-        }
         $card = ($is_content && $card_row) ? $this->build_card($card_row) : null;
 
         // Quellenblock in der Sprache der Antwort - der Nutzer darf in jeder
@@ -3418,16 +3417,30 @@ PROMPT;
             if (!empty($result['actions'])) {
                 return $result;
             }
+            // Das Modell hat geurteilt (content/card), aber keine gültigen Buttons
+            // geliefert. Urteil behalten (verhindert die falsche Karten-Notlösung)
+            // und stattdessen relevante Fallback-Buttons anhängen.
+            if (($result['content'] ?? null) !== null) {
+                $result['actions'] = $this->fallback_actions($lang, $question, $offered);
+                return $result;
+            }
         } catch (Throwable $e) {
             error_log('AICB action generation failed: ' . $e->getMessage());
         }
-        return ['actions' => $this->quick_actions($lang), 'lang' => $lang, 'content' => null, 'card' => null];
+        // Harter Ausfall (kein Key / Exception): relevante Fallback-Buttons, keine Karte.
+        return ['actions' => $this->fallback_actions($lang, $question, $offered), 'lang' => $lang, 'content' => null, 'card' => null];
     }
 
-    private function quick_actions(string $lang = 'de'): array {
+    /**
+     * Fallback-Buttons ohne KI: relevante Themen-Folgefragen (aus der Widget-
+     * Konfiguration) + ein Kontakt-Button, falls vorhanden. Bewusst KEINE
+     * generischen "Mehr Details"-Buttons mehr - lieber weniger, aber passend.
+     */
+    private function fallback_actions(string $lang, string $question, array $offered = []): array {
         $settings = $this->settings();
         $pack = $this->lang_pack($lang);
         $actions = [];
+
         if (!empty($settings['contact_url'])) {
             $actions[] = [
                 'label' => $pack['action_contact'],
@@ -3441,12 +3454,34 @@ PROMPT;
                 'url' => 'mailto:' . sanitize_email((string) $settings['contact_email']),
             ];
         }
-        $actions[] = [
-            'label' => $pack['action_details'],
-            'type' => 'question',
-            'question' => $pack['action_details_q'],
-        ];
-        return $actions;
+
+        // Wortmengen der aktuellen Frage + schon gezeigter Buttons, um Wiederholung
+        // zu vermeiden.
+        $avoid = [$this->compare_tokens($question)];
+        foreach (array_slice(array_filter(array_map('trim', $offered)), -10) as $shown) {
+            $avoid[] = $this->compare_tokens($shown);
+        }
+
+        foreach ((array) ($this->public_widget_config()['topics'] ?? []) as $topic) {
+            if (count($actions) >= 3) {
+                break;
+            }
+            $label = $this->clean_action_label((string) ($topic['label'] ?? ''));
+            $topic_question = trim((string) ($topic['question'] ?? ''));
+            if ($label === '' || $topic_question === '') {
+                continue;
+            }
+            if ($this->is_repeat_action($topic_question, $avoid) || $this->is_repeat_action($label, $avoid)) {
+                continue;
+            }
+            $actions[] = [
+                'label' => $label,
+                'type' => 'question',
+                'question' => $this->limit_text($topic_question, 180),
+            ];
+        }
+
+        return array_slice($actions, 0, 3);
     }
 
     private const AI_ACTIONS_SYSTEM = <<<'PROMPT'
@@ -3470,7 +3505,9 @@ Gib zusätzlich an:
 - "card": Nummer der Seite aus "Verfügbare Seiten", die als Karte unter der Antwort erscheinen soll.
   Wähle nur eine Seite, die genau das Thema der Antwort vertieft und dem Nutzer echten Mehrwert bringt.
   Passt keine Seite wirklich zum Inhalt der Antwort, ist die Antwort allgemein, eine Begrüßung oder eine
-  Absage, gib 0 an. Im Zweifel immer 0 - eine unpassende Karte ist schlechter als keine.
+  Absage, gib 0 an. Bei kurzen Faktenantworten (z. B. UID/Steuernummer, Telefonnummer, Adresse, Datum,
+  Öffnungszeit, Ja/Nein) ist fast immer 0 richtig - verlinke NICHT ein zufälliges Projekt oder eine
+  Referenz, nur weil sie im Kontext auftaucht. Im Zweifel immer 0 - eine unpassende Karte ist schlechter als keine.
 - "lang": ISO-639-1-Code der Sprache, in der die Antwort des Assistenten geschrieben ist.
 - "content": true, wenn die Antwort eine inhaltliche Auskunft zu Website, Unternehmen, Produkten oder Leistungen gibt. false, wenn sie nur Begrüßung, Dank, Small Talk, Rückfrage oder die Aussage ist, dass keine Informationen vorliegen.
 Antworte ausschließlich mit JSON in dieser Form: {"card": 0, "lang": "de", "content": true, "actions": [{"label": "...", "type": "question", "question": "..."}]}
@@ -3568,7 +3605,7 @@ PROMPT;
         $chat = $this->openai_chat([
             ['role' => 'system', 'content' => self::AI_ACTIONS_SYSTEM],
             ['role' => 'user', 'content' => implode("\n\n", $context)],
-        ], ['temperature' => 0.4, 'max_tokens' => 260]);
+        ], ['temperature' => 0.4, 'max_tokens' => 400]);
 
         $payload = $this->decode_json_object((string) ($chat['answer'] ?? ''));
         if (!$payload || !is_array($payload['actions'] ?? null)) {

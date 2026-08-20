@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.8.2
+Stable tag: 0.8.3
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -50,6 +50,10 @@ Die PDF-Textextraktion nutzt die mitgelieferte Bibliothek Smalot/PdfParser (MIT-
 
 
 == Changelog ==
+
+= 0.8.3 =
+* Keine unpassenden Antwortkarten mehr: Eine Karte erscheint nur noch, wenn das Modell aktiv eine wirklich passende Seite waehlt. Die alte Notloesung, einfach den besten Suchtreffer als Karte zu zeigen, ist entfernt (verhinderte z. B. ein zufaelliges Projekt bei einer Frage zur UID).
+* Bessere Folge-Buttons: Statt generischem "Mehr Details" gibt es relevante Themen-Folgefragen bzw. einen Kontakt-Button; das KI-Urteil (Karte/Content) bleibt erhalten, auch wenn einzelne Buttons herausgefiltert wurden. Button-Generierung robuster (mehr Token).
 
 = 0.8.2 =
 * Schnellere Suche bei identischer Qualitaet: Embeddings werden jetzt kompakt gepackt gespeichert (Base64 float32, ca. 2,4x kleiner als vorher) und normalisiert - die Aehnlichkeitssuche wird zum schnellen Skalarprodukt statt JSON zu parsen. Ergebnisse sind bit-genau dieselben (verifiziert). Alte Eintraege laufen unveraendert weiter; fuer den vollen Tempogewinn einmal neu trainieren.
