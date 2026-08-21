@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.8.3
+ * Version: 0.8.4
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -31,7 +31,7 @@ final class AICB_Plugin {
     private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.8.3';
+    private const ASSET_VERSION = '0.8.4';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -1543,6 +1543,22 @@ final class AICB_Plugin {
         $sessions_active = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$sessions} WHERE expires_at > %s", gmdate('Y-m-d H:i:s', $now)));
         $avg_messages = (float) $wpdb->get_var("SELECT AVG(messages) FROM {$sessions}");
 
+        // Negativ (👎) bewertete Gespraeche: Frage + gegebene Antwort, damit man
+        // gezielt nachbessern kann. Neueste zuerst.
+        $negative_rows = $wpdb->get_results(
+            "SELECT id, question, answer, created_at FROM {$events} WHERE feedback = -1 ORDER BY created_at DESC LIMIT 50",
+            ARRAY_A
+        );
+        $negative = [];
+        foreach ($negative_rows ?: [] as $row) {
+            $negative[] = [
+                'id' => (int) $row['id'],
+                'question' => (string) $row['question'],
+                'answer' => (string) $row['answer'],
+                'created_at' => get_date_from_gmt((string) $row['created_at'], 'd.m.Y H:i'),
+            ];
+        }
+
         return rest_ensure_response([
             'overview' => [
                 'total_chats' => $total_chats,
@@ -1570,6 +1586,7 @@ final class AICB_Plugin {
             'by_weekday' => $by_weekday,
             'by_hour' => $by_hour,
             'top_questions' => array_slice(array_map(fn($q, $c) => ['question' => $q, 'count' => $c], array_keys($top), $top), 0, 12),
+            'negative' => $negative,
         ]);
     }
 

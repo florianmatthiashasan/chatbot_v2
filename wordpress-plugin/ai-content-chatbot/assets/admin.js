@@ -587,6 +587,7 @@
 
     const topQ = s.top_questions || [];
     const maxTop = topQ.reduce((m, i) => Math.max(m, i.count), 0) || 1;
+    const neg = s.negative || [];
 
     return `
       <section class="aicb-panel aicb-stats">
@@ -630,6 +631,25 @@
                   )
                   .join("")
               : "<p>Noch keine Fragen.</p>"
+          }</div>
+        </div>
+
+        <div class="aicb-chart-card">
+          <div class="aicb-chart-head"><h3>👎 Negativ bewertete Gespräche</h3><span>${neg.length ? neg.length + (neg.length >= 50 ? "+" : "") + " zuletzt" : "keine"}</span></div>
+          <p class="aicb-hint">Hier siehst du Antworten, die ein Besucher mit Daumen runter bewertet hat – so erkennst du, wo der Chatbot nachgebessert werden sollte (z. B. Inhalt fehlt, falsche Seite, unklare Antwort).</p>
+          <div class="aicb-neg">${
+            neg.length
+              ? neg
+                  .map(
+                    (n) => `
+            <div class="aicb-neg-item">
+              <div class="aicb-neg-meta">👎 ${escapeHtml(n.created_at || "")}</div>
+              <div class="aicb-neg-q">${escapeHtml(n.question || "")}</div>
+              <div class="aicb-neg-a">${escapeHtml(n.answer || "")}</div>
+            </div>`
+                  )
+                  .join("")
+              : "<p>Noch keine negativen Bewertungen. 🎉</p>"
           }</div>
         </div>
       </section>`;
