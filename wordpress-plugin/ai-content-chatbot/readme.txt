@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 0.8.4
+Stable tag: 0.8.5
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -50,6 +50,9 @@ Die PDF-Textextraktion nutzt die mitgelieferte Bibliothek Smalot/PdfParser (MIT-
 
 
 == Changelog ==
+
+= 0.8.5 =
+* Gespraeche bleiben beim Neuladen erhalten: Der sichtbare Chatverlauf wird jetzt lokal (im Browser) gespeichert und beim Reload bzw. Seitenwechsel wiederhergestellt - war das Fenster offen, oeffnet es sich wieder mit dem bisherigen Verlauf. Geleert wird nur beim Schliessen ueber das X (Minimieren behaelt den Verlauf).
 
 = 0.8.4 =
 * Statistik-Tab: Neue Sektion "Negativ bewertete Gespraeche" - zeigt die letzten Antworten, die ein Besucher mit Daumen runter bewertet hat (Frage + gegebene Antwort + Zeitpunkt). So sieht man direkt, wo der Chatbot nachgebessert werden sollte.

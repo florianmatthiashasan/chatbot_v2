@@ -9,6 +9,8 @@
 
   var SESSION_KEY = "aicb_session_token";
   var HISTORY_KEY = "aicb_history";
+  var TRANSCRIPT_KEY = "aicb_transcript"; // sichtbarer Verlauf (bleibt bei Reload)
+  var OPEN_KEY = "aicb_open";             // war das Panel offen?
   var TEASER_KEY = "aicb_teaser_seen";
   var SUGGESTIONS_KEY = "aicb_page_suggestions_seen";
   var HISTORY_LIMIT = 16;
@@ -75,9 +77,11 @@
     } catch (err) { /* Privater Modus: dann eben ohne Persistenz */ }
   }
 
+  // Verlauf/Kontext in localStorage -> bleibt bei Reload und Tab-Wechsel,
+  // wird nur beim Schliessen (X) geleert.
   function getHistory() {
     try {
-      var value = JSON.parse(readStore("sessionStorage", HISTORY_KEY, "[]"));
+      var value = JSON.parse(readStore("localStorage", HISTORY_KEY, "[]"));
       return Array.isArray(value) ? value.slice(-HISTORY_LIMIT) : [];
     } catch (err) {
       return [];
@@ -85,7 +89,7 @@
   }
 
   function setHistory(history) {
-    writeStore("sessionStorage", HISTORY_KEY, JSON.stringify(history.slice(-HISTORY_LIMIT)));
+    writeStore("localStorage", HISTORY_KEY, JSON.stringify(history.slice(-HISTORY_LIMIT)));
   }
 
   function ensureSession() {
@@ -571,6 +575,23 @@
     var pageQuestions = [];        // KI-generierte Fragen zur aktuellen Seite
     var lastSuggestUrl = "";       // URL, fuer die zuletzt Fragen geladen wurden
     var routeTimer = null;
+    // Sichtbaren Verlauf persistieren (nur echtes Floating-Widget, nicht Admin/Inline).
+    var persistOn = !inline && typeof window.AICBAdmin === "undefined";
+    var transcript = [];
+    function saveTranscript() {
+      if (!persistOn) return;
+      writeStore("localStorage", TRANSCRIPT_KEY, JSON.stringify(transcript.slice(-40)));
+    }
+    function pushTranscript(entry) {
+      if (!persistOn) return;
+      transcript.push(entry);
+      saveTranscript();
+    }
+    function clearTranscript() {
+      transcript = [];
+      writeStore("localStorage", TRANSCRIPT_KEY, "[]");
+      writeStore("localStorage", OPEN_KEY, "0");
+    }
 
     Array.prototype.forEach.call(shell.querySelectorAll("[data-aicb-avatar]"), function (el) {
       renderIcon(el, icon);
@@ -802,6 +823,30 @@
       else scrollToBottom();
     }
 
+    // Gespeicherten Verlauf beim Laden wiederherstellen (bleibt bei Reload).
+    function restoreTranscript() {
+      if (!persistOn) return false;
+      var stored = [];
+      try {
+        stored = JSON.parse(readStore("localStorage", TRANSCRIPT_KEY, "[]"));
+      } catch (err) {
+        stored = [];
+      }
+      if (!Array.isArray(stored) || !stored.length) return false;
+      transcript = stored.slice(-40);
+      hideIntro();
+      transcript.forEach(function (m) {
+        if (!m || typeof m.text !== "string" || m.text === "") return;
+        var sender = m.sender === "user" ? "user" : "bot";
+        var extra = sender === "bot" ? richNodes(m.rich || null) : [];
+        if (sender === "bot" && m.eventId) extra.push(feedbackRow(m.eventId));
+        appendRow(createRow(sender, [createBubble(m.text, sender)].concat(extra)));
+      });
+      anchorRow = null;
+      scrollToBottom();
+      return true;
+    }
+
     /* --- Startansicht ----------------------------------------------------- */
     function chevron() {
       return svgNode(["M9 6l6 6-6 6"], "aicb-chevron");
@@ -885,6 +930,7 @@
       inputEl.value = "";
       syncComposer();
       addMessage(question, "user");
+      pushTranscript({ sender: "user", text: question });
       var typing = startTyping();
       setBusy(true);
 
@@ -903,6 +949,7 @@
           if (data.session_token) writeStore("localStorage", SESSION_KEY, data.session_token);
           var answer = data.answer || "";
           finishTyping(typing, answer, data.rich, data.event_id);
+          pushTranscript({ sender: "bot", text: answer, rich: data.rich || null, eventId: data.event_id || null });
           history.push({ role: "user", content: question });
           history.push({ role: "assistant", content: answer });
           setHistory(history);
@@ -922,23 +969,29 @@
       if (remember) writeStore(teaserStore, teaserStorageKey, teaserMemoryValue);
     }
 
-    function open() {
+    function open(silent) {
       panel.hidden = false;
       shell.classList.add("aicb-open");
       hideTeaser(true);
-      setTimeout(function () { inputEl.focus(); }, 50);
+      if (persistOn) writeStore("localStorage", OPEN_KEY, "1");
+      if (!silent) {
+        setTimeout(function () { inputEl.focus(); }, 50);
+      }
     }
 
     function close(reset) {
       if (inline) return;
       panel.hidden = true;
       shell.classList.remove("aicb-open");
+      // Minimieren: Verlauf bleibt, nur den Offen-Status merken.
+      if (persistOn && !reset) writeStore("localStorage", OPEN_KEY, "0");
       if (reset) {
         listEl.innerHTML = "";
         offeredActions = [];
         anchorRow = null;
         if (spacerEl) spacerEl.style.height = "0px";
         setHistory([]);
+        clearTranscript();
         showIntro();
       }
     }
@@ -946,7 +999,7 @@
     renderTopics();
     syncComposer();
 
-    if (launcher) launcher.addEventListener("click", open);
+    if (launcher) launcher.addEventListener("click", function () { open(); });
     if (minimizeBtn) minimizeBtn.addEventListener("click", function () { close(false); });
     if (closeBtn) closeBtn.addEventListener("click", function () { close(true); });
 
@@ -1069,13 +1122,19 @@
     }
 
     if (!inline && teaserEl) {
-      teaserEl.addEventListener("click", open);
+      teaserEl.addEventListener("click", function () { open(); });
       if (teaserCloseEl) {
         teaserCloseEl.addEventListener("click", function (event) {
           event.stopPropagation();
           hideTeaser(true);
         });
       }
+    }
+
+    // Verlauf wiederherstellen (bleibt bei Reload). War das Panel vorher offen,
+    // wieder oeffnen - ohne den Fokus/Scroll an sich zu reissen.
+    if (restoreTranscript() && !inline && readStore("localStorage", OPEN_KEY, "0") === "1") {
+      open(true);
     }
 
     // Nicht in der Admin-Live-Vorschau feuern (spart OpenAI-Aufrufe).
