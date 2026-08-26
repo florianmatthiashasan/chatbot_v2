@@ -1190,21 +1190,30 @@
   text-align: start;
 }
 
-.aicb-widget-shell .aicb-close-confirm-sheet h2 {
+/* Titel/Text bewusst als div (kein h2/p): Theme-Ueberschriften-Styles mit hoher
+   Spezifitaet oder !important koennen so nicht mehr reinfunken. Alle Werte explizit. */
+.aicb-widget-shell .aicb-close-confirm-title {
   margin: 0;
   padding: 0;
-  color: inherit;
+  color: var(--aicb-text);
+  font-family: inherit;
   font-size: 15px;
   font-weight: 600;
   line-height: 1.35;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
-.aicb-widget-shell .aicb-close-confirm-sheet p {
+.aicb-widget-shell .aicb-close-confirm-message {
   margin: 4px 0 0;
   padding: 0;
   color: var(--aicb-muted);
+  font-family: inherit;
   font-size: 12.5px;
+  font-weight: 400;
   line-height: 1.4;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 /* Aktionen als horizontale Pill-Reihe (bricht bei Bedarf um) */
