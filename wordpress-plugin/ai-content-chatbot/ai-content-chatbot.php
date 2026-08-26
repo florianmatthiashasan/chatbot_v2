@@ -595,16 +595,16 @@ final class AICB_Plugin {
     private function close_confirm_labels(string $lang): array {
         $map = [
             'de' => [
-                'title' => 'Unterhaltung beenden?',
-                'message' => 'Moechtest du diese Unterhaltung wirklich beenden und neu starten?',
-                'confirm' => 'Unterhaltung beenden',
-                'cancel' => 'Abbrechen',
+                'title' => 'Willst du den Chat wirklich schließen?',
+                'message' => 'Der Verlauf wird dabei gelöscht.',
+                'confirm' => 'Ja, schließen',
+                'cancel' => 'Nein, weitermachen',
             ],
             'en' => [
-                'title' => 'End conversation?',
-                'message' => 'Do you want to end this conversation and start over?',
-                'confirm' => 'End conversation',
-                'cancel' => 'Cancel',
+                'title' => 'Do you really want to close the chat?',
+                'message' => 'This will clear the conversation.',
+                'confirm' => 'Yes, close',
+                'cancel' => 'No, keep chatting',
             ],
         ];
         return $map[$lang] ?? $map['en'];
@@ -959,8 +959,10 @@ final class AICB_Plugin {
                     <div class="aicb-close-confirm-sheet" role="dialog" aria-modal="true" aria-label="<?php echo esc_attr((string) ($close_confirm['title'] ?? 'End conversation?')); ?>">
                         <h2><?php echo esc_html((string) ($close_confirm['title'] ?? 'End conversation?')); ?></h2>
                         <p><?php echo esc_html((string) ($close_confirm['message'] ?? 'Do you want to end this conversation and start over?')); ?></p>
-                        <button class="aicb-close-confirm-end" type="button" data-aicb-close-confirm-end><?php echo esc_html((string) ($close_confirm['confirm'] ?? 'End conversation')); ?></button>
-                        <button class="aicb-close-confirm-cancel" type="button" data-aicb-close-cancel><?php echo esc_html((string) ($close_confirm['cancel'] ?? 'Cancel')); ?></button>
+                        <div class="aicb-close-confirm-actions">
+                            <button class="aicb-close-confirm-end" type="button" data-aicb-close-confirm-end><?php echo esc_html((string) ($close_confirm['confirm'] ?? 'End conversation')); ?></button>
+                            <button class="aicb-close-confirm-cancel" type="button" data-aicb-close-cancel><?php echo esc_html((string) ($close_confirm['cancel'] ?? 'Cancel')); ?></button>
+                        </div>
                     </div>
                 </div>
                 <?php endif; ?>

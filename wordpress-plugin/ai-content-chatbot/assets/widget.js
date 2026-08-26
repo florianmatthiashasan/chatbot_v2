@@ -669,6 +669,7 @@
     var closeConfirmEl = shell.querySelector("[data-aicb-close-confirm]");
     var closeConfirmEndBtn = shell.querySelector("[data-aicb-close-confirm-end]");
     var closeConfirmCancelEls = shell.querySelectorAll("[data-aicb-close-cancel]");
+    var closeConfirmCancelBtn = shell.querySelector(".aicb-close-confirm-cancel");
     var footerEl = shell.querySelector(".aicb-footer");
     var footerDismissEl = shell.querySelector("[data-aicb-footer-dismiss]");
     var inline = shell.classList.contains("aicb-mode-inline");
@@ -1140,8 +1141,10 @@
       }
       closeConfirmEl.hidden = false;
       shell.classList.add("aicb-confirming-close");
+      // Fokus auf die sichere Wahl ("weitermachen"), nicht auf das Loeschen.
       setTimeout(function () {
-        if (closeConfirmEndBtn) closeConfirmEndBtn.focus();
+        if (closeConfirmCancelBtn) closeConfirmCancelBtn.focus();
+        else if (closeConfirmEndBtn) closeConfirmEndBtn.focus();
       }, 20);
     }
 

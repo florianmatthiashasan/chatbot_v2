@@ -1179,55 +1179,83 @@
 .aicb-widget-shell .aicb-close-confirm-sheet {
   position: relative;
   display: grid;
-  gap: 14px;
+  gap: 0;
   width: 100%;
-  padding: 28px 22px 20px;
-  border-radius: 22px 22px 0 0;
+  padding: 20px 18px;
+  border-top: 1px solid var(--aicb-hairline);
+  border-radius: var(--aicb-radius-lg) var(--aicb-radius-lg) 0 0;
   background: var(--aicb-panel);
   color: var(--aicb-text);
   box-shadow: 0 -18px 46px rgba(17, 16, 13, 0.16);
-  text-align: center;
+  text-align: start;
 }
 
 .aicb-widget-shell .aicb-close-confirm-sheet h2 {
   margin: 0;
   padding: 0;
   color: inherit;
-  font-size: 24px;
-  font-weight: 750;
-  line-height: 1.18;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .aicb-widget-shell .aicb-close-confirm-sheet p {
-  margin: 0 0 4px;
+  margin: 4px 0 0;
   padding: 0;
-  color: var(--aicb-soft);
-  font-size: 14px;
-  line-height: 1.45;
+  color: var(--aicb-muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+/* Aktionen als horizontale Pill-Reihe (bricht bei Bedarf um) */
+.aicb-widget-shell .aicb-close-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .aicb-widget-shell .aicb-close-confirm-sheet button {
-  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 44px;
   margin: 0;
-  padding: 10px 16px;
-  border: 0;
-  border-radius: 10px;
+  padding: 10px 18px;
+  border: 1px solid var(--aicb-chip-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--aicb-text);
   font: inherit;
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 600;
   line-height: 1.2;
   cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
+/* Destruktiv ("Ja, schließen"): entschaerfter Outline-Button */
 .aicb-widget-shell .aicb-close-confirm-end {
+  border-color: var(--aicb-chip-border);
+  background: transparent;
+  color: var(--aicb-text);
+}
+
+.aicb-widget-shell .aicb-close-confirm-end:hover {
+  border-color: var(--aicb-text);
+  background: var(--aicb-hover-soft);
+}
+
+/* Sichere Wahl ("Nein, weitermachen"): gefuellter Primaer-Button; Fokus startet hier */
+.aicb-widget-shell .aicb-close-confirm-cancel {
+  border-color: transparent;
   background: var(--aicb-composer-button-bg);
   color: var(--aicb-composer-button-text);
 }
 
-.aicb-widget-shell .aicb-close-confirm-cancel {
-  background: transparent;
-  color: var(--aicb-text);
+.aicb-widget-shell .aicb-close-confirm-cancel:hover {
+  border-color: transparent;
+  background: var(--aicb-accent);
 }
 
 .aicb-widget-shell .aicb-hidden {
