@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.8.12
+ * Version: 0.9.0
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -31,7 +31,7 @@ final class AICB_Plugin {
     private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.8.12';
+    private const ASSET_VERSION = '0.9.0';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -124,6 +124,8 @@ final class AICB_Plugin {
             KEY feedback (feedback)
         ) {$charset};");
 
+        self::create_metrics_table();
+
         if (!get_option(self::OPTION_KEY)) {
             add_option(self::OPTION_KEY, self::default_settings());
         }
@@ -137,6 +139,32 @@ final class AICB_Plugin {
 
     public static function deactivate(): void {
         wp_clear_scheduled_hook('aicb_reindex_single_post');
+    }
+
+    /**
+     * Leichtes Ereignis-Table fuer Nutzungs-Kennzahlen (Chat-Oeffnungen und
+     * Outcomes/Conversions nach dem Chat). Bewusst getrennt vom Q&A-Table
+     * aicb_events, damit dessen Auswertungen sauber bleiben. Idempotent (dbDelta),
+     * wird bei Aktivierung UND bei Versions-Upgrade sichergestellt.
+     */
+    private static function create_metrics_table(): void {
+        global $wpdb;
+        if (!function_exists('dbDelta')) {
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        }
+        $charset = $wpdb->get_charset_collate();
+        $metrics = $wpdb->prefix . 'aicb_metrics';
+        dbDelta("CREATE TABLE {$metrics} (
+            id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            type varchar(32) NOT NULL,
+            label varchar(191) NULL,
+            url text NULL,
+            session_hash char(64) NULL,
+            created_at datetime NOT NULL,
+            PRIMARY KEY  (id),
+            KEY type (type),
+            KEY created_at (created_at)
+        ) {$charset};");
     }
 
     public static function default_settings(): array {
@@ -662,6 +690,17 @@ final class AICB_Plugin {
                 // Leer -> Fallback auf die erste Bildschirmhoehe.
                 'selector' => '',
             ],
+            'analytics' => [
+                // Chat-Oeffnungen zaehlen.
+                'track_opens' => true,
+                // Outcomes nach dem Chat zaehlen (Klick auf Booking-/CTA-Links,
+                // abgeschickte Anfrageformulare - in-Widget und auf der Seite).
+                'track_outcomes' => true,
+                // Optionale CSS-Selektoren fuer praezise Conversion-Erkennung auf
+                // der Seite. Leer -> Heuristik (Booking-/Kontakt-Muster).
+                'conversion_selector' => '',
+                'form_selector' => '',
+            ],
             'topics' => [],
         ];
     }
@@ -802,6 +841,9 @@ final class AICB_Plugin {
         if (!$has_packed) {
             $wpdb->query("ALTER TABLE {$chunks_table} ADD COLUMN embedding_packed longtext NULL");
         }
+
+        // Kennzahlen-Table (Chat-Oeffnungen + Outcomes) auch beim Update anlegen.
+        self::create_metrics_table();
 
         update_option(self::VERSION_OPTION, self::ASSET_VERSION, false);
     }
@@ -1166,6 +1208,12 @@ final class AICB_Plugin {
             'permission_callback' => '__return_true',
         ]);
 
+        register_rest_route(self::REST_NS, '/metric', [
+            'methods' => 'POST',
+            'callback' => [$this, 'rest_metric'],
+            'permission_callback' => '__return_true',
+        ]);
+
         $admin_routes = [
             ['/admin/settings', ['GET', 'POST'], 'rest_admin_settings'],
             ['/admin/widget', ['GET', 'POST'], 'rest_admin_widget'],
@@ -1296,6 +1344,49 @@ final class AICB_Plugin {
 
         $wpdb->update($events, ['feedback' => $value], ['id' => $event_id], ['%d'], ['%d']);
         return rest_ensure_response(['status' => 'ok', 'value' => $value]);
+    }
+
+    /**
+     * Nutzungs-Kennzahlen aus dem Widget: 'open' (Chat geoeffnet) und 'outcome'
+     * (Conversion nach dem Chat, z. B. Klick auf Booking-Link oder abgeschicktes
+     * Anfrageformular). Jede Kennzahl wird an eine echte Session gebunden (leichte
+     * Missbrauchs-Bremse); ein fehlendes Token erzeugt eine Session und wird
+     * zurueckgegeben, damit Folge-Events dieselbe Session nutzen.
+     */
+    public function rest_metric(WP_REST_Request $request): WP_REST_Response {
+        global $wpdb;
+        $params = $request->get_json_params();
+        $type = sanitize_key((string) ($params['type'] ?? ''));
+        if (!in_array($type, ['open', 'outcome'], true)) {
+            return new WP_REST_Response(['error' => 'Ungueltiger Typ.'], 400);
+        }
+
+        // Respektiere die im Widget gewaehlten Analytics-Optionen.
+        $cfg = (array) get_option(self::WIDGET_OPTION_KEY, self::default_widget_config());
+        $analytics = (array) ($cfg['analytics'] ?? []);
+        if ($type === 'open' && ($analytics['track_opens'] ?? true) === false) {
+            return rest_ensure_response(['status' => 'skipped']);
+        }
+        if ($type === 'outcome' && ($analytics['track_outcomes'] ?? true) === false) {
+            return rest_ensure_response(['status' => 'skipped']);
+        }
+
+        $session = $this->ensure_session_payload((string) ($params['session_token'] ?? ''));
+        $label = substr(sanitize_text_field((string) ($params['label'] ?? '')), 0, 191);
+        $url = esc_url_raw((string) ($params['url'] ?? ''));
+        if (strlen($url) > 2000) {
+            $url = substr($url, 0, 2000);
+        }
+
+        $wpdb->insert($wpdb->prefix . 'aicb_metrics', [
+            'type' => $type,
+            'label' => $label !== '' ? $label : null,
+            'url' => $url !== '' ? $url : null,
+            'session_hash' => $session['session_hash'],
+            'created_at' => gmdate('Y-m-d H:i:s'),
+        ], ['%s', '%s', '%s', '%s', '%s']);
+
+        return rest_ensure_response(['status' => 'ok', 'session_token' => $session['token']]);
     }
 
     public function rest_admin_settings(WP_REST_Request $request): WP_REST_Response {
@@ -1636,6 +1727,34 @@ final class AICB_Plugin {
             ];
         }
 
+        // --- Nutzungs-Kennzahlen: Chat-Oeffnungen + Outcomes nach dem Chat ---
+        $metrics = $wpdb->prefix . 'aicb_metrics';
+        $has_metrics = (bool) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $metrics));
+        $today_start_gmt = get_gmt_from_date($today_local . ' 00:00:00');
+        $engagement = [
+            'opens_total' => 0, 'opens_week' => 0, 'opens_month' => 0, 'opens_today' => 0,
+            'outcomes_total' => 0, 'outcomes_week' => 0, 'outcomes_month' => 0,
+            'conversion_rate' => null, 'outcomes_by_label' => [], 'top_outcome_urls' => [],
+        ];
+        if ($has_metrics) {
+            $engagement['opens_total'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$metrics} WHERE type = 'open'");
+            $engagement['opens_week'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$metrics} WHERE type = 'open' AND created_at >= %s", $since_week));
+            $engagement['opens_month'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$metrics} WHERE type = 'open' AND created_at >= %s", $since_month));
+            $engagement['opens_today'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$metrics} WHERE type = 'open' AND created_at >= %s", $today_start_gmt));
+            $engagement['outcomes_total'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$metrics} WHERE type = 'outcome'");
+            $engagement['outcomes_week'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$metrics} WHERE type = 'outcome' AND created_at >= %s", $since_week));
+            $engagement['outcomes_month'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$metrics} WHERE type = 'outcome' AND created_at >= %s", $since_month));
+            $engagement['conversion_rate'] = $engagement['opens_total'] > 0
+                ? (int) round(100 * $engagement['outcomes_total'] / $engagement['opens_total'])
+                : null;
+            foreach ($wpdb->get_results("SELECT COALESCE(label, '') AS label, COUNT(*) AS c FROM {$metrics} WHERE type = 'outcome' GROUP BY label ORDER BY c DESC LIMIT 10", ARRAY_A) ?: [] as $r) {
+                $engagement['outcomes_by_label'][] = ['label' => (string) $r['label'], 'count' => (int) $r['c']];
+            }
+            foreach ($wpdb->get_results("SELECT url, COUNT(*) AS c FROM {$metrics} WHERE type = 'outcome' AND url IS NOT NULL AND url <> '' GROUP BY url ORDER BY c DESC LIMIT 10", ARRAY_A) ?: [] as $r) {
+                $engagement['top_outcome_urls'][] = ['url' => (string) $r['url'], 'count' => (int) $r['c']];
+            }
+        }
+
         return rest_ensure_response([
             'overview' => [
                 'total_chats' => $total_chats,
@@ -1659,6 +1778,7 @@ final class AICB_Plugin {
                 'helpful_month' => $helpful_month,
                 'not_helpful_month' => $not_helpful_month,
             ],
+            'engagement' => $engagement,
             'daily' => $daily,
             'by_weekday' => $by_weekday,
             'by_hour' => $by_hour,
@@ -4177,6 +4297,12 @@ PROMPT;
             'hide_in_hero' => rest_sanitize_boolean($raw['hero']['hide_in_hero'] ?? $defaults['hero']['hide_in_hero']),
             'selector' => sanitize_text_field((string) ($raw['hero']['selector'] ?? $defaults['hero']['selector'])),
         ];
+        $analytics = [
+            'track_opens' => rest_sanitize_boolean($raw['analytics']['track_opens'] ?? $defaults['analytics']['track_opens']),
+            'track_outcomes' => rest_sanitize_boolean($raw['analytics']['track_outcomes'] ?? $defaults['analytics']['track_outcomes']),
+            'conversion_selector' => sanitize_text_field((string) ($raw['analytics']['conversion_selector'] ?? $defaults['analytics']['conversion_selector'])),
+            'form_selector' => sanitize_text_field((string) ($raw['analytics']['form_selector'] ?? $defaults['analytics']['form_selector'])),
+        ];
         $topics = [];
         foreach ((array) ($raw['topics'] ?? $defaults['topics']) as $item) {
             $label = sanitize_text_field((string) ($item['label'] ?? ''));
@@ -4192,7 +4318,7 @@ PROMPT;
                 ];
             }
         }
-        return ['theme' => $theme, 'copy' => $copy, 'greeting' => $greeting, 'page_suggestions' => $page_suggestions, 'hero' => $hero, 'topics' => $topics];
+        return ['theme' => $theme, 'copy' => $copy, 'greeting' => $greeting, 'page_suggestions' => $page_suggestions, 'hero' => $hero, 'analytics' => $analytics, 'topics' => $topics];
     }
 
     private function faqs(): array {

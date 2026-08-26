@@ -166,6 +166,12 @@
         hide_in_hero: Boolean(data.hide_in_hero),
         selector: (data.hero_selector || "").trim(),
       },
+      analytics: {
+        track_opens: Boolean(data.track_opens),
+        track_outcomes: Boolean(data.track_outcomes),
+        conversion_selector: (data.conversion_selector || "").trim(),
+        form_selector: (data.form_selector || "").trim(),
+      },
       topics,
     };
     set({ busy: true, error: "", notice: "" });
@@ -479,6 +485,7 @@
     const g = w.greeting || {};
     const ps = w.page_suggestions || {};
     const hero = w.hero || {};
+    const an = w.analytics || {};
     const topics = w.topics && w.topics.length ? w.topics : [{ label: "", question: "", url: "", highlight: false }];
     const colorFields = [
       ["accent", "Akzent"],
@@ -520,8 +527,14 @@
           <label><input type="checkbox" name="page_suggestions_enabled" ${ps.enabled !== false ? "checked" : ""}> Automatische Seitenfragen aktivieren</label>
           <label><input type="checkbox" name="page_suggestions_route_change" ${ps.show_on_route_change !== false ? "checked" : ""}> Bei Seitenwechsel automatisch anzeigen</label>
           <label><input type="checkbox" name="hide_in_hero" ${hero.hide_in_hero ? "checked" : ""}> Im Hero-Bereich ausblenden (erst danach einblenden)</label>
+          <label><input type="checkbox" name="track_opens" ${an.track_opens !== false ? "checked" : ""}> Chat-Öffnungen zählen</label>
+          <label><input type="checkbox" name="track_outcomes" ${an.track_outcomes !== false ? "checked" : ""}> Outcomes nach dem Chat zählen (Booking-Klick, Anfrageformular …)</label>
         </div>
         ${field("Hero-Bereich CSS-Selektor (optional, leer = erste Bildschirmhöhe)", `<input name="hero_selector" value="${escapeHtml(hero.selector || "")}" placeholder="z. B. .hero, #hero, section.hero">`)}
+        <div class="aicb-grid two">
+          ${field("Conversion-Links CSS-Selektor (optional, leer = Booking-Heuristik)", `<input name="conversion_selector" value="${escapeHtml(an.conversion_selector || "")}" placeholder="z. B. a.booking, .cta-termin">`)}
+          ${field("Conversion-Formulare CSS-Selektor (optional, leer = Kontakt-Heuristik)", `<input name="form_selector" value="${escapeHtml(an.form_selector || "")}" placeholder="z. B. form.wpcf7-form, #kontakt form">`)}
+        </div>
         <div class="aicb-grid two">
           ${field("Greeting Text", `<input name="greeting_text" value="${escapeHtml(g.text || "")}">`)}
           ${field("Greeting Delay", `<input type="number" name="greeting_delay_ms" value="${Number(g.delay_ms || 1200)}">`)}
@@ -586,8 +599,13 @@
     const s = state.stats || {};
     const o = s.overview || {};
     const fb = s.feedback || {};
+    const en = s.engagement || {};
     const pct = (v) => (v === null || v === undefined ? "–" : `${v}%`);
     const num = (v) => Number(v || 0).toLocaleString("de-DE");
+    const outcomeLabel = (l) => ({
+      booking: "Booking-/Termin-Link", cta: "CTA-Link", form: "Anfrageformular",
+      action: "Aktion (im Chat)", card: "Karte (im Chat)", source: "Quelle (im Chat)", link: "Link",
+    }[l] || (l || "Sonstige"));
 
     const tile = (value, label, opts) => `
       <div class="aicb-stat${opts && opts.accent ? " aicb-stat-" + opts.accent : ""}">
@@ -604,6 +622,9 @@
     const topQ = s.top_questions || [];
     const maxTop = topQ.reduce((m, i) => Math.max(m, i.count), 0) || 1;
     const neg = s.negative || [];
+    const outLabels = en.outcomes_by_label || [];
+    const maxOut = outLabels.reduce((m, i) => Math.max(m, i.count), 0) || 1;
+    const outUrls = en.top_outcome_urls || [];
 
     return `
       <section class="aicb-panel aicb-stats">
@@ -621,6 +642,8 @@
           ${tile(pct(fb.satisfaction), "Zufriedenheit", { accent: "green", sub: `👍 ${num(fb.helpful)} · 👎 ${num(fb.not_helpful)}` })}
           ${tile(num(o.sessions), "Sessions", { sub: `${num(o.active_sessions)} aktiv` })}
           ${tile(num(o.avg_messages), "Ø Nachrichten / Session")}
+          ${tile(num(en.opens_total), "Chat geöffnet", { sub: `heute ${num(en.opens_today)} · 7 T. ${num(en.opens_week)}` })}
+          ${tile(num(en.outcomes_total), "Outcomes", { accent: "green", sub: en.conversion_rate === null || en.conversion_rate === undefined ? "nach dem Chat" : `${en.conversion_rate}% je Öffnung` })}
           ${tile(num(o.chunks), "Wissens-Chunks")}
         </div>
 
@@ -667,6 +690,38 @@
                   .join("")
               : "<p>Noch keine negativen Bewertungen. 🎉</p>"
           }</div>
+        </div>
+
+        <div class="aicb-chart-card">
+          <div class="aicb-chart-head"><h3>Outcomes nach dem Chat</h3><span>${num(en.outcomes_total)} gesamt${en.conversion_rate === null || en.conversion_rate === undefined ? "" : " · " + en.conversion_rate + "% je Öffnung"}</span></div>
+          <p class="aicb-hint">Was Besucher nach der Chat-Nutzung getan haben – Klick auf einen Booking-/CTA-Link (im Chat oder auf der Seite) oder ein abgeschicktes Anfrageformular.</p>
+          <div class="aicb-topq">${
+            outLabels.length
+              ? outLabels
+                  .map(
+                    (i) => `
+            <div class="aicb-topq-row">
+              <span class="aicb-topq-label">${escapeHtml(outcomeLabel(i.label))}</span>
+              <span class="aicb-topq-bar"><i style="width:${Math.max(6, Math.round((100 * i.count) / maxOut))}%"></i></span>
+              <strong>${i.count}</strong>
+            </div>`
+                  )
+                  .join("")
+              : "<p>Noch keine Outcomes erfasst.</p>"
+          }</div>
+          ${
+            outUrls.length
+              ? `<div class="aicb-neg" style="margin-top:12px">${outUrls
+                  .map(
+                    (u) => `
+            <div class="aicb-neg-item">
+              <div class="aicb-neg-q"><a href="${escapeHtml(u.url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(u.url)}</a></div>
+              <div class="aicb-neg-meta">${u.count}× ausgelöst</div>
+            </div>`
+                  )
+                  .join("")}</div>`
+              : ""
+          }
         </div>
       </section>`;
   }
@@ -858,6 +913,12 @@
     cfg.hero = {
       hide_in_hero: Boolean(data.hide_in_hero),
       selector: (data.hero_selector || "").trim(),
+    };
+    cfg.analytics = {
+      track_opens: Boolean(data.track_opens),
+      track_outcomes: Boolean(data.track_outcomes),
+      conversion_selector: (data.conversion_selector || "").trim(),
+      form_selector: (data.form_selector || "").trim(),
     };
     cfg.topics = [];
     form.querySelectorAll("[data-topic-row]").forEach((row) => {

@@ -78,6 +78,77 @@
     } catch (err) { /* Privater Modus: dann eben ohne Persistenz */ }
   }
 
+  /* --- Nutzungs-Kennzahlen (Chat-Oeffnungen + Outcomes nach dem Chat) ------- */
+  var ENGAGED_KEY = "aicb_engaged";
+  function analyticsCfg() { return (cfg && cfg.analytics) || {}; }
+  function markEngaged() { writeStore("sessionStorage", ENGAGED_KEY, "1"); }
+  function isEngaged() { return readStore("sessionStorage", ENGAGED_KEY, "") === "1"; }
+
+  // Eine Kennzahl senden; ein evtl. neu erzeugtes Session-Token wird gemerkt.
+  // Tracking ist bewusst "fire and forget" - Fehler duerfen den Chat nie stoeren.
+  function trackMetric(type, label, url) {
+    try {
+      api("metric", {
+        type: type,
+        label: label || "",
+        url: url || "",
+        session_token: readStore("localStorage", SESSION_KEY, ""),
+      })
+        .then(function (data) { if (data && data.session_token) writeStore("localStorage", SESSION_KEY, data.session_token); })
+        .catch(function () {});
+    } catch (err) { /* ignore */ }
+  }
+
+  function safeMatches(el, selector) {
+    if (!el || !selector || !el.matches) return false;
+    try { return el.matches(selector); } catch (err) { return false; }
+  }
+
+  // Booking-/Termin-Links heuristisch erkennen (falls kein Selektor gesetzt ist).
+  function looksLikeBooking(href) {
+    return /(calendly|cal\.com|calendar|book(ing)?|termin|appointment|reserv|buchen|meeting|consult)/i.test(href || "");
+  }
+  // Typische Kontakt-/Anfrage-Formulare erkennen (falls kein Selektor gesetzt ist).
+  function looksLikeConversionForm(form) {
+    var sig = ((form.className || "") + " " + (form.id || "") + " " + (form.getAttribute("action") || "")).toLowerCase();
+    return /(wpcf7|gform|wpforms|ninja-forms|contact|kontakt|anfrage|enquir|inquir|booking|termin|angebot|quote)/.test(sig);
+  }
+
+  // Host-Seiten-Conversions NACH dem Chat: Klick auf Booking-/CTA-Link oder
+  // abgeschicktes Anfrageformular. Nur wenn der Chat in dieser Session genutzt
+  // wurde und Outcome-Tracking aktiv ist. In-Widget-Klicks bleiben ausgeklammert
+  // (die trackt jede Shell direkt). Wird nur einmal pro Seite gebunden.
+  function setupHostConversions() {
+    if (window.__aicbHostConvBound) return;
+    window.__aicbHostConvBound = true;
+    var a = analyticsCfg();
+    if (a.track_outcomes === false) return;
+    var linkSel = (a.conversion_selector || "").trim();
+    var formSel = (a.form_selector || "").trim();
+
+    document.addEventListener("click", function (event) {
+      if (!isEngaged()) return;
+      var link = event.target && event.target.closest ? event.target.closest("a[href]") : null;
+      if (!link || (link.closest && link.closest(".aicb-widget-shell"))) return;
+      var href = link.href || "";
+      if (!/^https?:/i.test(href)) return;
+      var bySel = linkSel && safeMatches(link, linkSel);
+      if (bySel || looksLikeBooking(href)) {
+        trackMetric("outcome", bySel ? "cta" : "booking", href);
+      }
+    }, true);
+
+    document.addEventListener("submit", function (event) {
+      if (!isEngaged()) return;
+      var form = event.target;
+      if (!form || form.tagName !== "FORM" || (form.closest && form.closest(".aicb-widget-shell"))) return;
+      var bySel = formSel && safeMatches(form, formSel);
+      if (bySel || (!formSel && looksLikeConversionForm(form))) {
+        trackMetric("outcome", "form", form.getAttribute("action") || window.location.href);
+      }
+    }, true);
+  }
+
   // Verlauf/Kontext in localStorage -> bleibt bei Reload und Tab-Wechsel,
   // wird nur beim Schliessen (X) geleert.
   function getHistory() {
@@ -1076,6 +1147,7 @@
       var question = (value || "").toString().trim();
       if (!question || busy) return;
 
+      markEngaged(); // Nachricht gesendet -> Chat gilt als genutzt (auch inline).
       hideIntro();
       inputEl.value = "";
       syncComposer();
@@ -1130,6 +1202,9 @@
       hideTeaser(true);
       if (persistOn) writeStore("localStorage", OPEN_KEY, "1");
       if (!silent) {
+        // Nutzer hat den Chat aktiv geoeffnet -> Kennzahl + Engagement-Flag.
+        markEngaged();
+        if (analyticsCfg().track_opens !== false) trackMetric("open");
         setTimeout(function () { inputEl.focus(); }, 50);
       }
     }
@@ -1231,6 +1306,21 @@
       update();
     }
     setupHeroVisibility();
+
+    // In-Widget-Outcomes: Klick auf einen Link in einer Aktion, Karte oder Quelle
+    // (z. B. der vom Bot vorgeschlagene Booking-/Kontakt-Link).
+    shell.addEventListener("click", function (event) {
+      if (analyticsCfg().track_outcomes === false) return;
+      var link = event.target && event.target.closest ? event.target.closest("a[href]") : null;
+      if (!link || !shell.contains(link)) return;
+      if (link.classList.contains("aicb-privacy")) return; // Datenschutz-Link zaehlt nicht
+      var href = link.href || "";
+      if (!/^https?:/i.test(href)) return;
+      var label = link.closest(".aicb-card") ? "card"
+        : (link.closest(".aicb-action") ? "action"
+        : ((link.classList.contains("aicb-source-ref") || (link.closest && link.closest(".aicb-sources"))) ? "source" : "link"));
+      trackMetric("outcome", label, href);
+    });
 
     if (launcher) launcher.addEventListener("click", function () { open(); });
     if (minimizeBtn) minimizeBtn.addEventListener("click", function () { close(false); });
@@ -1537,4 +1627,7 @@
   };
 
   Array.prototype.forEach.call(document.querySelectorAll("[data-aicb-widget]"), initShell);
+
+  // Host-Seiten-Conversions nach dem Chat einmal pro Seite aktivieren (nicht im Admin).
+  if (typeof window.AICBAdmin === "undefined") setupHostConversions();
 })();
