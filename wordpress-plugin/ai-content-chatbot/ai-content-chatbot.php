@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.8.5
+ * Version: 0.8.8
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -31,7 +31,7 @@ final class AICB_Plugin {
     private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.8.5';
+    private const ASSET_VERSION = '0.8.8';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -193,6 +193,7 @@ final class AICB_Plugin {
             'aria_send' => 'Nachricht senden',
             'aria_open' => 'Chat öffnen',
             'aria_teaser_close' => 'Hinweis schließen',
+            'aria_hide_notice' => 'Hinweis ausblenden',
             'no_index' => 'Ich bin noch nicht auf die Inhalte dieser Website trainiert. Zu allgemeinen Fragen helfe ich dir aber gerne weiter.',
         ],
         'en' => [
@@ -216,6 +217,7 @@ final class AICB_Plugin {
             'aria_send' => 'Send message',
             'aria_open' => 'Open chat',
             'aria_teaser_close' => 'Dismiss notice',
+            'aria_hide_notice' => 'Hide notice',
             'no_index' => 'I have not been trained on this website yet. I am still happy to help with general questions.',
         ],
         'fr' => [
@@ -239,6 +241,7 @@ final class AICB_Plugin {
             'aria_send' => 'Envoyer le message',
             'aria_open' => 'Ouvrir le chat',
             'aria_teaser_close' => 'Fermer la notification',
+            'aria_hide_notice' => 'Masquer la note',
             'no_index' => "Je ne suis pas encore entraine sur le contenu de ce site. Je peux tout de meme repondre a des questions generales.",
         ],
         'es' => [
@@ -262,6 +265,7 @@ final class AICB_Plugin {
             'aria_send' => 'Enviar mensaje',
             'aria_open' => 'Abrir el chat',
             'aria_teaser_close' => 'Cerrar el aviso',
+            'aria_hide_notice' => 'Ocultar el aviso',
             'no_index' => 'Todavia no estoy entrenado con el contenido de esta web. Aun asi puedo ayudarte con preguntas generales.',
         ],
         'it' => [
@@ -285,6 +289,7 @@ final class AICB_Plugin {
             'aria_send' => 'Invia messaggio',
             'aria_open' => 'Apri la chat',
             'aria_teaser_close' => 'Chiudi la notifica',
+            'aria_hide_notice' => 'Nascondi la nota',
             'no_index' => 'Non sono ancora addestrato sui contenuti di questo sito. Posso comunque aiutarti con domande generali.',
         ],
         'nl' => [
@@ -308,6 +313,7 @@ final class AICB_Plugin {
             'aria_send' => 'Bericht verzenden',
             'aria_open' => 'Chat openen',
             'aria_teaser_close' => 'Melding sluiten',
+            'aria_hide_notice' => 'Melding verbergen',
             'no_index' => 'Ik ben nog niet getraind op de inhoud van deze site. Met algemene vragen help ik je graag.',
         ],
         'pt' => [
@@ -331,6 +337,7 @@ final class AICB_Plugin {
             'aria_send' => 'Enviar mensagem',
             'aria_open' => 'Abrir o chat',
             'aria_teaser_close' => 'Fechar o aviso',
+            'aria_hide_notice' => 'Ocultar o aviso',
             'no_index' => 'Ainda nao fui treinado com o conteudo deste site. Mesmo assim posso ajudar com perguntas gerais.',
         ],
         'tr' => [
@@ -354,6 +361,7 @@ final class AICB_Plugin {
             'aria_send' => 'Mesaj gonder',
             'aria_open' => 'Sohbeti ac',
             'aria_teaser_close' => 'Bildirimi kapat',
+            'aria_hide_notice' => 'Notu gizle',
             'no_index' => 'Bu sitenin icerigi icin henuz egitilmedim. Genel sorularda yine de yardimci olabilirim.',
         ],
         'pl' => [
@@ -583,6 +591,25 @@ final class AICB_Plugin {
         return $map[$lang] ?? $map['en'];
     }
 
+    /** Beschriftungen fuer den Dialog beim Beenden der Unterhaltung. */
+    private function close_confirm_labels(string $lang): array {
+        $map = [
+            'de' => [
+                'title' => 'Unterhaltung beenden?',
+                'message' => 'Moechtest du diese Unterhaltung wirklich beenden und neu starten?',
+                'confirm' => 'Unterhaltung beenden',
+                'cancel' => 'Abbrechen',
+            ],
+            'en' => [
+                'title' => 'End conversation?',
+                'message' => 'Do you want to end this conversation and start over?',
+                'confirm' => 'End conversation',
+                'cancel' => 'Cancel',
+            ],
+        ];
+        return $map[$lang] ?? $map['en'];
+    }
+
     public static function default_widget_config(): array {
         return [
             'theme' => [
@@ -617,6 +644,10 @@ final class AICB_Plugin {
                 'enabled' => true,
                 'text' => '',
                 'delay_ms' => 1200,
+            ],
+            'page_suggestions' => [
+                'enabled' => true,
+                'show_on_route_change' => true,
             ],
             'topics' => [],
         ];
@@ -857,6 +888,7 @@ final class AICB_Plugin {
         $privacy_url = (string) ($config['contact']['privacy_url'] ?? '');
         $inline = $mode === 'inline';
         $dir = !empty($config['rtl']) ? 'rtl' : 'ltr';
+        $close_confirm = $config['strings']['close_confirm'] ?? $this->close_confirm_labels((string) ($config['lang'] ?? 'en'));
         ?>
         <div class="<?php echo esc_attr($classes); ?>" style="<?php echo esc_attr($style); ?>" dir="<?php echo esc_attr($dir); ?>" lang="<?php echo esc_attr((string) ($config['lang'] ?? 'en')); ?>" data-aicb-widget>
             <?php if (!$inline) : ?>
@@ -914,8 +946,24 @@ final class AICB_Plugin {
                         <?php if ($privacy_url !== '') : ?>
                         <a class="aicb-privacy" href="<?php echo esc_url($privacy_url); ?>" target="_blank" rel="noreferrer noopener"><?php echo esc_html($copy['privacy_label']); ?></a>
                         <?php endif; ?>
+                        <?php if (!$inline) : ?>
+                        <button class="aicb-footer-dismiss" type="button" data-aicb-footer-dismiss aria-label="<?php echo esc_attr($pack['aria_hide_notice']); ?>">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6l-12 12"></path></svg>
+                        </button>
+                        <?php endif; ?>
                     </div>
                 </div>
+                <?php if (!$inline) : ?>
+                <div class="aicb-close-confirm" data-aicb-close-confirm hidden>
+                    <div class="aicb-close-confirm-backdrop" data-aicb-close-cancel></div>
+                    <div class="aicb-close-confirm-sheet" role="dialog" aria-modal="true" aria-label="<?php echo esc_attr((string) ($close_confirm['title'] ?? 'End conversation?')); ?>">
+                        <h2><?php echo esc_html((string) ($close_confirm['title'] ?? 'End conversation?')); ?></h2>
+                        <p><?php echo esc_html((string) ($close_confirm['message'] ?? 'Do you want to end this conversation and start over?')); ?></p>
+                        <button class="aicb-close-confirm-end" type="button" data-aicb-close-confirm-end><?php echo esc_html((string) ($close_confirm['confirm'] ?? 'End conversation')); ?></button>
+                        <button class="aicb-close-confirm-cancel" type="button" data-aicb-close-cancel><?php echo esc_html((string) ($close_confirm['cancel'] ?? 'Cancel')); ?></button>
+                    </div>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
         <?php
@@ -1253,7 +1301,7 @@ final class AICB_Plugin {
 
     public function rest_admin_widget(WP_REST_Request $request): WP_REST_Response {
         if ($request->get_method() === 'GET') {
-            return rest_ensure_response(get_option(self::WIDGET_OPTION_KEY, self::default_widget_config()));
+            return rest_ensure_response($this->sanitize_widget_config((array) get_option(self::WIDGET_OPTION_KEY, self::default_widget_config())));
         }
         $payload = $request->get_json_params();
         $config = $this->sanitize_widget_config(is_array($payload) ? $payload : []);
@@ -2672,17 +2720,10 @@ final class AICB_Plugin {
         $card_row = $actions['card'];
         $card = ($is_content && $card_row) ? $this->build_card($card_row) : null;
 
-        // Quellenblock in der Sprache der Antwort - der Nutzer darf in jeder
-        // Sprache schreiben, der Block muss zur Antwort passen.
+        // Quellen strukturiert ausliefern; das Widget rendert sie als kompakte
+        // Titel-Chips statt als lange URL-Liste im Antworttext.
         $sources = ($relevant && $is_content) ? $this->sources_from_matches($relevant) : [];
-        $answer_has_url = (bool) preg_match('#https?://#i', $answer);
-        if ($sources && !$answer_has_url && !$this->has_sources_block($answer)) {
-            $answer_pack = $this->lang_pack($target_lang);
-            $answer .= "\n\n" . $answer_pack['sources'] . ":\n"
-                . implode("\n", array_map(fn($s) => $s['url'], $sources));
-        }
-
-        $rich = ['version' => 1, 'actions' => $actions['actions']];
+        $rich = ['version' => 1, 'actions' => $actions['actions'], 'sources' => $sources];
         if ($card) {
             $rich['cards'] = [$card];
         }
@@ -3345,6 +3386,9 @@ PROMPT;
                 continue;
             }
             $question = $this->limit_text($question, 110);
+            if ($this->is_blocked_page_suggestion($question, $url, $title, $context)) {
+                continue;
+            }
             $key = $this->str_lower(trim($question, " ?!.\t\n\r\0\x0B"));
             if ($key === '' || isset($seen[$key])) {
                 continue;
@@ -3356,6 +3400,25 @@ PROMPT;
             }
         }
         return count($questions) >= 2 ? $questions : [];
+    }
+
+    private function is_blocked_page_suggestion(string $question, string $url, string $title, string $context): bool {
+        $text = $this->str_lower($question);
+        if ($text === '') {
+            return true;
+        }
+
+        $page_signal = $this->str_lower($url . ' ' . $title);
+        $contact_page = preg_match('/(kontakt|contact|anfrage|request|consultation|termin|appointment|booking|buchen|demo)/u', $page_signal) === 1;
+        $contact_intent = preg_match('/(kontakt|contact|erreichen|reach|sprechen|speak|reden|talk|telefon|phone|email|e-mail|mail|termin|appointment|meeting|consultation|anfrage|request|buchen|book)/u', $text) === 1;
+        if ($contact_intent && !$contact_page) {
+            return true;
+        }
+
+        $person_contact = preg_match('/(gruender\w*|gründer\w*|founder\w*|kund\w*|client\w*|customer\w*)/u', $text) === 1
+            && preg_match('/(sprechen|speak|reden|talk|kontakt|contact|erreichen|reach|treffen|meet|meeting)/u', $text) === 1;
+
+        return $person_contact && !$contact_page;
     }
 
     private function page_suggestion_context(string $url, string $title, string $page_text): string {
@@ -4040,6 +4103,7 @@ PROMPT;
             'sources' => $pack['sources'],
             'sources_labels' => $this->sources_labels(),
             'feedback' => $this->feedback_labels($lang),
+            'close_confirm' => $this->close_confirm_labels($lang),
         ];
         $config['contact'] = [
             'url' => esc_url_raw((string) ($settings['contact_url'] ?? '')),
@@ -4066,6 +4130,10 @@ PROMPT;
             'text' => sanitize_text_field((string) ($raw['greeting']['text'] ?? $defaults['greeting']['text'])),
             'delay_ms' => max(0, absint($raw['greeting']['delay_ms'] ?? $defaults['greeting']['delay_ms'])),
         ];
+        $page_suggestions = [
+            'enabled' => rest_sanitize_boolean($raw['page_suggestions']['enabled'] ?? $defaults['page_suggestions']['enabled']),
+            'show_on_route_change' => rest_sanitize_boolean($raw['page_suggestions']['show_on_route_change'] ?? $defaults['page_suggestions']['show_on_route_change']),
+        ];
         $topics = [];
         foreach ((array) ($raw['topics'] ?? $defaults['topics']) as $item) {
             $label = sanitize_text_field((string) ($item['label'] ?? ''));
@@ -4081,7 +4149,7 @@ PROMPT;
                 ];
             }
         }
-        return ['theme' => $theme, 'copy' => $copy, 'greeting' => $greeting, 'topics' => $topics];
+        return ['theme' => $theme, 'copy' => $copy, 'greeting' => $greeting, 'page_suggestions' => $page_suggestions, 'topics' => $topics];
     }
 
     private function faqs(): array {

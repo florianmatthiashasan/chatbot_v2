@@ -13,6 +13,7 @@
   var OPEN_KEY = "aicb_open";             // war das Panel offen?
   var TEASER_KEY = "aicb_teaser_seen";
   var SUGGESTIONS_KEY = "aicb_page_suggestions_seen";
+  var LEGAL_KEY = "aicb_legal_hidden";      // Fusszeile pro Session ausgeblendet?
   var HISTORY_LIMIT = 16;
   var OFFERED_LIMIT = 10;
   var SCROLL_TOP_OFFSET = 8;
@@ -270,6 +271,14 @@
     return [page.url, questions].join("|");
   }
 
+  function pageSuggestionsEnabled() {
+    return !cfg.page_suggestions || cfg.page_suggestions.enabled !== false;
+  }
+
+  function routeChangeSuggestionsEnabled() {
+    return pageSuggestionsEnabled() && (!cfg.page_suggestions || cfg.page_suggestions.show_on_route_change !== false);
+  }
+
   // Kurze Ueberschrift ueber den Fragen im Teaser (falls kein Greeting-Text gesetzt).
   function suggestLeadLabel() {
     var map = {
@@ -359,29 +368,22 @@
     var wrap = document.createElement("div");
     wrap.className = "aicb-feedback";
 
-    var question = document.createElement("span");
-    question.className = "aicb-feedback-q";
-    question.textContent = fbLabel("question");
-    wrap.appendChild(question);
-
     var voted = false;
     function makeButton(up) {
       var btn = document.createElement("button");
       btn.type = "button";
       btn.className = "aicb-feedback-btn aicb-feedback-" + (up ? "up" : "down");
       btn.setAttribute("aria-label", up ? fbLabel("yes") : fbLabel("no"));
+      btn.setAttribute("aria-pressed", "false");
       btn.appendChild(thumbIcon(up));
       btn.addEventListener("click", function () {
         if (voted) return;
         voted = true;
         wrap.classList.add("aicb-voted");
         btn.classList.add("aicb-chosen");
+        btn.setAttribute("aria-pressed", "true");
         var token = readStore("localStorage", SESSION_KEY, "");
         api("feedback", { event_id: eventId, value: up ? 1 : -1, session_token: token }).catch(function () {});
-        var thanks = document.createElement("span");
-        thanks.className = "aicb-feedback-thanks";
-        thanks.textContent = fbLabel("thanks");
-        wrap.appendChild(thanks);
       });
       return btn;
     }
@@ -409,16 +411,121 @@
 
   var SOURCES_HEADING = sourcesHeadingRegex();
 
-  function externalLink(label, href) {
+  function externalLink(label, href, className) {
     var anchor = document.createElement("a");
     anchor.href = href;
     anchor.textContent = label;
     anchor.target = "_blank";
     anchor.rel = "noreferrer noopener";
+    if (className) anchor.className = className;
     return anchor;
   }
 
-  function linkifyFragment(input) {
+  function sourceUrlKey(value) {
+    var url = (value || "").toString().trim();
+    if (!url) return "";
+    if (/^www\./i.test(url)) url = "https://" + url;
+    try {
+      var parsed = new URL(url, window.location.href);
+      parsed.hash = "";
+      return parsed.href.replace(/\/$/, "").toLowerCase();
+    } catch (err) {
+      return url.replace(/\/$/, "").toLowerCase();
+    }
+  }
+
+  function sourceLabel(source) {
+    var title = (source && (source.title || source.section) ? source.title || source.section : "").toString().trim();
+    if (title) return title;
+    try {
+      var parsed = new URL(source.url, window.location.href);
+      return parsed.hostname.replace(/^www\./, "") || source.url;
+    } catch (err) {
+      return (source && source.url ? source.url : "").toString();
+    }
+  }
+
+  function normalizeSources(sources) {
+    var seen = {};
+    return (Array.isArray(sources) ? sources : [])
+      .map(function (source) {
+        var url = safeUrl(source && source.url);
+        if (!url) return null;
+        var key = sourceUrlKey(url);
+        if (!key || seen[key]) return null;
+        seen[key] = true;
+        return {
+          title: sourceLabel(source),
+          section: (source && source.section ? source.section : "").toString().trim(),
+          url: url,
+          key: key,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function sourcesByUrl(sources) {
+    var map = {};
+    normalizeSources(sources).forEach(function (source) {
+      map[source.key] = source;
+    });
+    return map;
+  }
+
+  function sourceIcon() {
+    return svgNode([
+      "M10 13a5 5 0 0 0 7.07 0l2.12-2.12a5 5 0 0 0-7.07-7.07l-1.2 1.2",
+      "M14 11a5 5 0 0 0-7.07 0L4.81 13.12a5 5 0 0 0 7.07 7.07l1.2-1.2",
+    ], "aicb-source-icon");
+  }
+
+  function sourceLink(source, compact) {
+    var anchor = externalLink(sourceLabel(source), source.url, compact ? "aicb-source-ref aicb-source-inline" : "aicb-source-ref");
+    anchor.textContent = "";
+    anchor.appendChild(sourceIcon());
+    var label = document.createElement("span");
+    label.textContent = sourceLabel(source);
+    anchor.appendChild(label);
+    return anchor;
+  }
+
+  function sourcesFromText(value) {
+    var lines = (value || "").toString().split("\n");
+    var items = [];
+    lines.forEach(function (line) {
+      var match = line.match(/\b(?:https?:\/\/|www\.)[^\s<>()]+/i);
+      if (!match) return;
+      var rawUrl = match[0];
+      var url = rawUrl.indexOf("http") === 0 ? rawUrl : "https://" + rawUrl;
+      var label = line.replace(rawUrl, "").replace(/^[-*\s:]+|[-*\s:]+$/g, "").trim();
+      items.push({ title: label, url: url });
+    });
+    return normalizeSources(items);
+  }
+
+  function sourceListNode(sources) {
+    var normalized = normalizeSources(sources).slice(0, 4);
+    if (!normalized.length) return null;
+    var wrap = document.createElement("div");
+    wrap.className = "aicb-sources";
+    normalized.forEach(function (source) {
+      wrap.appendChild(sourceLink(source, false));
+    });
+    return wrap;
+  }
+
+  function hasSourceReference(value, sourceMap) {
+    if (!sourceMap) return false;
+    var pattern = urlRegex();
+    var match;
+    while ((match = pattern.exec((value || "").toString())) !== null) {
+      var href = match[0].indexOf("http") === 0 ? match[0] : "https://" + match[0];
+      if (sourceMap[sourceUrlKey(href)]) return true;
+    }
+    return false;
+  }
+
+  function linkifyFragment(input, sourceMap) {
     var value = (input || "").toString();
     var fragment = document.createDocumentFragment();
     var pattern = urlRegex();
@@ -429,7 +536,9 @@
         fragment.appendChild(document.createTextNode(value.slice(lastIndex, match.index)));
       }
       var url = match[0];
-      fragment.appendChild(externalLink(url, url.indexOf("http") === 0 ? url : "https://" + url));
+      var href = url.indexOf("http") === 0 ? url : "https://" + url;
+      var mappedSource = sourceMap && sourceMap[sourceUrlKey(href)];
+      fragment.appendChild(mappedSource ? sourceLink(mappedSource, true) : externalLink(url, href));
       lastIndex = pattern.lastIndex;
     }
     if (lastIndex < value.length) {
@@ -439,11 +548,11 @@
   }
 
   // Rendert **fett**, __fett__, *kursiv*, `code` und Markdown-Links als Elemente.
-  function appendInlineMarkdown(target, input, depth) {
+  function appendInlineMarkdown(target, input, depth, sourceMap) {
     var level = depth || 0;
     var value = (input || "").toString();
     if (level > 3) {
-      target.appendChild(linkifyFragment(value));
+      target.appendChild(linkifyFragment(value, sourceMap));
       return;
     }
     var pattern = inlineMarkdownRegex();
@@ -451,13 +560,14 @@
     var match;
     while ((match = pattern.exec(value)) !== null) {
       if (match.index > lastIndex) {
-        target.appendChild(linkifyFragment(value.slice(lastIndex, match.index)));
+        target.appendChild(linkifyFragment(value.slice(lastIndex, match.index), sourceMap));
       }
       if (match[2]) {
-        target.appendChild(externalLink(match[1], match[2]));
+        var markdownSource = sourceMap && sourceMap[sourceUrlKey(match[2])];
+        target.appendChild(markdownSource ? sourceLink(markdownSource, true) : externalLink(match[1], match[2]));
       } else if (match[3] || match[4]) {
         var strong = document.createElement("strong");
-        appendInlineMarkdown(strong, match[3] || match[4], level + 1);
+        appendInlineMarkdown(strong, match[3] || match[4], level + 1, sourceMap);
         target.appendChild(strong);
       } else if (match[5]) {
         var code = document.createElement("code");
@@ -465,28 +575,28 @@
         target.appendChild(code);
       } else if (match[6]) {
         var em = document.createElement("em");
-        appendInlineMarkdown(em, match[6], level + 1);
+        appendInlineMarkdown(em, match[6], level + 1, sourceMap);
         target.appendChild(em);
       }
       lastIndex = pattern.lastIndex;
     }
     if (lastIndex < value.length) {
-      target.appendChild(linkifyFragment(value.slice(lastIndex)));
+      target.appendChild(linkifyFragment(value.slice(lastIndex), sourceMap));
     }
   }
 
-  function appendRichText(target, input) {
+  function appendRichText(target, input, sourceMap) {
     var lines = (input || "").toString().split("\n");
     lines.forEach(function (line, idx) {
       if (idx > 0) target.appendChild(document.createTextNode("\n"));
       var heading = line.match(/^\s{0,3}(#{1,6})\s+(.*)$/);
       if (heading) {
         var strong = document.createElement("strong");
-        appendInlineMarkdown(strong, heading[2], 0);
+        appendInlineMarkdown(strong, heading[2], 0, sourceMap);
         target.appendChild(strong);
         return;
       }
-      appendInlineMarkdown(target, line, 0);
+      appendInlineMarkdown(target, line, 0, sourceMap);
     });
   }
 
@@ -508,29 +618,27 @@
     return { body: value, label: "", sources: "" };
   }
 
-  function setBubbleContent(bubble, value, plain) {
+  function setBubbleContent(bubble, value, plain, sources) {
     bubble.innerHTML = "";
+    var normalizedSources = normalizeSources(sources);
+    var sourceMap = sourcesByUrl(normalizedSources);
     if (plain) {
-      bubble.appendChild(linkifyFragment(value));
+      bubble.appendChild(linkifyFragment(value, sourceMap));
       return;
     }
     var parts = splitSources(value);
     if (parts.body.trim()) {
       var body = document.createElement("div");
-      appendRichText(body, parts.body);
+      appendRichText(body, parts.body, sourceMap);
       bubble.appendChild(body);
     }
-    if (parts.sources) {
-      var wrap = document.createElement("div");
-      wrap.className = "aicb-sources";
-      var label = document.createElement("div");
-      label.className = "aicb-sources-label";
-      label.textContent = (parts.label || str("sources")) + ":";
-      wrap.appendChild(label);
-      var list = document.createElement("div");
-      appendRichText(list, parts.sources);
-      wrap.appendChild(list);
-      bubble.appendChild(wrap);
+    var sourceNode = sourceListNode(
+      hasSourceReference(parts.body, sourceMap)
+        ? []
+        : (normalizedSources.length ? normalizedSources : sourcesFromText(parts.sources))
+    );
+    if (sourceNode) {
+      bubble.appendChild(sourceNode);
     }
   }
 
@@ -558,9 +666,34 @@
     var teaserEl = shell.querySelector("[data-aicb-teaser]");
     var teaserTextEl = shell.querySelector("[data-aicb-teaser-text]");
     var teaserCloseEl = shell.querySelector("[data-aicb-teaser-close]");
+    var closeConfirmEl = shell.querySelector("[data-aicb-close-confirm]");
+    var closeConfirmEndBtn = shell.querySelector("[data-aicb-close-confirm-end]");
+    var closeConfirmCancelEls = shell.querySelectorAll("[data-aicb-close-cancel]");
+    var footerEl = shell.querySelector(".aicb-footer");
+    var footerDismissEl = shell.querySelector("[data-aicb-footer-dismiss]");
     var inline = shell.classList.contains("aicb-mode-inline");
 
     if (!panel || !messagesEl || !listEl || !formEl || !inputEl) return;
+
+    // Barrierefreiheit: das schwebende Panel ist ein (nicht-modaler) Dialog;
+    // die Nachrichtenliste kuendigt neue Antworten an (aria-live via Markup).
+    if (!inline) {
+      panel.setAttribute("role", "dialog");
+      var panelLabel = (copy.title || "").toString().trim();
+      if (panelLabel) panel.setAttribute("aria-label", panelLabel);
+    }
+
+    // Fusszeile (Disclaimer + Datenschutz) pro Browser-Session ausblendbar -
+    // so bleibt der Hinweis nicht dauerhaft weg, taucht naechste Session wieder auf.
+    if (footerEl && footerDismissEl) {
+      if (readStore("sessionStorage", LEGAL_KEY, "") === "1") {
+        footerEl.classList.add("aicb-hidden");
+      }
+      footerDismissEl.addEventListener("click", function () {
+        footerEl.classList.add("aicb-hidden");
+        writeStore("sessionStorage", LEGAL_KEY, "1");
+      });
+    }
 
     var icon = (copy.icon || "").trim();
     // Bereits gezeigte Buttons: gehen mit, damit der Bot nicht dieselbe
@@ -654,13 +787,13 @@
       return row;
     }
 
-    function createBubble(value, sender) {
+    function createBubble(value, sender, sources) {
       var bubble = document.createElement("div");
       bubble.className = "aicb-bubble";
       // dir=auto: eine arabische Antwort läuft rechtsbündig, auch wenn die
       // Seite links-nach-rechts ist.
       bubble.setAttribute("dir", "auto");
-      setBubbleContent(bubble, value, sender === "user");
+      setBubbleContent(bubble, value, sender === "user", sources);
       return bubble;
     }
 
@@ -750,24 +883,32 @@
       });
       var actions = (rich.actions || []).slice(0, 3);
       if (actions.length) {
-        var row = document.createElement("div");
-        row.className = "aicb-actions-row";
+        var linkRow = document.createElement("div");
+        linkRow.className = "aicb-actions-row aicb-link-actions";
+        var questionRow = document.createElement("div");
+        questionRow.className = "aicb-actions-row aicb-question-actions";
         actions.forEach(function (action, idx) {
           if (!action || (!action.label && !action.question)) return;
           var label = (action.label || "").toString().trim();
           if (label && offeredActions.indexOf(label) === -1) offeredActions.push(label);
-          row.appendChild(createAction(action, idx === 0));
+          if (safeUrl(action.url) && action.type !== "question") {
+            linkRow.appendChild(createAction(action, linkRow.children.length === 0));
+          } else {
+            questionRow.appendChild(createAction(action, false));
+          }
         });
         while (offeredActions.length > OFFERED_LIMIT) offeredActions.shift();
-        nodes.push(row);
+        if (linkRow.children.length) nodes.push(linkRow);
+        if (questionRow.children.length) nodes.push(questionRow);
       }
       return nodes;
     }
 
     function addMessage(value, sender, rich, eventId) {
-      var extra = richNodes(rich);
+      var extra = [];
       if (sender === "bot" && eventId) extra.push(feedbackRow(eventId));
-      var row = appendRow(createRow(sender, [createBubble(value, sender)].concat(extra)));
+      extra = extra.concat(richNodes(rich));
+      var row = appendRow(createRow(sender, [createBubble(value, sender, rich && rich.sources)].concat(extra)));
       if (sender === "user") {
         anchorRow = row;
         keepAnchorInView(true);
@@ -815,10 +956,10 @@
         return;
       }
       entry.bubble.classList.remove("aicb-typing");
-      setBubbleContent(entry.bubble, value, false);
+      setBubbleContent(entry.bubble, value, false, rich && rich.sources);
       var stack = entry.row.querySelector(".aicb-stack");
-      richNodes(rich).forEach(function (node) { stack.appendChild(node); });
       if (eventId) stack.appendChild(feedbackRow(eventId));
+      richNodes(rich).forEach(function (node) { stack.appendChild(node); });
       if (anchorRow) keepAnchorInView(false);
       else scrollToBottom();
     }
@@ -838,9 +979,10 @@
       transcript.forEach(function (m) {
         if (!m || typeof m.text !== "string" || m.text === "") return;
         var sender = m.sender === "user" ? "user" : "bot";
-        var extra = sender === "bot" ? richNodes(m.rich || null) : [];
+        var extra = [];
         if (sender === "bot" && m.eventId) extra.push(feedbackRow(m.eventId));
-        appendRow(createRow(sender, [createBubble(m.text, sender)].concat(extra)));
+        if (sender === "bot") extra = extra.concat(richNodes(m.rich || null));
+        appendRow(createRow(sender, [createBubble(m.text, sender, m.rich && m.rich.sources)].concat(extra)));
       });
       anchorRow = null;
       scrollToBottom();
@@ -852,16 +994,23 @@
       return svgNode(["M9 6l6 6-6 6"], "aicb-chevron");
     }
 
+    function configuredTopics() {
+      return (Array.isArray(cfg.topics) ? cfg.topics : []).filter(function (topic) {
+        return topic && ((topic.label || "").toString().trim() || (topic.question || "").toString().trim() || safeUrl(topic.url));
+      });
+    }
+
     function renderTopics() {
       if (!topicsEl || !topicsListEl) return;
-      // KI-Fragen zur aktuellen Seite zuerst, danach die im Admin gepflegten Themen.
-      var aiRows = (pageQuestions || [])
+      var manualTopics = configuredTopics();
+      // Wenn Quick Topics gepflegt sind, bleibt die Startansicht bewusst ruhig.
+      var aiRows = manualTopics.length ? [] : (pageQuestions || [])
         .map(function (item) {
           var q = (item && item.question ? item.question : "").toString().trim();
           return q ? { label: "", question: q, url: "", highlight: false, ai: true } : null;
         })
         .filter(Boolean);
-      var topics = aiRows.concat(Array.isArray(cfg.topics) ? cfg.topics : []);
+      var topics = aiRows.concat(manualTopics);
       topicsListEl.innerHTML = "";
       if (!topics.length) {
         topicsEl.classList.add("aicb-hidden");
@@ -948,8 +1097,12 @@
         .then(function (data) {
           if (data.session_token) writeStore("localStorage", SESSION_KEY, data.session_token);
           var answer = data.answer || "";
-          finishTyping(typing, answer, data.rich, data.event_id);
-          pushTranscript({ sender: "bot", text: answer, rich: data.rich || null, eventId: data.event_id || null });
+          var rich = data.rich || {};
+          if (Array.isArray(data.sources) && data.sources.length && !Array.isArray(rich.sources)) {
+            rich.sources = data.sources;
+          }
+          finishTyping(typing, answer, rich, data.event_id);
+          pushTranscript({ sender: "bot", text: answer, rich: rich, eventId: data.event_id || null });
           history.push({ role: "user", content: question });
           history.push({ role: "assistant", content: answer });
           setHistory(history);
@@ -972,6 +1125,7 @@
     function open(silent) {
       panel.hidden = false;
       shell.classList.add("aicb-open");
+      hideCloseConfirm(false);
       hideTeaser(true);
       if (persistOn) writeStore("localStorage", OPEN_KEY, "1");
       if (!silent) {
@@ -979,8 +1133,30 @@
       }
     }
 
+    function showCloseConfirm() {
+      if (inline || !closeConfirmEl) {
+        close(true);
+        return;
+      }
+      closeConfirmEl.hidden = false;
+      shell.classList.add("aicb-confirming-close");
+      setTimeout(function () {
+        if (closeConfirmEndBtn) closeConfirmEndBtn.focus();
+      }, 20);
+    }
+
+    function hideCloseConfirm(restoreFocus) {
+      if (!closeConfirmEl) return;
+      closeConfirmEl.hidden = true;
+      shell.classList.remove("aicb-confirming-close");
+      if (restoreFocus !== false && closeBtn && shell.classList.contains("aicb-open")) {
+        closeBtn.focus();
+      }
+    }
+
     function close(reset) {
       if (inline) return;
+      hideCloseConfirm(false);
       panel.hidden = true;
       shell.classList.remove("aicb-open");
       // Minimieren: Verlauf bleibt, nur den Offen-Status merken.
@@ -994,6 +1170,10 @@
         clearTranscript();
         showIntro();
       }
+      // Fokus zurueck an den Ausloeser, damit Tastaturnutzer nicht ins Leere greifen.
+      if (launcher) {
+        try { launcher.focus(); } catch (err) { /* focus kann fehlschlagen */ }
+      }
     }
 
     renderTopics();
@@ -1001,7 +1181,11 @@
 
     if (launcher) launcher.addEventListener("click", function () { open(); });
     if (minimizeBtn) minimizeBtn.addEventListener("click", function () { close(false); });
-    if (closeBtn) closeBtn.addEventListener("click", function () { close(true); });
+    if (closeBtn) closeBtn.addEventListener("click", function () { showCloseConfirm(); });
+    if (closeConfirmEndBtn) closeConfirmEndBtn.addEventListener("click", function () { close(true); });
+    Array.prototype.forEach.call(closeConfirmCancelEls, function (el) {
+      el.addEventListener("click", function () { hideCloseConfirm(); });
+    });
 
     formEl.addEventListener("submit", function (event) {
       event.preventDefault();
@@ -1012,6 +1196,20 @@
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         send(inputEl.value);
+      }
+    });
+    panel.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape" && event.key !== "Esc") return;
+      // Erst den Bestaetigungsdialog schliessen, sonst das Panel minimieren
+      // (Verlauf bleibt erhalten - kein Beenden ueber Esc).
+      if (closeConfirmEl && !closeConfirmEl.hidden) {
+        event.preventDefault();
+        hideCloseConfirm();
+        return;
+      }
+      if (!inline) {
+        event.preventDefault();
+        close(false);
       }
     });
     window.addEventListener("resize", updateSpacer);
@@ -1079,7 +1277,29 @@
         teaserTextEl.appendChild(btn);
       });
       if (!teaserTextEl.children.length) return false;
+      writeStore("sessionStorage", SUGGESTIONS_KEY, currentKey);
       showTeaserAfter(Number((cfg.greeting && cfg.greeting.delay_ms) || 1200));
+      return true;
+    }
+
+    function showOpenQuestionSuggestions(items, page) {
+      if (inline || !shell.classList.contains("aicb-open") || !Array.isArray(items) || !items.length) return false;
+      var currentKey = suggestionsKey(items, page);
+      if (readStore("sessionStorage", SUGGESTIONS_KEY, "") === currentKey) return true;
+
+      var actions = document.createElement("div");
+      actions.className = "aicb-actions-row aicb-page-suggestions";
+      items.slice(0, 3).forEach(function (item) {
+        var question = (item.question || "").toString().trim();
+        if (!question) return;
+        actions.appendChild(createAction({ type: "question", label: question, question: question }, false));
+      });
+      if (!actions.children.length) return false;
+
+      appendRow(createRow("bot", [createBubble(suggestLeadLabel(), "bot"), actions]));
+      writeStore("sessionStorage", SUGGESTIONS_KEY, currentKey);
+      anchorRow = null;
+      scrollToBottom();
       return true;
     }
 
@@ -1088,10 +1308,16 @@
     // Ergebnis der KI-Fragen anwenden: immer in die Topics-Liste; und (wenn Chat
     // zu) ins Popup. Das Fragen-Popup erscheint zuverlaessig, auch wenn das
     // klassische Greeting deaktiviert ist - das Greeting ist nur der Fallback.
-    function applySuggestions(items, page) {
+    function applySuggestions(items, page, options) {
       pageQuestions = (Array.isArray(items) ? items : []).slice(0, 3);
       renderTopics();
-      if (inline || !teaserEl || shell.classList.contains("aicb-open")) return;
+      if (inline || !teaserEl) return;
+      if (shell.classList.contains("aicb-open")) {
+        if (!options || !options.route || routeChangeSuggestionsEnabled()) {
+          showOpenQuestionSuggestions(pageQuestions, page);
+        }
+        return;
+      }
       if (showQuestionTeaser(pageQuestions, page)) return;
       if (greetingOn) showGreetingTeaser();
     }
@@ -1100,12 +1326,33 @@
       return window.location.pathname + window.location.search;
     }
 
-    function loadSuggestions() {
+    function loadSuggestions(options) {
+      if (configuredTopics().length) {
+        pageQuestions = [];
+        renderTopics();
+        if ((!options || !options.route) && !inline && teaserEl && greetingOn && !shell.classList.contains("aicb-open")) {
+          showGreetingTeaser();
+        }
+        return;
+      }
+      if (!pageSuggestionsEnabled()) {
+        pageQuestions = [];
+        renderTopics();
+        if ((!options || !options.route) && !inline && teaserEl && greetingOn && !shell.classList.contains("aicb-open")) {
+          showGreetingTeaser();
+        }
+        return;
+      }
+      if (options && options.route && !routeChangeSuggestionsEnabled()) {
+        pageQuestions = [];
+        renderTopics();
+        return;
+      }
       lastSuggestUrl = currentPath();
       var page = pageSignal();
       api("suggestions", page)
         .then(function (data) {
-          applySuggestions(Array.isArray(data.questions) ? data.questions : [], page);
+          applySuggestions(Array.isArray(data.questions) ? data.questions : [], page, options || {});
         })
         .catch(function () {
           if (!inline && teaserEl && greetingOn && !shell.classList.contains("aicb-open")) showGreetingTeaser();
@@ -1118,7 +1365,7 @@
       pageQuestions = [];
       renderTopics();
       if (teaserEl) teaserEl.classList.remove("aicb-teaser-visible");
-      loadSuggestions();
+      loadSuggestions({ route: true });
     }
 
     if (!inline && teaserEl) {
@@ -1136,6 +1383,11 @@
     if (restoreTranscript() && !inline && readStore("localStorage", OPEN_KEY, "0") === "1") {
       open(true);
     }
+
+    // Live-Region erst NACH dem Wiederherstellen aktivieren, sonst liest der
+    // Screenreader beim Laden den kompletten alten Verlauf vor. Ab hier werden
+    // nur neu eintreffende Antworten angesagt.
+    listEl.setAttribute("aria-live", "polite");
 
     // Nicht in der Admin-Live-Vorschau feuern (spart OpenAI-Aufrufe).
     // Topics bekommen KI-Fragen auch im Inline-Modus; Teaser nur floating.

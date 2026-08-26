@@ -158,6 +158,10 @@
         text: data.greeting_text,
         delay_ms: Number(data.greeting_delay_ms || 1200),
       },
+      page_suggestions: {
+        enabled: Boolean(data.page_suggestions_enabled),
+        show_on_route_change: Boolean(data.page_suggestions_route_change),
+      },
       topics,
     };
     set({ busy: true, error: "", notice: "" });
@@ -469,6 +473,7 @@
     const t = w.theme || {};
     const c = w.copy || {};
     const g = w.greeting || {};
+    const ps = w.page_suggestions || {};
     const topics = w.topics && w.topics.length ? w.topics : [{ label: "", question: "", url: "", highlight: false }];
     const colorFields = [
       ["accent", "Akzent"],
@@ -505,7 +510,11 @@
         ${field("Icon: Emoji oder SVG-Logo (leer = kein Avatar)", `<textarea name="icon" rows="3">${escapeHtml(c.icon || "")}</textarea>`)}
         ${field("Disclaimer", `<input name="disclaimer" value="${escapeHtml(c.disclaimer || "")}">`)}
         <div class="aicb-colors">${colorFields.map(([key, label]) => `<label><span>${label}</span><input type="color" name="${key}" value="${escapeHtml(t[key] || "#000000")}"></label>`).join("")}</div>
-        <div class="aicb-checks"><label><input type="checkbox" name="greeting_enabled" ${g.enabled ? "checked" : ""}> Greeting aktivieren</label></div>
+        <div class="aicb-checks">
+          <label><input type="checkbox" name="greeting_enabled" ${g.enabled ? "checked" : ""}> Greeting aktivieren</label>
+          <label><input type="checkbox" name="page_suggestions_enabled" ${ps.enabled !== false ? "checked" : ""}> Automatische Seitenfragen aktivieren</label>
+          <label><input type="checkbox" name="page_suggestions_route_change" ${ps.show_on_route_change !== false ? "checked" : ""}> Bei Seitenwechsel automatisch anzeigen</label>
+        </div>
         <div class="aicb-grid two">
           ${field("Greeting Text", `<input name="greeting_text" value="${escapeHtml(g.text || "")}">`)}
           ${field("Greeting Delay", `<input type="number" name="greeting_delay_ms" value="${Number(g.delay_ms || 1200)}">`)}
@@ -834,6 +843,10 @@
       enabled: Boolean(data.greeting_enabled),
       text: (data.greeting_text || "").trim() || defaults.greeting || "",
       delay_ms: Number(data.greeting_delay_ms || 1200),
+    };
+    cfg.page_suggestions = {
+      enabled: Boolean(data.page_suggestions_enabled),
+      show_on_route_change: Boolean(data.page_suggestions_route_change),
     };
     cfg.topics = [];
     form.querySelectorAll("[data-topic-row]").forEach((row) => {
