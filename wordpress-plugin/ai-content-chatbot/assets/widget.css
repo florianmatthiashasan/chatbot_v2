@@ -1271,6 +1271,24 @@
   display: none !important;
 }
 
+/* --- Im Hero-Bereich ausblenden ------------------------------------------ */
+/* Nur aktiv, wenn im Backend gewaehlt (Klasse aicb-hide-in-hero, serverseitig
+   gesetzt). Sobald der Nutzer den Hero verlaesst, setzt das JS aicb-past-hero
+   -> Launcher/Teaser poppen weich auf. Ein offenes Panel bleibt immer sichtbar. */
+.aicb-widget-shell.aicb-hide-in-hero .aicb-launcher,
+.aicb-widget-shell.aicb-hide-in-hero .aicb-teaser {
+  transition: opacity 0.3s ease, transform 0.3s ease, box-shadow 0.2s ease, visibility 0s;
+}
+
+.aicb-widget-shell.aicb-hide-in-hero:not(.aicb-past-hero):not(.aicb-open) .aicb-launcher,
+.aicb-widget-shell.aicb-hide-in-hero:not(.aicb-past-hero) .aicb-teaser {
+  opacity: 0;
+  transform: translateY(14px) scale(0.9);
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease, visibility 0s 0.3s;
+}
+
 @media (max-width: 520px) {
   .aicb-widget-shell.aicb-mode-floating {
     right: 14px;

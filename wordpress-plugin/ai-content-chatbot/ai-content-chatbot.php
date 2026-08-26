@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.8.10
+ * Version: 0.8.11
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -31,7 +31,7 @@ final class AICB_Plugin {
     private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.8.10';
+    private const ASSET_VERSION = '0.8.11';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -654,6 +654,14 @@ final class AICB_Plugin {
                 'enabled' => true,
                 'show_on_route_change' => true,
             ],
+            'hero' => [
+                // false = Chatbot auch im Hero zeigen (Default). true = im Hero
+                // ausblenden und erst nach dem Hero-Bereich einblenden.
+                'hide_in_hero' => false,
+                // Optionaler CSS-Selektor des Hero-Bereichs fuer praezise Erkennung.
+                // Leer -> Fallback auf die erste Bildschirmhoehe.
+                'selector' => '',
+            ],
             'topics' => [],
         ];
     }
@@ -903,6 +911,11 @@ final class AICB_Plugin {
         $inline = $mode === 'inline';
         $dir = !empty($config['rtl']) ? 'rtl' : 'ltr';
         $close_confirm = $config['strings']['close_confirm'] ?? $this->close_confirm_labels((string) ($config['lang'] ?? 'en'));
+        // Im-Hero-ausblenden: Klasse schon serverseitig setzen, damit der Launcher
+        // beim Laden nicht kurz aufblitzt, bevor das JS greift.
+        if (!$inline && !empty($config['hero']['hide_in_hero'])) {
+            $classes .= ' aicb-hide-in-hero';
+        }
         ?>
         <div class="<?php echo esc_attr($classes); ?>" style="<?php echo esc_attr($style); ?>" dir="<?php echo esc_attr($dir); ?>" lang="<?php echo esc_attr((string) ($config['lang'] ?? 'en')); ?>" data-aicb-widget>
             <?php if (!$inline) : ?>
@@ -4160,6 +4173,10 @@ PROMPT;
             'enabled' => rest_sanitize_boolean($raw['page_suggestions']['enabled'] ?? $defaults['page_suggestions']['enabled']),
             'show_on_route_change' => rest_sanitize_boolean($raw['page_suggestions']['show_on_route_change'] ?? $defaults['page_suggestions']['show_on_route_change']),
         ];
+        $hero = [
+            'hide_in_hero' => rest_sanitize_boolean($raw['hero']['hide_in_hero'] ?? $defaults['hero']['hide_in_hero']),
+            'selector' => sanitize_text_field((string) ($raw['hero']['selector'] ?? $defaults['hero']['selector'])),
+        ];
         $topics = [];
         foreach ((array) ($raw['topics'] ?? $defaults['topics']) as $item) {
             $label = sanitize_text_field((string) ($item['label'] ?? ''));
@@ -4175,7 +4192,7 @@ PROMPT;
                 ];
             }
         }
-        return ['theme' => $theme, 'copy' => $copy, 'greeting' => $greeting, 'page_suggestions' => $page_suggestions, 'topics' => $topics];
+        return ['theme' => $theme, 'copy' => $copy, 'greeting' => $greeting, 'page_suggestions' => $page_suggestions, 'hero' => $hero, 'topics' => $topics];
     }
 
     private function faqs(): array {

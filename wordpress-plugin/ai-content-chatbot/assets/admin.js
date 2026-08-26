@@ -162,6 +162,10 @@
         enabled: Boolean(data.page_suggestions_enabled),
         show_on_route_change: Boolean(data.page_suggestions_route_change),
       },
+      hero: {
+        hide_in_hero: Boolean(data.hide_in_hero),
+        selector: (data.hero_selector || "").trim(),
+      },
       topics,
     };
     set({ busy: true, error: "", notice: "" });
@@ -474,6 +478,7 @@
     const c = w.copy || {};
     const g = w.greeting || {};
     const ps = w.page_suggestions || {};
+    const hero = w.hero || {};
     const topics = w.topics && w.topics.length ? w.topics : [{ label: "", question: "", url: "", highlight: false }];
     const colorFields = [
       ["accent", "Akzent"],
@@ -514,7 +519,9 @@
           <label><input type="checkbox" name="greeting_enabled" ${g.enabled ? "checked" : ""}> Greeting aktivieren</label>
           <label><input type="checkbox" name="page_suggestions_enabled" ${ps.enabled !== false ? "checked" : ""}> Automatische Seitenfragen aktivieren</label>
           <label><input type="checkbox" name="page_suggestions_route_change" ${ps.show_on_route_change !== false ? "checked" : ""}> Bei Seitenwechsel automatisch anzeigen</label>
+          <label><input type="checkbox" name="hide_in_hero" ${hero.hide_in_hero ? "checked" : ""}> Im Hero-Bereich ausblenden (erst danach einblenden)</label>
         </div>
+        ${field("Hero-Bereich CSS-Selektor (optional, leer = erste Bildschirmhöhe)", `<input name="hero_selector" value="${escapeHtml(hero.selector || "")}" placeholder="z. B. .hero, #hero, section.hero">`)}
         <div class="aicb-grid two">
           ${field("Greeting Text", `<input name="greeting_text" value="${escapeHtml(g.text || "")}">`)}
           ${field("Greeting Delay", `<input type="number" name="greeting_delay_ms" value="${Number(g.delay_ms || 1200)}">`)}
@@ -847,6 +854,10 @@
     cfg.page_suggestions = {
       enabled: Boolean(data.page_suggestions_enabled),
       show_on_route_change: Boolean(data.page_suggestions_route_change),
+    };
+    cfg.hero = {
+      hide_in_hero: Boolean(data.hide_in_hero),
+      selector: (data.hero_selector || "").trim(),
     };
     cfg.topics = [];
     form.querySelectorAll("[data-topic-row]").forEach((row) => {

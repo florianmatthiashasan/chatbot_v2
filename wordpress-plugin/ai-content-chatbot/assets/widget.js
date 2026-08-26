@@ -1182,6 +1182,56 @@
     renderTopics();
     syncComposer();
 
+    // Optional: Chatbot im Hero-Bereich ausblenden und erst danach einblenden.
+    function setupHeroVisibility() {
+      var hero = cfg.hero || {};
+      // Nicht im Inline-Modus und nicht in der Admin-Live-Vorschau (dort gibt es
+      // keinen Hero zum Vorbeiscrollen -> Launcher bliebe sonst dauerhaft versteckt).
+      if (inline || !hero.hide_in_hero || typeof window.AICBAdmin !== "undefined") {
+        shell.classList.remove("aicb-hide-in-hero");
+        return;
+      }
+      shell.classList.add("aicb-hide-in-hero"); // serverseitig meist schon gesetzt
+      var selector = (hero.selector || "").toString().trim();
+
+      // Untere Kante des Hero-Bereichs in Dokumentkoordinaten. Mit Selektor exakt,
+      // sonst Fallback auf ~85% der ersten Bildschirmhoehe.
+      function heroBottom() {
+        if (selector) {
+          var el = document.querySelector(selector);
+          if (el) {
+            var rect = el.getBoundingClientRect();
+            return (window.scrollY || window.pageYOffset || 0) + rect.bottom;
+          }
+        }
+        return window.innerHeight * 0.85;
+      }
+
+      var ticking = false;
+      function update() {
+        ticking = false;
+        var y = window.scrollY || window.pageYOffset || 0;
+        // 80px Vorlauf: der Launcher poppt knapp vor dem Hero-Ende auf.
+        shell.classList.toggle("aicb-past-hero", y >= (heroBottom() - 80));
+      }
+      function onScroll() {
+        if (ticking) return;
+        ticking = true;
+        window.requestAnimationFrame(update);
+      }
+      window.addEventListener("scroll", onScroll, { passive: true });
+      window.addEventListener("resize", onScroll, { passive: true });
+      // Hero-Hoehe kann sich nach Font-/Bild-Laden aendern -> nachmessen.
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(update);
+      window.addEventListener("load", update);
+      // Direkt (nicht via rAF) neu abgleichen, wenn der Tab wieder sichtbar wird
+      // oder die Seite aus dem bfcache kommt - dann ist die Scrollposition sofort korrekt.
+      document.addEventListener("visibilitychange", function () { if (!document.hidden) update(); });
+      window.addEventListener("pageshow", update);
+      update();
+    }
+    setupHeroVisibility();
+
     if (launcher) launcher.addEventListener("click", function () { open(); });
     if (minimizeBtn) minimizeBtn.addEventListener("click", function () { close(false); });
     if (closeBtn) closeBtn.addEventListener("click", function () { showCloseConfirm(); });
