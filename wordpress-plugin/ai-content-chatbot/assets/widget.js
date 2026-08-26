@@ -906,9 +906,9 @@
     }
 
     function addMessage(value, sender, rich, eventId) {
-      var extra = [];
+      // Reihenfolge: erst Karten/Aktionen, dann das Feedback (Daumen) ganz unten.
+      var extra = richNodes(rich);
       if (sender === "bot" && eventId) extra.push(feedbackRow(eventId));
-      extra = extra.concat(richNodes(rich));
       var row = appendRow(createRow(sender, [createBubble(value, sender, rich && rich.sources)].concat(extra)));
       if (sender === "user") {
         anchorRow = row;
@@ -959,8 +959,9 @@
       entry.bubble.classList.remove("aicb-typing");
       setBubbleContent(entry.bubble, value, false, rich && rich.sources);
       var stack = entry.row.querySelector(".aicb-stack");
-      if (eventId) stack.appendChild(feedbackRow(eventId));
+      // Erst Karten/Aktionen anhaengen, dann das Feedback (Daumen) als letztes.
       richNodes(rich).forEach(function (node) { stack.appendChild(node); });
+      if (eventId) stack.appendChild(feedbackRow(eventId));
       if (anchorRow) keepAnchorInView(false);
       else scrollToBottom();
     }
@@ -980,9 +981,8 @@
       transcript.forEach(function (m) {
         if (!m || typeof m.text !== "string" || m.text === "") return;
         var sender = m.sender === "user" ? "user" : "bot";
-        var extra = [];
+        var extra = sender === "bot" ? richNodes(m.rich || null) : [];
         if (sender === "bot" && m.eventId) extra.push(feedbackRow(m.eventId));
-        if (sender === "bot") extra = extra.concat(richNodes(m.rich || null));
         appendRow(createRow(sender, [createBubble(m.text, sender, m.rich && m.rich.sources)].concat(extra)));
       });
       anchorRow = null;

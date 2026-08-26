@@ -1387,7 +1387,7 @@
   justify-content: flex-end;
   gap: 6px;
   width: min(100%, 330px);
-  margin-top: -2px;
+  margin-top: 2px;
   margin-inline-start: auto;
 }
 .aicb-feedback-btn {
