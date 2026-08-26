@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 0.8.8
+ * Version: 0.8.9
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -31,7 +31,7 @@ final class AICB_Plugin {
     private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '0.8.8';
+    private const ASSET_VERSION = '0.8.9';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -144,8 +144,8 @@ final class AICB_Plugin {
             'openai_api_key' => '',
             'chat_model' => 'gpt-4o-mini',
             'embedding_model' => 'text-embedding-3-large',
-            'retriever_k' => 16,
-            'max_context_chars' => 26000,
+            'retriever_k' => 20,
+            'max_context_chars' => 30000,
             'batch_size' => 4,
             'auto_index_on_save' => true,
             'widget_enabled' => true,
@@ -161,9 +161,14 @@ final class AICB_Plugin {
     }
 
     public static function default_system_prompt(): string {
-        return "Du bist der Assistent dieser Website und antwortest zu Inhalten nur auf Basis des bereitgestellten Kontexts.\n"
-            . "Wenn etwas nicht im Kontext steht, sage ehrlich, dass du es nicht weißt.\n"
-            . "Antworte präzise, nenne konkrete Fakten und gib Quellen als direkte URLs aus.";
+        return "Du bist der digitale Assistent dieser Website - sachkundig, hilfsbereit und menschlich im Ton.\n"
+            . "Du kennst die Inhalte dieser Website genau und beantwortest inhaltliche Fragen ausschließlich "
+            . "auf Basis des bereitgestellten Kontexts.\n"
+            . "Antworte ausführlich und konkret: nenne alle relevanten Details, Zahlen und Fakten aus dem "
+            . "Kontext und erkläre Zusammenhänge verständlich.\n"
+            . "Steht etwas nicht im Kontext, sage ehrlich, dass du es nicht weißt, statt zu raten oder es zu erfinden.\n"
+            . "Schreibe natürlich und freundlich - wie ein kompetenter Mensch, nicht wie ein Formular. "
+            . "Gib Quellen als direkte URLs an.";
     }
 
     /**
@@ -691,6 +696,15 @@ final class AICB_Plugin {
         }
         if ((int) ($settings['max_context_chars'] ?? 0) === 20000) {
             $settings['max_context_chars'] = 26000;
+            $settings_changed = true;
+        }
+        // Naechste Stufe fuer vollstaendigere, detailreichere Antworten (nur alte Standardwerte).
+        if ((int) ($settings['retriever_k'] ?? 0) === 16) {
+            $settings['retriever_k'] = 20;
+            $settings_changed = true;
+        }
+        if ((int) ($settings['max_context_chars'] ?? 0) === 26000) {
+            $settings['max_context_chars'] = 30000;
             $settings_changed = true;
         }
         if ($settings_changed) {
@@ -2702,7 +2716,10 @@ final class AICB_Plugin {
         $target_lang = $this->detect_message_lang($question) ?: $lang;
         $context = $relevant ? $this->build_context($relevant) : '';
         $messages = $this->build_chat_messages($question, $history, $context, $target_lang, $count > 0);
-        $chat = $this->openai_chat($messages);
+        // Etwas Temperatur laesst die Antwort natuerlicher klingen (statt roboterhaft);
+        // die strikte Kontext-Bindung im Prompt verhindert weiterhin Halluzinationen.
+        // Grosszuegige Token-Obergrenze gibt ausfuehrlichen Antworten Raum, deckelt aber Ausreisser.
+        $chat = $this->openai_chat($messages, ['temperature' => 0.4, 'max_tokens' => 1200]);
         $answer = trim((string) ($chat['answer'] ?? ''));
         if ($answer === '') {
             $answer = $count > 0 ? $pack['error'] : $pack['no_index'];
@@ -2950,7 +2967,14 @@ final class AICB_Plugin {
             . "Bedingungen, Ausstattung. Fasse nicht vage zusammen, wenn genaue Angaben dastehen.\n"
             . "- Stehen mehrere Varianten im Kontext (z. B. mehrere Zimmer, Tarife oder Pakete), "
             . "nenne sie einzeln mit ihren jeweiligen Angaben statt nur einer Sammelaussage.\n"
-            . "- Halte Antworten kompakt: kurze Absätze, bei Aufzählungen Listen.";
+            . "- Antworte vollständig und hilfreich: decke alle relevanten Punkte aus dem Kontext ab und "
+            . "erkläre sie so, dass die Antwort für sich steht. Lieber eine gründliche, gut strukturierte "
+            . "Antwort als eine knappe - aber ohne Füllsätze oder Wiederholungen.\n"
+            . "- Gliedere längere Antworten: ein kurzer Einstieg, dann die Details in kurzen Absätzen oder "
+            . "Listen. Denke die naheliegende Folgefrage mit und beantworte sie, wenn der Kontext sie hergibt.\n"
+            . "- Schreibe in einem natürlichen, warmen Gesprächston - wie ein kompetenter, freundlicher "
+            . "Mensch. Variiere die Satzstruktur und vermeide steife Bausteinsätze oder wörtliche "
+            . "Wiederholungen aus dem Kontext.";
 
         $target_name = $this->lang_display_name($lang);
         $language_rule = "MANDATORY LANGUAGE RULE - this overrides every other instruction:\n"
@@ -3009,7 +3033,7 @@ final class AICB_Plugin {
     private function search_chunks(array $query_vectors): array {
         global $wpdb;
         $table = $wpdb->prefix . 'aicb_chunks';
-        $limit = max(1, min(32, (int) $this->setting('retriever_k', 16)));
+        $limit = max(1, min(32, (int) $this->setting('retriever_k', 20)));
         // Einzelvektor auch akzeptieren, damit Aufrufer beides übergeben können.
         $vectors = (isset($query_vectors[0]) && is_array($query_vectors[0])) ? $query_vectors : [$query_vectors];
         // Query-Vektoren einmal normalisieren -> Kosinus wird zum Skalarprodukt.
@@ -3164,7 +3188,7 @@ final class AICB_Plugin {
     }
 
     private function build_context(array $matches): string {
-        $max = max(3000, (int) $this->setting('max_context_chars', 20000));
+        $max = max(3000, (int) $this->setting('max_context_chars', 30000));
         $parts = [];
         $chars = 0;
         foreach ($matches as $idx => $row) {
