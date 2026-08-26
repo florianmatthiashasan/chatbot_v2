@@ -34,6 +34,7 @@
   --aicb-hairline: rgba(47, 42, 36, 0.12);
   --aicb-hairline-soft: rgba(47, 42, 36, 0.09);
   --aicb-hover-soft: rgba(47, 42, 36, 0.06);
+  --aicb-chip-border: rgba(47, 42, 36, 0.28);
   --aicb-muted: rgba(47, 42, 36, 0.55);
   --aicb-soft: rgba(47, 42, 36, 0.75);
   --aicb-idle-bg: rgba(47, 42, 36, 0.1);
@@ -54,6 +55,7 @@
     --aicb-hairline: color-mix(in srgb, var(--aicb-text) 12%, transparent);
     --aicb-hairline-soft: color-mix(in srgb, var(--aicb-text) 9%, transparent);
     --aicb-hover-soft: color-mix(in srgb, var(--aicb-text) 6%, transparent);
+    --aicb-chip-border: color-mix(in srgb, var(--aicb-text) 28%, transparent);
     --aicb-muted: color-mix(in srgb, var(--aicb-text) 55%, transparent);
     --aicb-soft: color-mix(in srgb, var(--aicb-text) 75%, transparent);
     --aicb-idle-bg: color-mix(in srgb, var(--aicb-text) 10%, transparent);
@@ -192,39 +194,98 @@
   min-width: 0;
 }
 
+/* Fragen-Popup: keine Box - die Vorschlaege stehen als frei schwebende Pills
+   rechtsbuendig ueber der Seite; das X als kleiner runder Button darueber.
+   pointer-events: none laesst die Luecken zwischen den Pills auf die Seite
+   durchklicken (Pills + X setzen pointer-events wieder auf auto). */
 .aicb-widget-shell .aicb-teaser.aicb-teaser-questions {
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 8px;
   width: min(320px, calc(100vw - 36px));
-  padding: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   cursor: default;
+  pointer-events: none;
 }
 
 .aicb-widget-shell .aicb-teaser.aicb-teaser-questions .aicb-teaser-content {
-  display: grid;
-  gap: 7px;
-  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
 }
 
 .aicb-widget-shell .aicb-teaser-question {
-  width: 100%;
+  position: relative;
+  width: auto;
+  max-width: 100%;
   margin: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--aicb-hairline-soft);
-  border-radius: var(--aicb-radius-md);
-  background: var(--aicb-bg);
+  padding: 8px 14px;
+  border: 1px solid var(--aicb-chip-border);
+  border-radius: 999px;
+  background: var(--aicb-panel);
   color: var(--aicb-text);
   font: inherit;
   font-size: 13px;
-  font-weight: 650;
-  line-height: 1.32;
-  text-align: start;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: end;
+  text-wrap: balance;
+  box-shadow: 0 6px 18px rgba(17, 16, 13, 0.12);
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+  pointer-events: auto;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+/* Touch-Ziel, ohne die Pille optisch aufzublaesen */
+.aicb-widget-shell .aicb-teaser-question::after {
+  content: "";
+  position: absolute;
+  inset: -6px 0;
+}
+
+/* Zweizeilige Pills: weicherer Radius statt Wurst-Kapsel (Klasse per JS) */
+.aicb-widget-shell .aicb-teaser-question.aicb-pill-wrapped {
+  border-radius: 14px;
 }
 
 .aicb-widget-shell .aicb-teaser-question:hover {
-  border-color: var(--aicb-accent-strong);
+  border-color: var(--aicb-text);
   background: var(--aicb-panel);
-  transform: translateY(-1px);
+  transform: none;
+}
+
+/* X im Fragen-Popup: eigener kleiner runder Button, da die Box wegfaellt */
+.aicb-widget-shell .aicb-teaser.aicb-teaser-questions .aicb-teaser-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--aicb-hairline);
+  border-radius: 50%;
+  background: var(--aicb-panel);
+  color: var(--aicb-muted);
+  font-size: 15px;
+  line-height: 1;
+  box-shadow: 0 6px 18px rgba(17, 16, 13, 0.12);
+  pointer-events: auto;
+}
+
+.aicb-widget-shell .aicb-teaser.aicb-teaser-questions .aicb-teaser-close:hover {
+  color: var(--aicb-text);
+  border-color: var(--aicb-chip-border);
+}
+
+/* Lead-Zeile im Fragen-Popup ausblenden - die Pills sprechen fuer sich */
+.aicb-widget-shell .aicb-teaser.aicb-teaser-questions .aicb-teaser-lead {
+  display: none;
 }
 
 .aicb-widget-shell.aicb-open .aicb-teaser {
@@ -740,21 +801,35 @@
 
 /* --- Karten und Aktionen -------------------------------------------------- */
 .aicb-widget-shell .aicb-card {
-  width: min(100%, 300px);
+  position: relative;
+  width: min(100%, 320px);
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 12px;
   padding: 10px;
-  border: 1px solid var(--aicb-hairline-soft);
-  border-radius: var(--aicb-radius-md);
+  border: 1px solid var(--aicb-hairline);
+  border-radius: var(--aicb-radius-lg);
   background: var(--aicb-panel);
   color: var(--aicb-text);
-  box-shadow: 0 4px 14px rgba(17, 16, 13, 0.06);
+  box-shadow: none;
+  transition: border-color 0.15s ease;
+}
+
+/* Ganze Card klickbar (stretched link ueber den Titel-Anker); Rahmen dunkelt
+   auf Hover. :has() ist Progressive Enhancement - ohne :has bleibt die Card
+   trotzdem klickbar und der Titel unterstreicht sich (::after deckt die Card). */
+.aicb-widget-shell .aicb-card:has(a.aicb-card-title):hover {
+  border-color: var(--aicb-text);
+}
+
+.aicb-widget-shell .aicb-card:has(a.aicb-card-title:focus-visible) {
+  outline: 2px solid var(--aicb-text);
+  outline-offset: 2px;
 }
 
 .aicb-widget-shell .aicb-card-thumb {
-  width: 54px;
-  height: 54px;
+  width: 64px;
+  height: 64px;
   border-radius: var(--aicb-radius-sm);
   overflow: hidden;
   flex-shrink: 0;
@@ -774,22 +849,48 @@
 .aicb-widget-shell .aicb-card-body {
   min-width: 0;
   display: grid;
-  gap: 4px;
-  align-content: start;
+  gap: 3px;
+  align-content: center;
 }
 
 .aicb-widget-shell .aicb-card-title {
   color: var(--aicb-text);
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1.25;
   text-decoration: none;
   overflow-wrap: anywhere;
 }
 
-.aicb-widget-shell a.aicb-card-title:hover {
-  text-decoration: underline;
-  text-underline-offset: 2px;
+/* Titel-Link: animierte Unterstreichung (currentColor, palette-agnostisch) und
+   zugleich die Klickflaeche der ganzen Card. Kein position:relative am Anker,
+   damit das ::after gegen die (relative) .aicb-card aufspannt. */
+.aicb-widget-shell a.aicb-card-title {
+  align-self: start;
+  justify-self: start;
+  max-width: 100%;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-size: 0 1px;
+  background-position: 100% 100%;
+  background-repeat: no-repeat;
+  transition: background-size 0.2s ease;
+}
+
+.aicb-widget-shell a.aicb-card-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+}
+
+/* Hover ueber irgendeinen Teil der Card = Hover auf dem card-deckenden ::after
+   des Titels -> Linie laeuft ein (funktioniert auch ohne :has). */
+.aicb-widget-shell a.aicb-card-title:hover,
+.aicb-widget-shell a.aicb-card-title:focus-visible {
+  text-decoration: none;
+  background-size: 100% 1px;
+  background-position: 0 100%;
 }
 
 .aicb-widget-shell .aicb-card-desc {
@@ -804,11 +905,10 @@
   overflow: hidden;
 }
 
+/* Detail-Tags (graue Flaeche unter der Beschreibung) entfallen im Redesign -
+   die Card zeigt nur Thumb, Titel und max. 2 Zeilen Beschreibung. */
 .aicb-widget-shell .aicb-details {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 1px;
+  display: none;
 }
 
 .aicb-widget-shell .aicb-detail {

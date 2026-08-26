@@ -1213,6 +1213,11 @@
       }
     });
     window.addEventListener("resize", updateSpacer);
+    // Fragen-Pills nach Viewport-Wechsel und nach dem Font-Laden neu messen.
+    window.addEventListener("resize", refreshTeaserPills);
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function () { setTimeout(refreshTeaserPills, 0); });
+    }
 
     function showTeaserAfter(delay) {
       setTimeout(function () {
@@ -1224,6 +1229,40 @@
       if (!teaserTextEl) return;
       teaserTextEl.innerHTML = "";
       teaserEl.classList.remove("aicb-teaser-questions");
+      // Greeting-Modus: der ganze Teaser ist wieder ein "Chat oeffnen"-Button.
+      teaserEl.setAttribute("role", "button");
+      teaserEl.setAttribute("tabindex", "0");
+    }
+
+    // Pill-Breite auf die laengste gerenderte Zeile schrumpfen ("hug"): eine
+    // umgebrochene Pille bliebe sonst auf voller Breite stehen (CSS kann eine
+    // umgebrochene Box nicht auf ihre laengste Zeile verkleinern).
+    function hugPill(el) {
+      el.style.width = "";
+      var range = document.createRange();
+      range.selectNodeContents(el);
+      var rects = range.getClientRects();
+      if (!rects.length) return;
+      var max = 0;
+      for (var i = 0; i < rects.length; i++) {
+        if (rects[i].width > max) max = rects[i].width;
+      }
+      var cs = window.getComputedStyle(el);
+      var extra = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)
+        + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+      el.style.width = Math.ceil(max + extra + 1) + "px"; // +1px Rundungsreserve
+    }
+
+    // Fragen-Pills auf ihre Textbreite schrumpfen; zweizeilige bekommen einen
+    // weicheren Radius. Nur sinnvoll, wenn der Teaser sichtbar (messbar) ist.
+    function refreshTeaserPills() {
+      if (!teaserEl || !teaserEl.classList.contains("aicb-teaser-questions")) return;
+      if (!teaserEl.classList.contains("aicb-teaser-visible")) return;
+      Array.prototype.forEach.call(teaserEl.querySelectorAll(".aicb-teaser-question"), function (pill) {
+        pill.classList.remove("aicb-pill-wrapped");
+        hugPill(pill);
+        if (pill.offsetHeight > 40) pill.classList.add("aicb-pill-wrapped");
+      });
     }
 
     function showGreetingTeaser() {
@@ -1252,6 +1291,10 @@
 
       clearTeaserContent();
       teaserEl.classList.add("aicb-teaser-questions");
+      // Wrapper ist im Fragen-Modus unsichtbar (pointer-events: none) - er darf
+      // kein fokussierbarer "Chat oeffnen"-Button sein.
+      teaserEl.removeAttribute("role");
+      teaserEl.removeAttribute("tabindex");
       // Kurze Lead-Zeile: Greeting-Text, sonst lokalisierte Ueberschrift.
       var lead = ((cfg.greeting && cfg.greeting.text) || "").toString().trim() || suggestLeadLabel();
       if (lead) {
@@ -1278,7 +1321,9 @@
       });
       if (!teaserTextEl.children.length) return false;
       writeStore("sessionStorage", SUGGESTIONS_KEY, currentKey);
-      showTeaserAfter(Number((cfg.greeting && cfg.greeting.delay_ms) || 1200));
+      var qDelay = Number((cfg.greeting && cfg.greeting.delay_ms) || 1200);
+      showTeaserAfter(qDelay);
+      setTimeout(refreshTeaserPills, qDelay + 40); // messbar erst nach dem Einblenden
       return true;
     }
 
