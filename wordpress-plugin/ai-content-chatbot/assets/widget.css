@@ -43,6 +43,7 @@
   --aicb-radius-lg: 18px;
   --aicb-radius-md: 14px;
   --aicb-radius-sm: 10px;
+  --aicb-pill-height: 44px;
 
   color: var(--aicb-text);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -222,10 +223,14 @@
 
 .aicb-widget-shell .aicb-teaser-question {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: auto;
   max-width: 100%;
+  min-height: var(--aicb-pill-height);
   margin: 0;
-  padding: 8px 14px;
+  padding: 0 14px;
   border: 1px solid var(--aicb-chip-border);
   border-radius: 999px;
   background: var(--aicb-panel);
@@ -941,9 +946,11 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 38px;
+  width: auto;
+  max-width: 100%;
+  height: var(--aicb-pill-height);
   margin: 0;
-  padding: 8px 16px;
+  padding: 0 16px;
   border: 1px solid var(--aicb-hairline-soft);
   border-radius: 999px;
   background: var(--aicb-panel);
@@ -958,6 +965,13 @@
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(17, 16, 13, 0.04);
   transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.aicb-widget-shell .aicb-action span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .aicb-widget-shell .aicb-link-actions .aicb-action.aicb-primary {
@@ -1381,7 +1395,7 @@
 }
 
 /* --- Feedback-Leiste ----------------------------------------------------- */
-.aicb-feedback {
+.aicb-widget-shell .aicb-feedback {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1390,45 +1404,47 @@
   margin-top: 2px;
   margin-inline-start: auto;
 }
-.aicb-feedback-btn {
+.aicb-widget-shell .aicb-feedback-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: 1px solid var(--aicb-hairline);
-  border-radius: 7px;
-  background: var(--aicb-panel);
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
   color: var(--aicb-muted);
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  transition: color 0.15s ease, transform 0.15s ease;
 }
-.aicb-feedback-btn:hover {
+.aicb-widget-shell .aicb-feedback-btn:hover {
   color: var(--aicb-text);
-  border-color: var(--aicb-soft);
-  background: var(--aicb-hover-soft);
+  background: transparent;
+  transform: translateY(-1px);
 }
-.aicb-feedback-icon {
-  width: 13px;
-  height: 13px;
+.aicb-widget-shell .aicb-feedback-btn:focus-visible {
+  outline: 2px solid var(--aicb-accent-strong);
+  outline-offset: 2px;
+}
+.aicb-widget-shell .aicb-feedback-icon {
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.9;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.aicb-feedback-btn.aicb-chosen.aicb-feedback-up {
-  color: #ffffff;
-  background: var(--aicb-status-dot, #4f8a5b);
-  border-color: var(--aicb-status-dot, #4f8a5b);
+.aicb-widget-shell .aicb-feedback-btn.aicb-chosen.aicb-feedback-up {
+  color: var(--aicb-status-dot, #4f8a5b);
+  background: transparent;
 }
-.aicb-feedback-btn.aicb-chosen.aicb-feedback-down {
-  color: #ffffff;
-  background: #b23b3b;
-  border-color: #b23b3b;
+.aicb-widget-shell .aicb-feedback-btn.aicb-chosen.aicb-feedback-down {
+  color: #b23b3b;
+  background: transparent;
 }
-.aicb-feedback.aicb-voted .aicb-feedback-btn:not(.aicb-chosen) {
+.aicb-widget-shell .aicb-feedback.aicb-voted .aicb-feedback-btn:not(.aicb-chosen) {
   opacity: 0.4;
   pointer-events: none;
 }

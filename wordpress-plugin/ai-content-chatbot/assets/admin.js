@@ -17,7 +17,12 @@
     error: "",
   };
 
-  const tabs = [
+  const permissions = Object.assign(
+    { canAccessAdmin: false, canManageSensitive: false },
+    AICBAdmin.permissions || {}
+  );
+  const sensitiveTabs = ["content", "settings", "widget", "memory"];
+  const allTabs = [
     ["training", "Training"],
     ["content", "Inhalte"],
     ["chat", "Test Chat"],
@@ -27,6 +32,10 @@
     ["faqs", "FAQs"],
     ["stats", "Statistiken"],
   ];
+  const tabs = allTabs.filter(([id]) => permissions.canManageSensitive || !sensitiveTabs.includes(id));
+  if (!tabs.some(([id]) => id === state.tab)) {
+    state.tab = tabs.length ? tabs[0][0] : "";
+  }
 
   let testSession = "";
   let testHistory = [];
@@ -71,15 +80,21 @@
   async function loadInitial() {
     try {
       set({ busy: true, error: "" });
-      const [settings, widget, faqs, stats, memory, job] = await Promise.all([
-        api("admin/settings"),
-        api("admin/widget"),
+      const [faqs, stats, job] = await Promise.all([
         api("admin/faqs"),
         api("admin/stats"),
-        api("admin/memory?limit=20"),
         api("admin/train/status"),
       ]);
-      set({ settings, widget, faqs: faqs.faqs || [], stats, memory, job, busy: false });
+      const nextState = { faqs: faqs.faqs || [], stats, job, busy: false };
+      if (permissions.canManageSensitive) {
+        const [settings, widget, memory] = await Promise.all([
+          api("admin/settings"),
+          api("admin/widget"),
+          api("admin/memory?limit=20"),
+        ]);
+        Object.assign(nextState, { settings, widget, memory });
+      }
+      set(nextState);
     } catch (err) {
       set({ error: err.message, busy: false });
     }
@@ -355,15 +370,21 @@
     const total = Number(job.total || 0);
     const processed = Number(job.processed || 0);
     const pct = total ? Math.round((processed / total) * 100) : 0;
+    const indexCount = state.settings
+      ? Number(state.settings.index_count || 0)
+      : Number(state.stats && state.stats.overview ? state.stats.overview.chunks || 0 : 0);
+    const scopeText = permissions.canManageSensitive
+      ? "Indexiert die im Tab <strong>Inhalte</strong> gewählten veröffentlichten Beiträge/Seiten und PDFs. Standardmäßig werden alle veröffentlichten Inhalte der aktivierten Post Types genommen. Keine Sitemap nötig."
+      : "Indexiert die von einem Administrator freigegebenen veröffentlichten Beiträge/Seiten und PDFs. Keine Sitemap nötig.";
     return `
       <section class="aicb-panel">
         <div class="aicb-panel-head">
-          <div><h2>Training aus WordPress-Inhalten</h2><p>Indexiert die im Tab <strong>Inhalte</strong> gewählten veröffentlichten Beiträge/Seiten und PDFs. Standardmäßig werden alle veröffentlichten Inhalte der aktivierten Post Types genommen. Keine Sitemap nötig.</p>
+          <div><h2>Training aus WordPress-Inhalten</h2><p>${scopeText}</p>
           <p class="aicb-hint">Nach einem Plugin-Update lohnt sich ein neues Training: Tabellen, Listen und Überschriften bleiben jetzt erhalten und die Abschnitte überlappen sich, damit Details wie Preise, Zeiten und Bedingungen zuverlässig gefunden werden.</p></div>
           ${button("Jetzt komplett trainieren", { id: "aicb-start-training", primary: true, disabled: state.busy })}
         </div>
         <div class="aicb-metrics">
-          <div><strong>${state.settings ? state.settings.index_count : 0}</strong><span>Chunks im Index</span></div>
+          <div><strong>${indexCount}</strong><span>Chunks im Index</span></div>
           <div><strong>${processed}/${total}</strong><span>Posts verarbeitet</span></div>
           <div><strong>${job.chunks || 0}</strong><span>Chunks im aktuellen Job</span></div>
           <div><strong>${job.status || "idle"}</strong><span>Status</span></div>
@@ -858,6 +879,9 @@
   }
 
   function renderActiveTab() {
+    if (sensitiveTabs.includes(state.tab) && !permissions.canManageSensitive) {
+      return renderTraining();
+    }
     if (state.tab === "content") return renderContent();
     if (state.tab === "settings") return renderSettings();
     if (state.tab === "widget") return renderWidget();
@@ -1035,6 +1059,7 @@
     }
     if (tab) {
       const target = tab.dataset.tab;
+      if (sensitiveTabs.includes(target) && !permissions.canManageSensitive) return;
       set({ tab: target, notice: "", error: "" });
       if (target === "content" && !state.content) loadContent();
       return;

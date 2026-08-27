@@ -18,6 +18,8 @@ final class AICB_Plugin {
     private const FAQ_OPTION_KEY = 'aicb_faqs';
     private const WIDGET_OPTION_KEY = 'aicb_widget_config';
     private const VERSION_OPTION = 'aicb_version';
+    private const ADMIN_ACCESS_CAP = 'edit_posts';
+    private const ADMIN_SENSITIVE_CAP = 'manage_options';
     // Feingranulare Inhaltsauswahl für das Training.
     private const INDEX_MODE_OPTION = 'aicb_index_mode';        // 'all' | 'selected'
     private const SELECTED_POSTS_OPTION = 'aicb_selected_posts'; // array<int> Post-IDs (nur publish)
@@ -856,7 +858,7 @@ final class AICB_Plugin {
         add_menu_page(
             'AI Chatbot',
             'AI Chatbot',
-            'manage_options',
+            self::ADMIN_ACCESS_CAP,
             'ai-content-chatbot',
             [$this, 'render_admin_page'],
             'dashicons-format-chat',
@@ -892,6 +894,10 @@ final class AICB_Plugin {
             'siteUrl' => home_url('/'),
             'previewHtml' => $this->widget_shell_markup('inline'),
             'widgetConfig' => $this->public_widget_config(),
+            'permissions' => [
+                'canAccessAdmin' => current_user_can(self::ADMIN_ACCESS_CAP),
+                'canManageSensitive' => current_user_can(self::ADMIN_SENSITIVE_CAP),
+            ],
             // Sprachpaket der Seite: füllt leere Felder in der Vorschau genauso
             // wie später im Frontend.
             'copyDefaults' => $this->lang_pack($this->site_lang()),
@@ -916,7 +922,7 @@ final class AICB_Plugin {
     }
 
     public function render_admin_page(): void {
-        if (!current_user_can('manage_options')) {
+        if (!current_user_can(self::ADMIN_ACCESS_CAP)) {
             wp_die(esc_html__('You do not have permission to access this page.', 'ai-content-chatbot'));
         }
         echo '<div class="wrap aicb-admin"><div id="aicb-admin-root"></div></div>';
@@ -1215,23 +1221,23 @@ final class AICB_Plugin {
         ]);
 
         $admin_routes = [
-            ['/admin/settings', ['GET', 'POST'], 'rest_admin_settings'],
-            ['/admin/widget', ['GET', 'POST'], 'rest_admin_widget'],
-            ['/admin/faqs', ['GET', 'POST'], 'rest_admin_faqs'],
-            ['/admin/train/start', ['POST'], 'rest_train_start'],
-            ['/admin/train/step', ['POST'], 'rest_train_step'],
-            ['/admin/train/status', ['GET'], 'rest_train_status'],
-            ['/admin/memory', ['GET', 'POST', 'DELETE'], 'rest_admin_memory'],
-            ['/admin/stats', ['GET'], 'rest_admin_stats'],
-            ['/admin/post-types', ['GET'], 'rest_post_types'],
-            ['/admin/content', ['GET', 'POST'], 'rest_admin_content'],
+            ['/admin/settings', ['GET', 'POST'], 'rest_admin_settings', self::ADMIN_SENSITIVE_CAP],
+            ['/admin/widget', ['GET', 'POST'], 'rest_admin_widget', self::ADMIN_SENSITIVE_CAP],
+            ['/admin/faqs', ['GET', 'POST'], 'rest_admin_faqs', self::ADMIN_ACCESS_CAP],
+            ['/admin/train/start', ['POST'], 'rest_train_start', self::ADMIN_ACCESS_CAP],
+            ['/admin/train/step', ['POST'], 'rest_train_step', self::ADMIN_ACCESS_CAP],
+            ['/admin/train/status', ['GET'], 'rest_train_status', self::ADMIN_ACCESS_CAP],
+            ['/admin/memory', ['GET', 'POST', 'DELETE'], 'rest_admin_memory', self::ADMIN_SENSITIVE_CAP],
+            ['/admin/stats', ['GET'], 'rest_admin_stats', self::ADMIN_ACCESS_CAP],
+            ['/admin/post-types', ['GET'], 'rest_post_types', self::ADMIN_SENSITIVE_CAP],
+            ['/admin/content', ['GET', 'POST'], 'rest_admin_content', self::ADMIN_SENSITIVE_CAP],
         ];
 
-        foreach ($admin_routes as [$route, $methods, $callback]) {
+        foreach ($admin_routes as [$route, $methods, $callback, $capability]) {
             register_rest_route(self::REST_NS, $route, [
                 'methods' => $methods,
                 'callback' => [$this, $callback],
-                'permission_callback' => fn() => current_user_can('manage_options'),
+                'permission_callback' => fn() => current_user_can($capability),
             ]);
         }
     }
