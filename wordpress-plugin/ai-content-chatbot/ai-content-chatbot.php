@@ -19,7 +19,7 @@ final class AICB_Plugin {
     private const WIDGET_OPTION_KEY = 'aicb_widget_config';
     private const VERSION_OPTION = 'aicb_version';
     private const ADMIN_ACCESS_CAP = 'edit_posts';
-    private const ADMIN_SENSITIVE_CAP = 'manage_options';
+    private const ADMIN_SENSITIVE_CAP = 'aicb_manage_sensitive';
     // Feingranulare Inhaltsauswahl für das Training.
     private const INDEX_MODE_OPTION = 'aicb_index_mode';        // 'all' | 'selected'
     private const SELECTED_POSTS_OPTION = 'aicb_selected_posts'; // array<int> Post-IDs (nur publish)
@@ -137,6 +137,7 @@ final class AICB_Plugin {
         if (!get_option(self::WIDGET_OPTION_KEY)) {
             add_option(self::WIDGET_OPTION_KEY, self::default_widget_config());
         }
+        self::sync_role_caps();
     }
 
     public static function deactivate(): void {
@@ -167,6 +168,13 @@ final class AICB_Plugin {
             KEY type (type),
             KEY created_at (created_at)
         ) {$charset};");
+    }
+
+    private static function sync_role_caps(): void {
+        $admin = get_role('administrator');
+        if ($admin && !$admin->has_cap(self::ADMIN_SENSITIVE_CAP)) {
+            $admin->add_cap(self::ADMIN_SENSITIVE_CAP);
+        }
     }
 
     public static function default_settings(): array {
@@ -714,6 +722,7 @@ final class AICB_Plugin {
      * unverändert dem alten Standard entspricht - eigene Texte bleiben.
      */
     public function maybe_upgrade(): void {
+        self::sync_role_caps();
         $installed_version = (string) get_option(self::VERSION_OPTION, '');
         if ($installed_version === self::ASSET_VERSION) {
             return;
