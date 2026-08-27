@@ -792,6 +792,17 @@
       transcript.push(entry);
       saveTranscript();
     }
+    function historySources(rich) {
+      return ((rich && Array.isArray(rich.sources)) ? rich.sources : [])
+        .map(function (source) {
+          return {
+            title: (source && source.title ? source.title : "").toString(),
+            url: (source && source.url ? source.url : "").toString(),
+          };
+        })
+        .filter(function (source) { return source.title || source.url; })
+        .slice(0, 4);
+    }
     function clearTranscript() {
       transcript = [];
       writeStore("localStorage", TRANSCRIPT_KEY, "[]");
@@ -1177,7 +1188,7 @@
           finishTyping(typing, answer, rich, data.event_id);
           pushTranscript({ sender: "bot", text: answer, rich: rich, eventId: data.event_id || null });
           history.push({ role: "user", content: question });
-          history.push({ role: "assistant", content: answer });
+          history.push({ role: "assistant", content: answer, sources: historySources(rich) });
           setHistory(history);
         })
         .catch(function (err) {

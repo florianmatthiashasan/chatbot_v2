@@ -347,6 +347,16 @@
     }
   }
 
+  function historySources(rich) {
+    return ((rich && Array.isArray(rich.sources)) ? rich.sources : [])
+      .map((source) => ({
+        title: source && source.title ? String(source.title) : "",
+        url: source && source.url ? String(source.url) : "",
+      }))
+      .filter((source) => source.title || source.url)
+      .slice(0, 4);
+  }
+
   async function sendTestChat(form) {
     const input = form.querySelector("[name='test_question']");
     const question = input.value.trim();
@@ -355,9 +365,13 @@
     testHistory.push({ role: "user", content: question });
     render();
     try {
-      const data = await api("chat", { method: "POST", body: { question, history: testHistory, session_token: testSession } });
+      const data = await api("chat", { method: "POST", body: { question, history: testHistory, session_token: testSession, lang: document.documentElement.lang || "de" } });
       testSession = data.session_token || testSession;
-      testHistory.push({ role: "assistant", content: data.answer || "" });
+      const rich = data.rich || {};
+      if (Array.isArray(data.sources) && data.sources.length && !Array.isArray(rich.sources)) {
+        rich.sources = data.sources;
+      }
+      testHistory.push({ role: "assistant", content: data.answer || "", sources: historySources(rich) });
       render();
     } catch (err) {
       testHistory.push({ role: "assistant", content: "Fehler: " + err.message });
