@@ -13,6 +13,7 @@
   var OPEN_KEY = "aicb_open";             // war das Panel offen?
   var TEASER_KEY = "aicb_teaser_seen";
   var SUGGESTIONS_KEY = "aicb_page_suggestions_seen";
+  var OPEN_SUGGESTIONS_KEY = "aicb_open_page_suggestions_seen";
   var LEGAL_KEY = "aicb_legal_hidden";      // Fusszeile pro Session ausgeblendet?
   var HISTORY_LIMIT = 16;
   var OFFERED_LIMIT = 10;
@@ -1484,7 +1485,7 @@
     function showOpenQuestionSuggestions(items, page) {
       if (inline || !shell.classList.contains("aicb-open") || !Array.isArray(items) || !items.length) return false;
       var currentKey = suggestionsKey(items, page);
-      if (readStore("sessionStorage", SUGGESTIONS_KEY, "") === currentKey) return true;
+      if (readStore("sessionStorage", OPEN_SUGGESTIONS_KEY, "") === currentKey) return true;
 
       var actions = document.createElement("div");
       actions.className = "aicb-actions-row aicb-page-suggestions";
@@ -1496,7 +1497,7 @@
       if (!actions.children.length) return false;
 
       appendRow(createRow("bot", [createBubble(suggestLeadLabel(), "bot"), actions]));
-      writeStore("sessionStorage", SUGGESTIONS_KEY, currentKey);
+      writeStore("sessionStorage", OPEN_SUGGESTIONS_KEY, currentKey);
       anchorRow = null;
       scrollToBottom();
       return true;
