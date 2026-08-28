@@ -72,6 +72,20 @@
     return `<label class="aicb-field"><span>${label}</span>${html}${hint ? `<small>${hint}</small>` : ""}</label>`;
   }
 
+  // Sagt, ob die eingestellte Dimension schon im Index steckt. Sie greift erst
+  // nach einem vollstaendigen Neu-Training - vorher sucht das Plugin weiter mit
+  // der Dimension, mit der der Index gebaut wurde.
+  function dimsHint(s) {
+    const wanted = Number(s.embedding_dims || 1024);
+    const active = Number(s.index_dims || 0);
+    const search = s.fulltext_ready
+      ? "Hybrid-Suche aktiv (Vektor + Volltext)."
+      : "Volltext-Index fehlt - die Suche laeuft nur ueber Vektoren.";
+    if (!active) return `Noch kein Index vorhanden. ${search}`;
+    if (active === wanted) return `Index nutzt ${active} Dimensionen. ${search}`;
+    return `Index nutzt noch ${active} Dimensionen. Fuer ${wanted} bitte einmal komplett neu trainieren. ${search}`;
+  }
+
   function button(label, attrs) {
     const type = attrs && attrs.submit ? "submit" : "button";
     return `<button type="${type}" class="button ${attrs && attrs.primary ? "button-primary" : ""}" ${attrs && attrs.disabled ? "disabled" : ""} ${attrs && attrs.id ? `id="${attrs.id}"` : ""}>${label}</button>`;
@@ -107,6 +121,7 @@
       openai_api_key: data.openai_api_key || "",
       chat_model: data.chat_model || "gpt-4o-mini",
       embedding_model: data.embedding_model || "text-embedding-3-large",
+      embedding_dims: Number(data.embedding_dims || 1024),
       retriever_k: Number(data.retriever_k || 8),
       max_context_chars: Number(data.max_context_chars || 14000),
       batch_size: Number(data.batch_size || 4),
@@ -367,12 +382,21 @@
     try {
       const data = await api("chat", { method: "POST", body: { question, history: testHistory, session_token: testSession, lang: document.documentElement.lang || "de" } });
       testSession = data.session_token || testSession;
-      const rich = data.rich || {};
-      if (Array.isArray(data.sources) && data.sources.length && !Array.isArray(rich.sources)) {
-        rich.sources = data.sources;
-      }
-      testHistory.push({ role: "assistant", content: data.answer || "", sources: historySources(rich) });
+      const entry = { role: "assistant", content: data.answer || "", sources: [] };
+      testHistory.push(entry);
       render();
+      // Quellen und Buttons kommen nachgelagert - genau wie im Widget, damit
+      // der Test das echte Verhalten spiegelt.
+      if (data.event_id && data.has_actions) {
+        try {
+          const extra = await api("actions", { method: "POST", body: { event_id: data.event_id, session_token: testSession } });
+          const rich = extra.rich || {};
+          if (Array.isArray(extra.sources) && extra.sources.length && !Array.isArray(rich.sources)) {
+            rich.sources = extra.sources;
+          }
+          entry.sources = historySources(rich);
+        } catch (err) { /* Beiwerk - die Antwort steht bereits. */ }
+      }
     } catch (err) {
       testHistory.push({ role: "assistant", content: "Fehler: " + err.message });
       render();
@@ -490,7 +514,10 @@
           ${field("OpenAI API Key", `<input name="openai_api_key" type="password" placeholder="${s.has_openai_api_key ? "Gespeichert. Leer lassen, um zu behalten." : "sk-..."}">`)}
           ${field("Chat Modell", `<input name="chat_model" value="${escapeHtml(s.chat_model || "gpt-4o-mini")}">`)}
           ${field("Embedding Modell", `<input name="embedding_model" value="${escapeHtml(s.embedding_model || "text-embedding-3-large")}">`)}
-          ${field("Retriever K", `<input name="retriever_k" type="number" min="1" max="20" value="${Number(s.retriever_k || 8)}">`)}
+          ${field("Embedding Dimensionen", `<select name="embedding_dims">${[512, 1024, 1536, 3072]
+            .map((d) => `<option value="${d}"${Number(s.embedding_dims || 1024) === d ? " selected" : ""}>${d}</option>`)
+            .join("")}</select>`, dimsHint(s))}
+          ${field("Retriever K", `<input name="retriever_k" type="number" min="1" max="32" value="${Number(s.retriever_k || 14)}">`)}
           ${field("Max Context Chars", `<input name="max_context_chars" type="number" min="3000" value="${Number(s.max_context_chars || 14000)}">`)}
           ${field("Batch Size", `<input name="batch_size" type="number" min="1" max="20" value="${Number(s.batch_size || 4)}">`)}
           ${field("Kontakt URL", `<input name="contact_url" value="${escapeHtml(s.contact_url || "")}">`)}

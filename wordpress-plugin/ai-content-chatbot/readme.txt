@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 9.2.1
+Stable tag: 9.3.1
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -50,6 +50,23 @@ Die PDF-Textextraktion nutzt die mitgelieferte Bibliothek Smalot/PdfParser (MIT-
 
 
 == Changelog ==
+
+= 9.3.1 =
+* Fix: Der Bot beantwortete die vorherige Frage noch einmal. Ursache war die in 9.3.0 eingefuehrte Anreicherung kurzer Fragen aus dem Verlauf - sie lief auf jede kurze Frage, auch auf eine mit eigenem Thema ("was ist die Telefonnummer?"), und das alte Thema stellte dann die Mehrheit der Woerter im Suchtext. Vier Gegenmassnahmen: die Anreicherung greift nur noch bei echten Rueckbezuegen (Anschlusswort, Pro-Form oder gar kein eigenes Inhaltswort); der Volltext-Zweig sieht immer nur die unveraenderte Frage; die angereicherte Variante wird beim Ranking gedaempft; und der Prompt verlangt ausdruecklich die Antwort auf die aktuelle Nachricht.
+* Die Trefferreihenfolge kommt jetzt aus der Fusion statt aus dem rohen Aehnlichkeitswert. Vorher wurde die Gewichtung am Ende wieder ueberschrieben, womit das alte Thema erneut oben stand.
+* Abschnitte unter der Relevanzschwelle landen nicht mehr in der Rangliste, nur weil sonst niemand da ist. Eine Rangfusion behandelt Platz 1 und Platz 2 fast gleich - unabhaengig davon, ob dazwischen 0.55 und 0.02 liegen.
+* Nachbar-Abschnitte stehen jetzt direkt hinter ihrem Anker statt nach Score verstreut und erben dessen Wert, damit sie nicht am Relevanzfilter haengenbleiben.
+
+= 9.3.0 =
+* Hybrid-Suche: Vektor-Aehnlichkeit und Volltext-Treffer werden getrennt gerankt und per Reciprocal Rank Fusion zusammengefuehrt. Reine Vektorsuche verfehlt systematisch alles Woertliche - Produktnamen, Artikelnummern, "UID", Eigennamen. Der neue Volltext-Zweig faengt genau diese Faelle ab.
+* Deutlich schnellere Suche: Der Aehnlichkeitsscan laedt nur noch IDs und Vektoren statt der kompletten Chunk-Tabelle; Titel und Text werden erst fuer die finalen Treffer nachgeladen.
+* Kuerzere Embeddings (1024 statt 3072 Dimensionen, per Matryoshka-Kuerzung einstellbar). Dritteldauer beim Scan, Dritteldaten in der Tabelle, praktisch unveraenderte Trefferqualitaet. Greift nach einem vollstaendigen Neu-Training.
+* Ein Modell-Aufruf weniger vor jeder Antwort: Folgefragen werden nicht mehr per Extra-Aufruf umformuliert, sondern aus dem Verlauf angereichert (vorige Frage + Titel der damals genannten Quellen).
+* Karte, Buttons und Quellen kommen jetzt nachgelagert ueber /actions. Der Antworttext steht dadurch ein bis drei Sekunden frueher im Chat, statt auf den Button-Aufruf zu warten.
+* Faktendichtere Antworten: Der Prompt verlangt konkrete Angaben ohne Einleitungsfloskeln, Schlusszusammenfassung oder selbst angebotene Folgethemen (dafuer sind die Buttons da). Zusammen mit dem knapperen Token-Limit verkuerzt das die Ausgabe spuerbar.
+* Weniger, dafuer treffendere Abschnitte im Kontext (Retriever K 20 -> 14, Kontext 30.000 -> 24.000 Zeichen). Der relevante Absatz geht nicht mehr in der Mitte unter.
+* Fix: Im Wissens-Tab bearbeitete Eintraege landeten im langsamen JSON-Pfad und mit der Standard-Dimension statt der des Index. Sie werden jetzt korrekt gepackt gespeichert.
+* Einstellungen zeigen an, mit wie vielen Dimensionen der Index gebaut wurde und ob der Volltext-Index bereitsteht.
 
 = 0.8.5 =
 * Gespraeche bleiben beim Neuladen erhalten: Der sichtbare Chatverlauf wird jetzt lokal (im Browser) gespeichert und beim Reload bzw. Seitenwechsel wiederhergestellt - war das Fenster offen, oeffnet es sich wieder mit dem bisherigen Verlauf. Geleert wird nur beim Schliessen ueber das X (Minimieren behaelt den Verlauf).

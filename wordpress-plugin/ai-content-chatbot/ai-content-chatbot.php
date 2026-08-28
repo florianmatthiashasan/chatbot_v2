@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 9.2.1
+ * Version: 9.3.1
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -31,9 +31,10 @@ final class AICB_Plugin {
      * Emoji ersetzen.
      */
     private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
-    private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
+    private const OLD_DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
+    private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="12" r="1.65" fill="currentColor"/><circle cx="12" cy="12" r="1.65" fill="currentColor"/><circle cx="16" cy="12" r="1.65" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '9.2.1';
+    private const ASSET_VERSION = '9.3.1';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -42,6 +43,50 @@ final class AICB_Plugin {
     private const CHUNK_TARGET_TOKENS = 380;
     private const CHUNK_OVERLAP_TOKENS = 70;
     private const SESSION_TTL = 86400;
+    // Merkt sich, ob die Datenbank den Volltext-Index angelegt hat.
+    private const FULLTEXT_OPTION = 'aicb_fulltext_ready';
+    // Dimensionszahl der aktuell gespeicherten Vektoren.
+    private const INDEX_DIMS_OPTION = 'aicb_index_dims';
+    // Zwischenspeicher fuer den nachgelagerten Button-Call (Sekunden).
+    private const ACTION_TICKET_TTL = 180;
+    // Gewicht der aus dem Verlauf angereicherten Suchvariante gegenueber der
+    // aktuellen Frage. Bei einer echten Folgefrage ("und die Preise?") soll sie
+    // weiterhin fuehren duerfen; liegt die Rueckbezug-Pruefung daneben, daempft
+    // der Faktor den Schaden, statt die vorige Frage erneut beantworten zu
+    // lassen.
+    private const FOLLOWUP_QUERY_WEIGHT = 0.8;
+
+    /**
+     * Fuellwoerter, die die Volltext-Relevanz verwaessern wuerden. Bewusst nur
+     * Funktionswoerter - alles Inhaltliche bleibt drin.
+     */
+    private const KEYWORD_STOPWORDS = [
+        'aber' => 1, 'alle' => 1, 'allen' => 1, 'aller' => 1, 'alles' => 1, 'als' => 1, 'also' => 1,
+        'auch' => 1, 'auf' => 1, 'aus' => 1, 'bei' => 1, 'beim' => 1, 'bin' => 1, 'bis' => 1,
+        'bist' => 1, 'brauche' => 1, 'dafuer' => 1, 'damit' => 1, 'dann' => 1, 'das' => 1, 'dass' => 1,
+        'dem' => 1, 'den' => 1, 'denn' => 1, 'der' => 1, 'des' => 1, 'die' => 1, 'dies' => 1,
+        'diese' => 1, 'diesem' => 1, 'diesen' => 1, 'dieser' => 1, 'dieses' => 1, 'doch' => 1,
+        'dort' => 1, 'du' => 1, 'durch' => 1, 'ein' => 1, 'eine' => 1, 'einem' => 1, 'einen' => 1,
+        'einer' => 1, 'eines' => 1, 'etwas' => 1, 'euch' => 1, 'euer' => 1, 'eure' => 1, 'fuer' => 1,
+        'gibt' => 1, 'habe' => 1, 'haben' => 1, 'hallo' => 1, 'hat' => 1, 'hier' => 1, 'ich' => 1,
+        'ihm' => 1, 'ihn' => 1, 'ihnen' => 1, 'ihr' => 1, 'ihre' => 1, 'ihrem' => 1, 'ihren' => 1,
+        'ihrer' => 1, 'immer' => 1, 'ist' => 1, 'kann' => 1, 'kannst' => 1, 'koennen' => 1,
+        'koennt' => 1, 'mal' => 1, 'man' => 1, 'mehr' => 1, 'mein' => 1, 'meine' => 1, 'mich' => 1,
+        'mir' => 1, 'mit' => 1, 'moechte' => 1, 'muss' => 1, 'nach' => 1, 'nicht' => 1, 'noch' => 1,
+        'nur' => 1, 'ob' => 1, 'oder' => 1, 'ohne' => 1, 'schon' => 1, 'sehr' => 1, 'sein' => 1,
+        'seine' => 1, 'sich' => 1, 'sie' => 1, 'sind' => 1, 'so' => 1, 'soll' => 1, 'sonst' => 1,
+        'ueber' => 1, 'und' => 1, 'uns' => 1, 'unser' => 1, 'unsere' => 1, 'vom' => 1, 'von' => 1,
+        'vor' => 1, 'waere' => 1, 'wann' => 1, 'war' => 1, 'was' => 1, 'weil' => 1, 'welche' => 1,
+        'welchen' => 1, 'welcher' => 1, 'welches' => 1, 'wenn' => 1, 'wer' => 1, 'werde' => 1,
+        'werden' => 1, 'wie' => 1, 'wieder' => 1, 'will' => 1, 'wir' => 1, 'wird' => 1, 'wo' => 1,
+        'wollen' => 1, 'wuerde' => 1, 'zu' => 1, 'zum' => 1, 'zur' => 1,
+        'about' => 1, 'and' => 1, 'any' => 1, 'are' => 1, 'can' => 1, 'could' => 1, 'did' => 1,
+        'does' => 1, 'for' => 1, 'from' => 1, 'has' => 1, 'have' => 1, 'her' => 1, 'his' => 1,
+        'how' => 1, 'its' => 1, 'may' => 1, 'not' => 1, 'the' => 1, 'their' => 1, 'them' => 1,
+        'there' => 1, 'they' => 1, 'this' => 1, 'was' => 1, 'were' => 1, 'what' => 1, 'when' => 1,
+        'where' => 1, 'which' => 1, 'who' => 1, 'will' => 1, 'with' => 1, 'would' => 1, 'you' => 1,
+        'your' => 1,
+    ];
 
     private static ?AICB_Plugin $instance = null;
 
@@ -56,6 +101,10 @@ final class AICB_Plugin {
         add_action('init', [$this, 'maybe_upgrade'], 5);
         add_action('init', [$this, 'register_shortcodes']);
         add_action('admin_menu', [$this, 'register_admin_menu']);
+        // Volltext-Index fuer die Keyword-Haelfte der Hybrid-Suche. Bewusst nur
+        // im Admin: das ALTER baut die Tabelle bei InnoDB einmalig neu, das
+        // gehoert nicht in den Request eines Besuchers.
+        add_action('admin_init', [$this, 'ensure_fulltext_index']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
         add_action('wp_enqueue_scripts', [$this, 'enqueue_widget_assets']);
         add_action('wp_footer', [$this, 'render_footer_widget']);
@@ -182,8 +231,12 @@ final class AICB_Plugin {
             'openai_api_key' => '',
             'chat_model' => 'gpt-4o-mini',
             'embedding_model' => 'text-embedding-3-large',
-            'retriever_k' => 20,
-            'max_context_chars' => 30000,
+            // Matryoshka-Kuerzung: 1024 statt 3072 Dimensionen. Die Trefferqualitaet
+            // bleibt praktisch gleich, die Suche wird dreimal schneller und die
+            // Tabelle dreimal kleiner. Greift erst nach einem Neu-Training.
+            'embedding_dims' => 1024,
+            'retriever_k' => 14,
+            'max_context_chars' => 24000,
             'batch_size' => 4,
             'auto_index_on_save' => true,
             'widget_enabled' => true,
@@ -765,6 +818,21 @@ final class AICB_Plugin {
             $settings['max_context_chars'] = 30000;
             $settings_changed = true;
         }
+        // Hybrid-Suche sortiert deutlich besser vor: weniger, dafuer treffendere
+        // Abschnitte. Das steigert die Antwortqualitaet (der relevante Absatz
+        // geht nicht mehr in der Mitte unter) und senkt zugleich die Wartezeit.
+        if ((int) ($settings['retriever_k'] ?? 0) === 20) {
+            $settings['retriever_k'] = 14;
+            $settings_changed = true;
+        }
+        if ((int) ($settings['max_context_chars'] ?? 0) === 30000) {
+            $settings['max_context_chars'] = 24000;
+            $settings_changed = true;
+        }
+        if (!isset($settings['embedding_dims'])) {
+            $settings['embedding_dims'] = 1024;
+            $settings_changed = true;
+        }
         if ($settings_changed) {
             update_option(self::OPTION_KEY, $settings, false);
         }
@@ -798,7 +866,7 @@ final class AICB_Plugin {
                 $widget['copy']['icon'] = self::DEFAULT_ICON_SVG;
                 $changed = true;
             }
-            if (trim((string) ($widget['copy']['icon'] ?? '')) === self::LEGACY_ICON_SVG) {
+            if (in_array(trim((string) ($widget['copy']['icon'] ?? '')), [self::LEGACY_ICON_SVG, self::OLD_DEFAULT_ICON_SVG], true)) {
                 $widget['copy']['icon'] = self::DEFAULT_ICON_SVG;
                 $changed = true;
             }
@@ -981,7 +1049,7 @@ final class AICB_Plugin {
                 <button class="aicb-teaser-close" type="button" data-aicb-teaser-close aria-label="<?php echo esc_attr($pack['aria_teaser_close']); ?>">&times;</button>
             </div>
             <button class="aicb-launcher" type="button" aria-label="<?php echo esc_attr($copy['title']); ?>" data-aicb-launcher>
-                <span class="aicb-launcher-icon" data-aicb-launcher-icon><?php echo $icon_html ?: $this->default_launcher_icon(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
+                <span class="aicb-launcher-icon" data-aicb-launcher-icon><?php echo $this->default_launcher_icon(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
             </button>
             <?php endif; ?>
             <div class="aicb-panel" data-aicb-panel <?php echo $inline ? '' : 'hidden'; ?>>
@@ -1176,10 +1244,10 @@ final class AICB_Plugin {
     }
 
     private function default_launcher_icon(): string {
-        return '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">'
-            . '<path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z"></path>'
-            . '<path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke-width="2.1"></path>'
-            . '<path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor" stroke="none"></path></svg>';
+        return '<svg viewBox="0 0 24 24" aria-hidden="true">'
+            . '<circle cx="8" cy="12" r="1.65" fill="currentColor" stroke="none"></circle>'
+            . '<circle cx="12" cy="12" r="1.65" fill="currentColor" stroke="none"></circle>'
+            . '<circle cx="16" cy="12" r="1.65" fill="currentColor" stroke="none"></circle></svg>';
     }
 
     private function widget_css_vars(array $config): string {
@@ -1208,6 +1276,14 @@ final class AICB_Plugin {
         register_rest_route(self::REST_NS, '/chat', [
             'methods' => 'POST',
             'callback' => [$this, 'rest_chat'],
+            'permission_callback' => '__return_true',
+        ]);
+
+        // Karte, Quellen und Buttons kosten einen eigenen Modell-Aufruf. Er
+        // laeuft nachgelagert, damit die Antwort nicht darauf warten muss.
+        register_rest_route(self::REST_NS, '/actions', [
+            'methods' => 'POST',
+            'callback' => [$this, 'rest_actions'],
             'permission_callback' => '__return_true',
         ]);
 
@@ -1288,15 +1364,6 @@ final class AICB_Plugin {
         $question = sanitize_textarea_field((string) ($params['question'] ?? $params['message'] ?? ''));
         $history = is_array($params['history'] ?? null) ? $params['history'] : [];
         $lang = sanitize_key((string) ($params['lang'] ?? 'de'));
-        // Bereits gezeigte Buttons: verhindert dieselbe Empfehlung zweimal.
-        $offered = [];
-        foreach ((array) ($params['offered'] ?? []) as $item) {
-            $label = sanitize_text_field((string) $item);
-            if ($label !== '') {
-                $offered[] = $label;
-            }
-        }
-        $offered = array_slice($offered, -10);
 
         if ($question === '') {
             return new WP_REST_Response(['error' => 'Keine Frage übergeben.'], 400);
@@ -1306,14 +1373,23 @@ final class AICB_Plugin {
         $session_hash = $session_payload['session_hash'];
 
         try {
-            $answer_payload = $this->answer_question($question, $history, $lang, $offered);
+            $answer_payload = $this->answer_question($question, $history, $lang);
             $event_id = $this->record_event($session_hash, $question, $answer_payload['answer'], 'ok', null, $answer_payload['usage']);
             $this->touch_session($session_hash);
+            // Alles, was der nachgelagerte /actions-Aufruf braucht. Nur IDs und
+            // Scores - die Texte holt er sich frisch aus der Tabelle.
+            set_transient($this->action_ticket_key($session_hash, $event_id), [
+                'question' => $question,
+                'answer' => $answer_payload['answer'],
+                'lang' => $answer_payload['lang'],
+                'scores' => $answer_payload['scores'],
+                'history' => $this->compact_history($history),
+            ], self::ACTION_TICKET_TTL);
             return rest_ensure_response([
                 'answer' => $answer_payload['answer'],
-                'sources' => $answer_payload['sources'],
-                'rich' => $answer_payload['rich'],
                 'event_id' => $event_id,
+                // Buttons, Karte und Quellen folgen ueber /actions.
+                'has_actions' => true,
                 'session_token' => $session_payload['token'],
                 'session_expires_at' => $session_payload['expires_at'],
             ]);
@@ -1325,6 +1401,101 @@ final class AICB_Plugin {
                 'session_expires_at' => $session_payload['expires_at'],
             ], 500);
         }
+    }
+
+    /**
+     * Zweiter Schritt einer Antwort: Karte, Quellen und Buttons.
+     *
+     * Diese kosten einen weiteren Modell-Aufruf, hängen aber nur an der bereits
+     * fertigen Antwort. Sie hier nachzuladen nimmt ein bis drei Sekunden aus der
+     * Wartezeit, die der Nutzer vor dem ersten Wort verbringt.
+     */
+    public function rest_actions(WP_REST_Request $request): WP_REST_Response {
+        $params = $request->get_json_params();
+        $event_id = (int) ($params['event_id'] ?? 0);
+        $empty = ['rich' => ['version' => 1, 'actions' => [], 'sources' => []]];
+        if ($event_id <= 0) {
+            return rest_ensure_response($empty);
+        }
+
+        $offered = [];
+        foreach ((array) ($params['offered'] ?? []) as $item) {
+            $label = sanitize_text_field((string) $item);
+            if ($label !== '') {
+                $offered[] = $label;
+            }
+        }
+        $offered = array_slice($offered, -10);
+
+        // Der Ticket-Key enthält den Session-Hash: eine fremde Session findet
+        // das Ticket nicht und bekommt schlicht nichts.
+        $session_payload = $this->ensure_session_payload((string) ($params['session_token'] ?? ''));
+        $ticket = get_transient($this->action_ticket_key($session_payload['session_hash'], $event_id));
+        if (!is_array($ticket)) {
+            return rest_ensure_response($empty);
+        }
+
+        try {
+            $answer = (string) ($ticket['answer'] ?? '');
+            $lang = (string) ($ticket['lang'] ?? 'de');
+            $matches = $this->hydrate_chunks((array) ($ticket['scores'] ?? []), false);
+            $candidates = $this->card_candidates($matches, $answer);
+            $actions = $this->build_actions(
+                $candidates,
+                (string) ($ticket['question'] ?? ''),
+                $answer,
+                (array) ($ticket['history'] ?? []),
+                $lang,
+                $matches,
+                $offered
+            );
+
+            // Ähnlichkeitswerte allein trennen Begrüßung und fremdsprachige
+            // Fachfrage nicht (gemessen: 0.32 vs 0.31). Deshalb meldet der
+            // Button-Call, ob die Antwort überhaupt eine inhaltliche Auskunft ist.
+            $is_content = $actions['content'] === null ? true : (bool) $actions['content'];
+            // Karte NUR, wenn das Modell aktiv eine wirklich passende Seite gewählt
+            // hat. Nie den besten Suchtreffer als Notlösung aufdrängen - eine
+            // unpassende Karte (z. B. ein Projekt bei einer Frage zur UID) ist
+            // schlechter als gar keine.
+            $card_row = $actions['card'];
+            $card = ($is_content && $card_row) ? $this->build_card($card_row) : null;
+
+            // Quellen strukturiert ausliefern; das Widget rendert sie als kompakte
+            // Titel-Chips statt als lange URL-Liste im Antworttext.
+            $sources = ($matches && $is_content) ? $this->sources_from_matches($matches) : [];
+            $rich = ['version' => 1, 'actions' => $actions['actions'], 'sources' => $sources];
+            if ($card) {
+                $rich['cards'] = [$card];
+            }
+            return rest_ensure_response(['rich' => $rich, 'sources' => $sources]);
+        } catch (Throwable $e) {
+            error_log('AICB actions failed: ' . $e->getMessage());
+            return rest_ensure_response($empty);
+        }
+    }
+
+    private function action_ticket_key(string $session_hash, int $event_id): string {
+        return 'aicb_act_' . md5($session_hash . '|' . $event_id);
+    }
+
+    /** Verlauf auf das eindampfen, was der Button-Aufruf tatsächlich liest. */
+    private function compact_history(array $history): array {
+        $out = [];
+        foreach (array_slice($history, -4) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $content = trim((string) ($item['content'] ?? $item['text'] ?? ''));
+            if ($content === '') {
+                continue;
+            }
+            $out[] = [
+                'role' => (string) ($item['role'] ?? $item['sender'] ?? 'user'),
+                'content' => $this->limit_text($content, 240),
+            ];
+        }
+        return $out;
     }
 
     /**
@@ -1412,7 +1583,7 @@ final class AICB_Plugin {
         $payload = $request->get_json_params();
         $settings = $this->settings();
         $allowed = [
-            'chat_model', 'embedding_model', 'retriever_k', 'max_context_chars', 'batch_size',
+            'chat_model', 'embedding_model', 'embedding_dims', 'retriever_k', 'max_context_chars', 'batch_size',
             'auto_index_on_save', 'widget_enabled', 'enabled_post_types', 'include_excerpts',
             'include_taxonomies', 'privacy_url', 'contact_url', 'contact_email', 'contact_phone',
             'system_prompt',
@@ -1619,15 +1790,19 @@ final class AICB_Plugin {
         if ($content === '') {
             return new WP_REST_Response(['error' => 'content fehlt.'], 400);
         }
-        $embedding = $this->embed_text($content);
+        // Dimension des bestehenden Index verwenden, sonst passt der Vektor
+        // nicht zum Rest der Tabelle. Und in die gepackte Spalte schreiben -
+        // die JSON-Spalte ist nur noch der Altlast-Pfad.
+        $embedding = $this->embed_text($content, $this->index_dimensions());
         $wpdb->update($table, [
             'title' => $title,
             'content' => $content,
             'content_hash' => sha1($content),
-            'embedding' => wp_json_encode($embedding),
+            'embedding' => null,
+            'embedding_packed' => $this->pack_embedding($embedding),
             'token_estimate' => $this->estimate_tokens($content),
             'updated_at' => gmdate('Y-m-d H:i:s'),
-        ], ['id' => $id], ['%s', '%s', '%s', '%s', '%d', '%s'], ['%d']);
+        ], ['id' => $id], ['%s', '%s', '%s', '%s', '%s', '%d', '%s'], ['%d']);
         return rest_ensure_response(['status' => 'ok', 'id' => $id]);
     }
 
@@ -2830,7 +3005,7 @@ final class AICB_Plugin {
         return "Document: {$title}\nSection: {$section}\n" . trim($body);
     }
 
-    private function answer_question(string $question, array $history, string $lang, array $offered = []): array {
+    private function answer_question(string $question, array $history, string $lang): array {
         global $wpdb;
         $chunks_table = $wpdb->prefix . 'aicb_chunks';
         $count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$chunks_table}");
@@ -2840,16 +3015,21 @@ final class AICB_Plugin {
         // funktionieren, statt eine Fehlermeldung auszuwerfen.
         $matches = [];
         if ($count > 0) {
-            // Mit Originalfrage und umformulierter Variante suchen: das fängt
-            // Folgefragen und fremdsprachige Fragen gleichzeitig ab.
+            // Mit Originalfrage und angereicherter Variante suchen: das fängt
+            // Folgefragen und fremdsprachige Fragen gleichzeitig ab. Die
+            // Anreicherung kommt aus dem Verlauf, nicht aus einem eigenen
+            // Modell-Aufruf - der kostete früher eine ganze Sekunde vorweg.
+            $expanded = $this->expand_followup_query($question, $history);
             $queries = [$question];
-            $rewritten = $this->rewrite_followup($question, $history);
-            if ($rewritten !== '' && $rewritten !== $question) {
-                $queries[] = $rewritten;
+            if ($expanded !== $question) {
+                $queries[] = $expanded;
             }
-            $vectors = array_values(array_filter($this->embed_texts($queries)));
+            $vectors = array_values(array_filter($this->embed_texts($queries, $this->index_dimensions())));
             if ($vectors) {
-                $matches = $this->search_chunks($vectors);
+                // Der Volltext-Zweig bekommt immer nur die unveraenderte Frage.
+                // Sonst suchte er nach den Woertern des alten Themas mit - und
+                // die sind bei einer kurzen Frage schnell in der Ueberzahl.
+                $matches = $this->search_chunks($vectors, $question);
             }
         }
 
@@ -2866,41 +3046,35 @@ final class AICB_Plugin {
         $messages = $this->build_chat_messages($question, $history, $context, $target_lang, $count > 0);
         // Etwas Temperatur laesst die Antwort natuerlicher klingen (statt roboterhaft);
         // die strikte Kontext-Bindung im Prompt verhindert weiterhin Halluzinationen.
-        // Grosszuegige Token-Obergrenze gibt ausfuehrlichen Antworten Raum, deckelt aber Ausreisser.
-        $chat = $this->openai_chat($messages, ['temperature' => 0.4, 'max_tokens' => 1200]);
+        // 900 Tokens reichen fuer eine vollstaendige Auskunft; der Prompt haelt die
+        // Antwort faktendicht statt wortreich, das spart mehrere Sekunden Ausgabe.
+        $chat = $this->openai_chat($messages, ['temperature' => 0.4, 'max_tokens' => 900]);
         $answer = trim((string) ($chat['answer'] ?? ''));
         if ($answer === '') {
             $answer = $count > 0 ? $pack['error'] : $pack['no_index'];
         }
 
-        $candidates = $this->card_candidates($relevant, $answer);
-        $actions = $this->build_actions($candidates, $question, $answer, $history, $target_lang, $relevant, $offered);
-
-        // Ähnlichkeitswerte allein trennen Begrüßung und fremdsprachige
-        // Fachfrage nicht (gemessen: 0.32 vs 0.31). Deshalb meldet der
-        // Button-Call, ob die Antwort überhaupt eine inhaltliche Auskunft ist.
-        $is_content = $actions['content'] === null ? true : (bool) $actions['content'];
-        // Karte NUR, wenn das Modell aktiv eine wirklich passende Seite gewählt
-        // hat. Nie den besten Suchtreffer als Notlösung aufdrängen - eine
-        // unpassende Karte (z. B. ein Projekt bei einer Frage zur UID) ist
-        // schlechter als gar keine.
-        $card_row = $actions['card'];
-        $card = ($is_content && $card_row) ? $this->build_card($card_row) : null;
-
-        // Quellen strukturiert ausliefern; das Widget rendert sie als kompakte
-        // Titel-Chips statt als lange URL-Liste im Antworttext.
-        $sources = ($relevant && $is_content) ? $this->sources_from_matches($relevant) : [];
-        $rich = ['version' => 1, 'actions' => $actions['actions'], 'sources' => $sources];
-        if ($card) {
-            $rich['cards'] = [$card];
-        }
-
+        // Karte, Quellen und Buttons brauchen einen weiteren Modell-Aufruf. Der
+        // laeuft nicht mehr hier, sondern nachgelagert ueber /actions - die
+        // Antwort steht dadurch ein bis drei Sekunden frueher im Chat.
         return [
             'answer' => $answer,
-            'sources' => $sources,
-            'rich' => $rich,
             'usage' => $chat['usage'] ?? [],
+            'lang' => $target_lang,
+            'scores' => $this->match_scores($relevant),
         ];
+    }
+
+    /** [id => score] aus den Treffern - reicht, um sie spaeter neu zu laden. */
+    private function match_scores(array $matches): array {
+        $scores = [];
+        foreach ($matches as $row) {
+            $id = (int) ($row['id'] ?? 0);
+            if ($id > 0) {
+                $scores[$id] = round((float) ($row['score'] ?? 0), 5);
+            }
+        }
+        return $scores;
     }
 
     /** Steht im Antworttext schon ein Quellenblock (in irgendeiner Sprache)? */
@@ -2915,42 +3089,130 @@ final class AICB_Plugin {
 
     /**
      * Kurze Folgefragen ("und die Preise?") für die Suche eigenständig machen.
-     * Nur bei kurzen Nachrichten mit Vorgeschichte - sonst ein Call zu viel.
+     *
+     * Früher lief dafür ein eigener Modell-Aufruf, der eine halbe bis anderthalb
+     * Sekunden vor jede Antwort setzte. Für Retrieval genügt aber, was der
+     * Verlauf ohnehin hergibt: die vorige Frage und die Titel der damals
+     * genannten Quellen. Der Vektor liegt dann zwischen altem Thema und neuer
+     * Frage - genau das, was die Umformulierung erreichen sollte.
      */
-    private function rewrite_followup(string $question, array $history): string {
+    private function expand_followup_query(string $question, array $history): string {
         if (!$history || $this->str_len($question) > 90 || str_word_count($question) > 12) {
             return $question;
         }
-        $lines = [];
-        foreach (array_slice($history, -4) as $item) {
+        // Reine Grußfloskeln nicht anreichern - sonst zieht "hallo" nach einem
+        // Fachgespräch plötzlich Fachabschnitte heran.
+        if ($this->is_pure_smalltalk($question)) {
+            return $question;
+        }
+        // Und nur, wenn die Frage ohne den Verlauf gar nicht dasteht. "Was ist
+        // die Telefonnummer von Moar Gut?" nennt ihr Thema selbst - wird sie
+        // trotzdem mit dem alten Thema angereichert, sucht das Plugin nach dem
+        // alten Thema und beantwortet die vorige Frage ein zweites Mal.
+        if (!$this->refers_to_previous($question)) {
+            return $question;
+        }
+
+        $previous_question = '';
+        $topic = '';
+        foreach (array_reverse(array_slice($history, -6)) as $item) {
             if (!is_array($item)) {
                 continue;
             }
             $role = strtolower((string) ($item['role'] ?? $item['sender'] ?? 'user'));
-            $content = trim((string) ($item['content'] ?? $item['text'] ?? ''));
-            if ($content === '') {
-                continue;
+            $is_bot = in_array($role, ['assistant', 'ai', 'bot'], true);
+            if ($is_bot && $topic === '') {
+                // Die Quellentitel der letzten Antwort benennen das Thema am
+                // schärfsten - besser als der Antworttext selbst.
+                $titles = [];
+                foreach ((array) ($item['sources'] ?? []) as $source) {
+                    $title = trim((string) (is_array($source) ? ($source['title'] ?? '') : ''));
+                    if ($title !== '' && !in_array($title, $titles, true)) {
+                        $titles[] = $title;
+                    }
+                    if (count($titles) >= 2) {
+                        break;
+                    }
+                }
+                $topic = implode(' ', $titles);
             }
-            $lines[] = (in_array($role, ['assistant', 'ai', 'bot'], true) ? 'Assistent: ' : 'Nutzer: ')
-                . $this->limit_text($content, 240);
+            if (!$is_bot && $previous_question === '') {
+                $previous_question = $this->limit_text(trim((string) ($item['content'] ?? $item['text'] ?? '')), 160);
+            }
+            if ($previous_question !== '' && $topic !== '') {
+                break;
+            }
         }
-        if (!$lines) {
-            return $question;
+
+        $expanded = trim(implode(' ', array_filter([$previous_question, $topic, $question])));
+        return $expanded !== '' ? $expanded : $question;
+    }
+
+    /**
+     * Verweist die Frage auf das bisher Gesagte, statt ihr Thema selbst zu
+     * nennen? Nur dann darf der Verlauf in die Suche einfließen.
+     *
+     * Drei Signale: ein Anschlusswort am Anfang ("und die Preise?"), eine
+     * Pro-Form ("welche davon?") oder überhaupt kein eigenes Inhaltswort
+     * ("sonst nichts?"). Alles andere - jede Frage, die ihr Thema selbst
+     * benennt - bleibt unangetastet.
+     */
+    private function refers_to_previous(string $question): bool {
+        $plain = $this->str_lower(trim($question));
+        $words = array_values(array_filter(preg_split('/[^\p{L}\p{N}]+/u', $plain) ?: [], fn($w) => $w !== ''));
+        if (!$words) {
+            return false;
         }
-        try {
-            $chat = $this->openai_chat([
-                ['role' => 'system', 'content' =>
-                    'Du formulierst die letzte Nutzernachricht so um, dass sie ohne den Chatverlauf '
-                    . 'verständlich ist. Behalte die Sprache der Nachricht. Füge keine neuen '
-                    . 'Informationen hinzu. Ist die Nachricht eine Begrüßung oder Small Talk, gib sie '
-                    . 'unverändert zurück. Antworte nur mit der umformulierten Nachricht.'],
-                ['role' => 'user', 'content' => implode("\n", $lines) . "\n\nLetzte Nachricht: " . $question],
-            ], ['temperature' => 0, 'max_tokens' => 120]);
-            $rewritten = trim((string) ($chat['answer'] ?? ''));
-            return $rewritten !== '' ? $rewritten : $question;
-        } catch (Throwable $e) {
-            return $question;
+
+        // 1) Anschlusswort am Satzanfang.
+        $openers = [
+            'und' => 1, 'auch' => 1, 'oder' => 1, 'sonst' => 1, 'dann' => 1, 'ausserdem' => 1,
+            'außerdem' => 1, 'weiter' => 1, 'weitere' => 1, 'noch' => 1, 'aber' => 1,
+            'and' => 1, 'also' => 1, 'else' => 1, 'more' => 1,
+        ];
+        if (!empty($openers[$words[0]])) {
+            return true;
         }
+
+        // 2) Pro-Form irgendwo im Satz - sie zeigt auf etwas zuvor Genanntes.
+        $proforms = [
+            'davon' => 1, 'dazu' => 1, 'dabei' => 1, 'dafür' => 1, 'dafuer' => 1, 'damit' => 1,
+            'darin' => 1, 'darüber' => 1, 'darueber' => 1, 'daran' => 1, 'darauf' => 1,
+            'dort' => 1, 'dieses' => 1, 'diese' => 1, 'dieser' => 1, 'diesem' => 1, 'diesen' => 1,
+            'jene' => 1, 'derselbe' => 1, 'genannten' => 1, 'erwähnten' => 1, 'erwaehnten' => 1,
+            'thereof' => 1, 'those' => 1, 'them' => 1,
+        ];
+        foreach ($words as $word) {
+            if (!empty($proforms[$word])) {
+                return true;
+            }
+        }
+
+        // 3) Kein eigenes Inhaltswort - die Frage steht ohne Verlauf nicht.
+        return !$this->keyword_terms($question);
+    }
+
+    /** Nur Gruß, Dank oder Bestätigung - ohne eigenes Thema. */
+    private function is_pure_smalltalk(string $text): bool {
+        $words = preg_split('/[^\p{L}\p{N}]+/u', $this->str_lower(trim($text))) ?: [];
+        $words = array_values(array_filter($words, fn($w) => $w !== ''));
+        if (!$words || count($words) > 4) {
+            return false;
+        }
+        $smalltalk = [
+            'hallo' => 1, 'hi' => 1, 'hey' => 1, 'servus' => 1, 'moin' => 1, 'guten' => 1,
+            'tag' => 1, 'morgen' => 1, 'abend' => 1, 'grüß' => 1, 'gruess' => 1, 'gott' => 1,
+            'danke' => 1, 'dank' => 1, 'vielen' => 1, 'super' => 1, 'perfekt' => 1, 'top' => 1,
+            'ok' => 1, 'okay' => 1, 'alles' => 1, 'klar' => 1, 'tschüss' => 1, 'tschuess' => 1,
+            'ciao' => 1, 'bye' => 1, 'hello' => 1, 'thanks' => 1, 'thank' => 1, 'you' => 1,
+            'good' => 1, 'great' => 1, 'nice' => 1, 'cool' => 1,
+        ];
+        foreach ($words as $word) {
+            if (!isset($smalltalk[$word])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -3108,23 +3370,33 @@ final class AICB_Plugin {
             . "- Inhaltliche Fragen zu dieser Website, dem Unternehmen, den Produkten oder Leistungen "
             . "beantwortest du ausschließlich mit dem bereitgestellten Kontext. Steht die Information "
             . "dort nicht, sage klar, dass du sie nicht hast - erfinde nichts und nutze kein Weltwissen.\n"
-            . "- Beziehe dich auf den bisherigen Verlauf. Folgefragen wie \"und die Preise?\" beziehen "
-            . "sich auf das zuletzt besprochene Thema.\n"
-            . "- Wenn der Nutzer nach einer bereits beantworteten Sache fragt, bestätigt, zweifelt "
-            . "oder nachhakt (z. B. \"sonst nichts?\", \"okay?\", \"welche davon?\"), nutze zuerst "
-            . "die vorherige Antwort und deren Quellen. Sage dann kurz, was bereits genannt wurde, "
-            . "nenne den passenden Link, wenn er im Verlauf oder Kontext steht, und frage bei Bedarf "
-            . "nach dem nächsten Schritt. Behaupte in diesem Fall nicht, es gebe keinen Kontext.\n"
-            . "- Nennst du Fakten aus dem Kontext, gib die passenden Quellen als direkte URLs an.\n"
+            . "- WICHTIG: Beantworte immer die AKTUELLE Nachricht, nie die vorherige. Fragt der "
+            . "Nutzer nach etwas Neuem (z. B. erst nach Zimmern, dann nach der Telefonnummer), "
+            . "wechsle das Thema vollständig. Der Kontext unten kann noch Abschnitte zum alten "
+            . "Thema enthalten - ignoriere sie dann. Steht die Antwort auf die aktuelle Frage nicht "
+            . "im Kontext, sage das offen, statt ersatzweise das vorherige Thema zu wiederholen.\n"
+            . "- Beziehe dich auf den bisherigen Verlauf nur, wenn die aktuelle Nachricht das "
+            . "verlangt: bei Folgefragen wie \"und die Preise?\", die ohne das zuletzt besprochene "
+            . "Thema unvollständig wären.\n"
+            . "- Hakt der Nutzer zu einer bereits beantworteten Sache nach (z. B. \"sonst nichts?\", "
+            . "\"okay?\", \"welche davon?\"), nutze zuerst die vorherige Antwort und deren Quellen. "
+            . "Sage dann kurz, was bereits genannt wurde, nenne den passenden Link, wenn er im "
+            . "Verlauf oder Kontext steht, und frage bei Bedarf nach dem nächsten Schritt. Behaupte "
+            . "in diesem Fall nicht, es gebe keinen Kontext.\n"
+            . "- Nennst du Fakten aus dem Kontext, gib die ein bis zwei wichtigsten Quellen als "
+            . "direkte URL an - nicht jede Quelle zu jedem Satz.\n"
             . "- Nenne konkrete Details aus dem Kontext: Zahlen, Preise, Uhrzeiten, Dauer, Namen, "
             . "Bedingungen, Ausstattung. Fasse nicht vage zusammen, wenn genaue Angaben dastehen.\n"
             . "- Stehen mehrere Varianten im Kontext (z. B. mehrere Zimmer, Tarife oder Pakete), "
             . "nenne sie einzeln mit ihren jeweiligen Angaben statt nur einer Sammelaussage.\n"
-            . "- Antworte vollständig und hilfreich: decke alle relevanten Punkte aus dem Kontext ab und "
-            . "erkläre sie so, dass die Antwort für sich steht. Lieber eine gründliche, gut strukturierte "
-            . "Antwort als eine knappe - aber ohne Füllsätze oder Wiederholungen.\n"
-            . "- Gliedere längere Antworten: ein kurzer Einstieg, dann die Details in kurzen Absätzen oder "
-            . "Listen. Denke die naheliegende Folgefrage mit und beantworte sie, wenn der Kontext sie hergibt.\n"
+            . "- Antworte faktendicht statt wortreich. Jeder Satz muss eine Information tragen: "
+            . "keine Einleitungsfloskel, keine Wiederholung der Frage, keine Zusammenfassung am "
+            . "Ende. Ziel sind rund 120 bis 150 Wörter; nur wenn du mehrere Varianten aufzählen "
+            . "musst, darfst du länger werden.\n"
+            . "- Gliedere Aufzählungen als kurze Liste: ein Punkt pro Variante mit ihren konkreten "
+            . "Angaben. Fließtext nur für zusammenhängende Erklärungen.\n"
+            . "- Beantworte die gestellte Frage und höre dann auf. Zähle nicht von dir aus weitere "
+            . "Themen oder mögliche Folgefragen auf - dafür stehen Buttons unter der Antwort.\n"
             . "- Schreibe in einem natürlichen, warmen Gesprächston - wie ein kompetenter, freundlicher "
             . "Mensch. Variiere die Satzstruktur und vermeide steife Bausteinsätze oder wörtliche "
             . "Wiederholungen aus dem Kontext.";
@@ -3183,7 +3455,8 @@ final class AICB_Plugin {
         $messages[] = [
             'role' => 'user',
             'content' => $context_note . "\n\nNachricht des Nutzers: " . $question
-                . "\n\n(Reminder: answer in " . $target_name . ".)",
+                . "\n\n(Reminder: answer THIS message - \"" . $this->limit_text($question, 160)
+                . "\" - not the previous one, and answer in " . $target_name . ".)",
         ];
 
         return $messages;
@@ -3212,10 +3485,127 @@ final class AICB_Plugin {
      * @param array $query_vectors Ein Vektor oder eine Liste von Vektoren. Bei
      *                             mehreren zählt pro Abschnitt der beste Treffer.
      */
-    private function search_chunks(array $query_vectors): array {
+    /**
+     * Hybrid-Suche: Vektor-Ähnlichkeit und Volltext-Treffer werden getrennt
+     * gerankt und per Reciprocal Rank Fusion zusammengeführt.
+     *
+     * Reine Vektorsuche verfehlt systematisch alles Wörtliche - Produktnamen,
+     * Artikelnummern, "UID", Eigennamen -, weil ein Embedding Bedeutung abbildet
+     * und nicht Zeichenketten. Der Volltext-Zweig fängt genau diese Fälle ab.
+     *
+     * Gescannt wird nur noch (id, embedding); Titel und Text werden erst für die
+     * finalen Treffer nachgeladen. Das spart bei jeder Frage den Transfer der
+     * kompletten Chunk-Tabelle.
+     *
+     * @param array  $query_vectors  Liste von Query-Vektoren. Der erste MUSS die
+     *                               aktuelle Frage sein; weitere sind aus dem
+     *                               Verlauf angereicherte Varianten und zaehlen
+     *                               nur halb, damit sie die Frage ergaenzen und
+     *                               nicht ueberstimmen.
+     * @param string $keyword_query  Rohtext für den Volltext-Zweig ('' = aus).
+     *                               Immer die unveraenderte aktuelle Frage.
+     */
+    private function search_chunks(array $query_vectors, string $keyword_query = ''): array {
+        $limit = max(1, min(32, (int) $this->setting('retriever_k', 14)));
+        // Breiteres Kandidatenfenster als die Ausgabe: die Fusion soll etwas zu
+        // wählen haben, sonst kann der Volltext-Zweig nichts beisteuern.
+        $pool = max($limit * 2, 24);
+
+        // Vektor 0 ist die aktuelle Frage und zaehlt voll; alles weitere sind
+        // aus dem Verlauf angereicherte Varianten und werden gedaempft.
+        $weights = [1.0];
+        for ($i = 1, $n = count($query_vectors); $i < $n; $i++) {
+            $weights[$i] = self::FOLLOWUP_QUERY_WEIGHT;
+        }
+        [$cosine, $ranked] = $this->rank_by_vector($query_vectors, $weights);
+        if (!$cosine && $keyword_query === '') {
+            return [];
+        }
+
+        // Small Talk erkennt man daran, dass kein einziger Abschnitt inhaltlich
+        // passt. Dann darf auch ein zufälliger Worttreffer nichts hochspülen.
+        $best_cosine = $cosine ? max($cosine) : 0.0;
+        $content_question = $best_cosine >= self::CONTEXT_MIN_SCORE;
+
+        // Themenfremdes gar nicht erst ranken. Sonst landet ein Abschnitt mit
+        // Cosinus 0.02 auf Platz 2 - nur weil sonst niemand da ist - und die
+        // Rangfusion behandelt ihn fast wie den Treffer auf Platz 1.
+        $vector_order = [];
+        foreach ($ranked as $id => $score) {
+            if (($cosine[$id] ?? 0.0) < self::CONTEXT_MIN_SCORE) {
+                continue;
+            }
+            $vector_order[] = $id;
+            if (count($vector_order) >= $pool) {
+                break;
+            }
+        }
+
+        $keyword_scores = $content_question ? $this->rank_by_keyword($keyword_query, $pool) : [];
+
+        // Reciprocal Rank Fusion: 1/(k+rang), k=60. Nur noch zwischen Vektor-
+        // und Volltext-Zweig - deren Scores sind nicht ineinander umrechenbar.
+        // Innerhalb des Vektor-Zweigs wurde bereits ueber die Cosinus-Werte
+        // gewichtet, weil die sehr wohl vergleichbar sind.
+        $rrf_k = 60;
+        $fused = [];
+        foreach ($vector_order as $rank => $id) {
+            $fused[$id] = ($fused[$id] ?? 0.0) + 1.0 / ($rrf_k + $rank + 1);
+        }
+        $rank = 0;
+        foreach ($keyword_scores as $id => $unused) {
+            $fused[$id] = ($fused[$id] ?? 0.0) + 1.0 / ($rrf_k + $rank + 1);
+            $rank++;
+        }
+        if (!$fused) {
+            return [];
+        }
+        arsort($fused);
+        $top_ids = array_slice(array_keys($fused), 0, $limit);
+
+        // Ein starker Worttreffer ohne Vektor-Nähe würde am Relevanzfilter
+        // scheitern. Bei einer inhaltlichen Frage heben wir ihn deshalb auf die
+        // Schwelle - genau dafür ist der Zweig da.
+        $keyword_floor = $keyword_scores ? 0.5 * (float) reset($keyword_scores) : 0.0;
+        $scores = [];
+        foreach ($top_ids as $id) {
+            $score = (float) ($cosine[$id] ?? 0.0);
+            if ($content_question
+                && isset($keyword_scores[$id])
+                && $keyword_scores[$id] >= $keyword_floor
+                && $score < self::CONTEXT_MIN_SCORE) {
+                $score = self::CONTEXT_MIN_SCORE;
+            }
+            $scores[$id] = $score;
+        }
+
+        // Bewusst NICHT nach Score umsortieren: die Reihenfolge kommt aus der
+        // Fusion und ist der eigentliche Punkt der Gewichtung. Der rohe Cosinus
+        // faehrt nur als Wert mit, damit die Relevanz- und Kartenschwellen
+        // weiter greifen. Wer hier nachsortiert, stellt das alte Thema wieder
+        // nach oben - und der Bot beantwortet die vorige Frage erneut.
+        return $this->hydrate_chunks($scores);
+    }
+
+    /**
+     * Kosinus-Ähnlichkeit über alle Abschnitte.
+     *
+     * Bei mehreren Query-Vektoren zählt der beste - aber die aus dem Verlauf
+     * angereicherte Variante wird gedämpft, bevor verglichen wird. Die Cosinus-
+     * Werte stammen vom selben Modell und sind direkt vergleichbar, deshalb
+     * wird hier gewichtet und nicht über Ränge fusioniert: ein Abschnitt mit
+     * 0.55 zur aktuellen Frage muss einen mit 0.22 klar schlagen, und eine
+     * Rangfusion würde daraus 1/61 gegen 1/62 machen.
+     *
+     * Bewusst ohne Textspalten: der Scan läuft über die gesamte Tabelle.
+     *
+     * @param array<int,float> $weights Gewicht je Query-Vektor (Standard 1.0).
+     * @return array{0: array<int,float>, 1: array<int,float>} [roher Cosinus, gewichtet]
+     */
+    private function rank_by_vector(array $query_vectors, array $weights = []): array {
         global $wpdb;
         $table = $wpdb->prefix . 'aicb_chunks';
-        $limit = max(1, min(32, (int) $this->setting('retriever_k', 20)));
+
         // Einzelvektor auch akzeptieren, damit Aufrufer beides übergeben können.
         $vectors = (isset($query_vectors[0]) && is_array($query_vectors[0])) ? $query_vectors : [$query_vectors];
         // Query-Vektoren einmal normalisieren -> Kosinus wird zum Skalarprodukt.
@@ -3227,33 +3617,25 @@ final class AICB_Plugin {
             }
         }
         if (!$qnorm) {
-            return [];
+            return [[], []];
         }
 
-        $cols = 'id, source_id, source_url, title, section, content';
-        $scored = [];
+        $cosine = [];
+        $ranked = [];
 
         // Schneller Pfad: kompakt gepackte (bereits normalisierte) Embeddings.
-        $rows = $wpdb->get_results("SELECT {$cols}, embedding_packed FROM {$table} WHERE embedding_packed IS NOT NULL", ARRAY_A);
+        $rows = $wpdb->get_results("SELECT id, embedding_packed FROM {$table} WHERE embedding_packed IS NOT NULL", ARRAY_A);
         foreach ($rows ?: [] as $row) {
             $vec = $this->unpack_embedding((string) $row['embedding_packed']);
             if (!$vec) {
                 continue;
             }
-            $best = 0.0;
-            foreach ($qnorm as $q) {
-                $score = $this->dot_product($q, $vec);
-                if ($score > $best) {
-                    $best = $score;
-                }
-            }
-            unset($row['embedding_packed']);
-            $row['score'] = $best;
-            $scored[] = $row;
+            $this->score_row((int) $row['id'], $vec, $qnorm, $weights, $cosine, $ranked);
         }
+        unset($rows);
 
         // Fallback: alte JSON-Zeilen ohne gepacktes Embedding (bleiben nutzbar).
-        $legacy = $wpdb->get_results("SELECT {$cols}, embedding FROM {$table} WHERE embedding_packed IS NULL AND embedding IS NOT NULL", ARRAY_A);
+        $legacy = $wpdb->get_results("SELECT id, embedding FROM {$table} WHERE embedding_packed IS NULL AND embedding IS NOT NULL", ARRAY_A);
         foreach ($legacy ?: [] as $row) {
             $vector = json_decode((string) $row['embedding'], true);
             if (!is_array($vector)) {
@@ -3263,21 +3645,216 @@ final class AICB_Plugin {
             if (!$vn) {
                 continue;
             }
-            $best = 0.0;
-            foreach ($qnorm as $q) {
-                $score = $this->dot_product($q, $vn);
-                if ($score > $best) {
-                    $best = $score;
-                }
+            $this->score_row((int) $row['id'], $vn, $qnorm, $weights, $cosine, $ranked);
+        }
+        unset($legacy);
+
+        arsort($ranked);
+        return [$cosine, $ranked];
+    }
+
+    /**
+     * Einen Abschnitt gegen alle Query-Vektoren scoren.
+     *
+     * $cosine bekommt den rohen Bestwert - daran haengen die Relevanz- und
+     * Kartenschwellen, die ihre bisherige Bedeutung behalten sollen. $ranked
+     * bekommt den gewichteten Bestwert, der nur die Reihenfolge bestimmt.
+     */
+    private function score_row(int $id, array $vec, array $qnorm, array $weights, array &$cosine, array &$ranked): void {
+        $raw = 0.0;
+        $weighted = 0.0;
+        foreach ($qnorm as $idx => $q) {
+            $score = $this->dot_product($q, $vec);
+            if ($score > $raw) {
+                $raw = $score;
             }
-            unset($row['embedding']);
-            $row['score'] = $best;
-            $scored[] = $row;
+            $score *= $weights[$idx] ?? 1.0;
+            if ($score > $weighted) {
+                $weighted = $score;
+            }
+        }
+        $cosine[$id] = $raw;
+        $ranked[$id] = $weighted;
+    }
+
+    /**
+     * Volltext-Rangliste (MySQL MATCH ... AGAINST). Ohne Volltext-Index oder
+     * ohne brauchbare Suchwörter bleibt der Zweig einfach leer - die
+     * Vektorsuche trägt das Ergebnis dann allein.
+     *
+     * @return array<int,float> [id => Relevanz], absteigend sortiert.
+     */
+    private function rank_by_keyword(string $query, int $pool): array {
+        global $wpdb;
+        if (!get_option(self::FULLTEXT_OPTION, false)) {
+            return [];
+        }
+        $terms = $this->keyword_terms($query);
+        if (!$terms) {
+            return [];
+        }
+        $table = $wpdb->prefix . 'aicb_chunks';
+        $needle = implode(' ', $terms);
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, MATCH(title, section, content) AGAINST (%s IN NATURAL LANGUAGE MODE) AS relevance
+             FROM {$table}
+             WHERE MATCH(title, section, content) AGAINST (%s IN NATURAL LANGUAGE MODE)
+             ORDER BY relevance DESC
+             LIMIT %d",
+            $needle,
+            $needle,
+            $pool
+        ), ARRAY_A);
+
+        $scores = [];
+        foreach ($rows ?: [] as $row) {
+            $scores[(int) $row['id']] = (float) $row['relevance'];
+        }
+        return $scores;
+    }
+
+    /**
+     * Suchwörter aus der Frage. Füllwörter fliegen raus, sonst dominieren
+     * "was", "wie" und "kostet" die Volltext-Relevanz; kurze Wörter ignoriert
+     * der Index ohnehin (innodb_ft_min_token_size).
+     *
+     * @return array<int,string>
+     */
+    private function keyword_terms(string $query): array {
+        $query = $this->str_lower(trim($query));
+        if ($query === '') {
+            return [];
+        }
+        // Alles ausser Buchstaben/Ziffern trennt Wörter. Bindestriche bleiben,
+        // damit "e-mail" oder Artikelnummern zusammenbleiben.
+        $parts = preg_split('/[^\p{L}\p{N}\-]+/u', $query) ?: [];
+        $stop = self::KEYWORD_STOPWORDS;
+        $terms = [];
+        foreach ($parts as $part) {
+            $part = trim($part, '-');
+            if ($this->str_len($part) < 3 || isset($stop[$part])) {
+                continue;
+            }
+            $terms[$part] = true;
+            if (count($terms) >= 16) {
+                break;
+            }
+        }
+        return array_keys($terms);
+    }
+
+    /**
+     * Lädt Titel und Text für die ausgewählten IDs - und gleich die direkt
+     * angrenzenden Abschnitte derselben Seite mit. Details stehen oft eine
+     * Zeile weiter: die Tabelle im einen Chunk, die Bedingungen im nächsten.
+     *
+     * @param array<int,float> $scores [id => score], absteigend sortiert.
+     */
+    /**
+     * @param array<int,float> $scores [id => score] in der gewuenschten
+     *                                 Ausgabereihenfolge. Sie wird beibehalten;
+     *                                 Nachbarn folgen direkt auf ihren Anker.
+     */
+    private function hydrate_chunks(array $scores, bool $with_neighbours = true): array {
+        global $wpdb;
+        if (!$scores) {
+            return [];
+        }
+        $table = $wpdb->prefix . 'aicb_chunks';
+
+        // Nachbar-IDs mitladen; ob sie zur selben Seite gehören, entscheidet
+        // sich unten anhand der source_id.
+        $wanted = [];
+        foreach (array_keys($scores) as $id) {
+            $wanted[(int) $id] = true;
+            if ($with_neighbours) {
+                $wanted[(int) $id - 1] = true;
+                $wanted[(int) $id + 1] = true;
+            }
+        }
+        $ids = array_values(array_filter(array_keys($wanted), fn($id) => $id > 0));
+        if (!$ids) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, source_id, source_url, title, section, content FROM {$table} WHERE id IN ({$placeholders})",
+            ...$ids
+        ), ARRAY_A);
+
+        $by_id = [];
+        foreach ($rows ?: [] as $row) {
+            $by_id[(int) $row['id']] = $row;
         }
 
-        usort($scored, fn($a, $b) => ($b['score'] <=> $a['score']));
-        $top = array_slice($scored, 0, $limit);
-        return $this->with_neighbour_chunks($top, $scored, $limit);
+        $anchors = [];
+        foreach ($scores as $id => $score) {
+            $id = (int) $id;
+            if (!isset($by_id[$id])) {
+                continue;
+            }
+            $row = $by_id[$id];
+            $row['score'] = (float) $score;
+            $anchors[$id] = $row;
+        }
+        if (!$with_neighbours) {
+            return array_values($anchors);
+        }
+
+        // Nachbarn direkt hinter ihren Anker, nicht irgendwo nach Score. Sie
+        // erben dessen Wert, damit sie nicht am Relevanzfilter haengenbleiben,
+        // waehrend der Abschnitt, zu dem sie gehoeren, durchkommt.
+        $cap = count($anchors) + 6;
+        $result = [];
+        $taken = [];
+        foreach ($anchors as $id => $row) {
+            if (isset($taken[$id])) {
+                continue;
+            }
+            $taken[$id] = true;
+            $result[] = $row;
+            foreach ([$id - 1, $id + 1] as $neighbour_id) {
+                if (count($taken) >= $cap || isset($taken[$neighbour_id]) || !isset($by_id[$neighbour_id])) {
+                    continue;
+                }
+                $neighbour = $by_id[$neighbour_id];
+                if ((string) $neighbour['source_id'] !== (string) $row['source_id']) {
+                    continue;
+                }
+                $neighbour['score'] = (float) $row['score'];
+                $taken[$neighbour_id] = true;
+                $result[] = $neighbour;
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * Legt den Volltext-Index an, wenn die Datenbank ihn kann. Schlägt das fehl
+     * (alte MySQL-Version, fehlende Rechte), läuft die Suche ohne Keyword-Zweig
+     * weiter - nur eben mit der alten Trefferqualität.
+     */
+    public function ensure_fulltext_index(bool $retry = false): void {
+        global $wpdb;
+        $state = get_option(self::FULLTEXT_OPTION, null);
+        if ((int) $state === 1) {
+            return;
+        }
+        // Einmal fehlgeschlagen (alte MySQL, fehlende Rechte): nicht bei jedem
+        // Aufruf erneut probieren. Ein Neu-Training versucht es wieder.
+        if ($state !== null && !$retry) {
+            return;
+        }
+        $table = $wpdb->prefix . 'aicb_chunks';
+        $existing = $wpdb->get_results("SHOW INDEX FROM {$table} WHERE Key_name = 'aicb_ft'", ARRAY_A);
+        if ($existing) {
+            update_option(self::FULLTEXT_OPTION, 1, false);
+            return;
+        }
+        $suppress = $wpdb->suppress_errors(true);
+        $ok = $wpdb->query("ALTER TABLE {$table} ADD FULLTEXT KEY aicb_ft (title, section, content)");
+        $wpdb->suppress_errors($suppress);
+        update_option(self::FULLTEXT_OPTION, $ok === false ? 0 : 1, false);
     }
 
     /** Einheitsvektor (L2). Leeres Array bei Nullvektor. */
@@ -3326,47 +3903,6 @@ final class AICB_Plugin {
         }
         $vals = @unpack('g*', $bin);
         return is_array($vals) ? array_values($vals) : [];
-    }
-
-    /**
-     * Zu jedem Treffer den direkt angrenzenden Abschnitt derselben Seite
-     * ergänzen. Details stehen oft eine Zeile weiter: die Tabelle im einen
-     * Chunk, die Fußnote mit den Bedingungen im nächsten.
-     */
-    private function with_neighbour_chunks(array $top, array $all, int $limit): array {
-        if (!$top) {
-            return $top;
-        }
-        $by_id = [];
-        foreach ($all as $row) {
-            $by_id[(int) $row['id']] = $row;
-        }
-        $selected = [];
-        foreach ($top as $row) {
-            $selected[(int) $row['id']] = $row;
-        }
-        foreach ($top as $row) {
-            if (count($selected) >= $limit + 6) {
-                break;
-            }
-            $id = (int) $row['id'];
-            foreach ([$id - 1, $id + 1] as $neighbour_id) {
-                if (isset($selected[$neighbour_id]) || !isset($by_id[$neighbour_id])) {
-                    continue;
-                }
-                $neighbour = $by_id[$neighbour_id];
-                // Nur innerhalb derselben Seite.
-                if ((string) $neighbour['source_id'] !== (string) $row['source_id']) {
-                    continue;
-                }
-                // Etwas unter den Treffer einsortieren, damit die Reihenfolge stimmt.
-                $neighbour['score'] = (float) $row['score'] - 0.001;
-                $selected[$neighbour_id] = $neighbour;
-            }
-        }
-        $result = array_values($selected);
-        usort($result, fn($a, $b) => ($b['score'] <=> $a['score']));
-        return $result;
     }
 
     private function build_context(array $matches): string {
@@ -3423,20 +3959,54 @@ final class AICB_Plugin {
         ];
     }
 
-    private function embed_text(string $text): array {
-        $vectors = $this->embed_texts([$text]);
+    private function embed_text(string $text, int $dims = 0): array {
+        $vectors = $this->embed_texts([$text], $dims);
         return $vectors[0] ?? [];
     }
 
-    private function embed_texts(array $texts): array {
+    /**
+     * Dimensionszahl der gespeicherten Vektoren. Die Suchanfrage muss exakt
+     * dazu passen: ein auf 1024 gekürzter Query-Vektor gegen 3072er Einträge
+     * liefert systematisch zu niedrige Werte, und die Relevanzschwelle würde
+     * still reißen. So bleibt ein alter Index gültig, bis neu trainiert wird.
+     */
+    private function index_dimensions(): int {
+        global $wpdb;
+        $cached = (int) get_option(self::INDEX_DIMS_OPTION, 0);
+        if ($cached > 0) {
+            return $cached;
+        }
+        $table = $wpdb->prefix . 'aicb_chunks';
+        $packed = (string) $wpdb->get_var("SELECT embedding_packed FROM {$table} WHERE embedding_packed IS NOT NULL LIMIT 1");
+        if ($packed !== '') {
+            $bin = base64_decode($packed, true);
+            $dims = $bin === false ? 0 : intdiv(strlen($bin), 4);
+            if ($dims > 0) {
+                update_option(self::INDEX_DIMS_OPTION, $dims, false);
+                return $dims;
+            }
+        }
+        // Leerer Index: die Einstellung gilt, das naechste Training legt sie fest.
+        return (int) $this->setting('embedding_dims', 1024);
+    }
+
+    /**
+     * @param int $dims Gewuenschte Dimensionszahl, 0 = Einstellung verwenden.
+     *                  Die Suche gibt hier die Dimension des Index vor.
+     */
+    private function embed_texts(array $texts, int $dims = 0): array {
         $texts = array_values(array_filter(array_map(fn($t) => trim((string) $t), $texts), fn($t) => $t !== ''));
         if (!$texts) {
             return [];
         }
-        $data = $this->openai_request('embeddings', [
-            'model' => $this->setting('embedding_model', 'text-embedding-3-large'),
-            'input' => $texts,
-        ]);
+        $model = (string) $this->setting('embedding_model', 'text-embedding-3-large');
+        $payload = ['model' => $model, 'input' => $texts];
+        $dims = $dims > 0 ? $dims : (int) $this->setting('embedding_dims', 1024);
+        // Nur die -3-Modelle koennen gekuerzte Vektoren ausliefern (Matryoshka).
+        if ($dims > 0 && strpos($model, 'text-embedding-3') === 0) {
+            $payload['dimensions'] = $dims;
+        }
+        $data = $this->openai_request('embeddings', $payload);
         $vectors = [];
         foreach (($data['data'] ?? []) as $item) {
             $vectors[(int) $item['index']] = $item['embedding'];
@@ -4271,12 +4841,16 @@ PROMPT;
         $settings['has_openai_api_key'] = trim((string) $this->setting('openai_api_key', '')) !== '';
         $settings['post_types'] = $this->available_post_types();
         $settings['index_count'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}aicb_chunks");
+        // Diagnose fuer die Suche: womit der Index tatsaechlich gebaut wurde
+        // und ob der Volltext-Zweig der Hybrid-Suche zur Verfuegung steht.
+        $settings['index_dims'] = $settings['index_count'] > 0 ? $this->index_dimensions() : 0;
+        $settings['fulltext_ready'] = (bool) get_option(self::FULLTEXT_OPTION, false);
         return $settings;
     }
 
     private function sanitize_setting_value(string $key, mixed $value): mixed {
         return match ($key) {
-            'retriever_k', 'max_context_chars', 'batch_size' => absint($value),
+            'retriever_k', 'max_context_chars', 'batch_size', 'embedding_dims' => absint($value),
             'auto_index_on_save', 'widget_enabled', 'include_excerpts', 'include_taxonomies' => rest_sanitize_boolean($value),
             'enabled_post_types' => array_values(array_filter(array_map('sanitize_key', (array) $value))),
             'privacy_url', 'contact_url' => esc_url_raw((string) $value),
@@ -4447,6 +5021,11 @@ PROMPT;
     private function clear_chunks(): void {
         global $wpdb;
         $wpdb->query("TRUNCATE TABLE {$wpdb->prefix}aicb_chunks");
+        // Der neue Index bekommt die aktuell eingestellte Dimension.
+        update_option(self::INDEX_DIMS_OPTION, (int) $this->setting('embedding_dims', 1024), false);
+        // Die Tabelle ist jetzt leer - der guenstigste Moment fuer das ALTER,
+        // falls der Index noch fehlt oder beim ersten Versuch scheiterte.
+        $this->ensure_fulltext_index(true);
     }
 
     private function delete_source_chunks(string $source_id): void {

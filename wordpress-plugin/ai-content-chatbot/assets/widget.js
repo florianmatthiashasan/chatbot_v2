@@ -282,37 +282,29 @@
   }
 
   function defaultLauncherIcon() {
-    var svg = svgNode([
-      "M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z",
-      "M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01",
-    ], "");
-    svg.setAttribute("fill", "none");
-    svg.setAttribute("stroke", "currentColor");
-    svg.setAttribute("stroke-width", "1.55");
-    svg.setAttribute("stroke-linecap", "round");
-    svg.setAttribute("stroke-linejoin", "round");
-    if (svg.childNodes[1]) svg.childNodes[1].setAttribute("stroke-width", "2.1");
     var ns = "http://www.w3.org/2000/svg";
-    var sparkle = document.createElementNS(ns, "path");
-    sparkle.setAttribute("d", "M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z");
-    sparkle.setAttribute("fill", "currentColor");
-    sparkle.setAttribute("stroke", "none");
-    svg.appendChild(sparkle);
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    [8, 12, 16].forEach(function (cx) {
+      var dot = document.createElementNS(ns, "circle");
+      dot.setAttribute("cx", String(cx));
+      dot.setAttribute("cy", "12");
+      dot.setAttribute("r", "1.65");
+      dot.setAttribute("fill", "currentColor");
+      dot.setAttribute("stroke", "none");
+      svg.appendChild(dot);
+    });
     return svg;
   }
 
-  function renderLauncherIcon(target, value) {
+  function renderLauncherIcon(target) {
     if (!target) return;
-    var trimmed = (value || "").trim();
     target.innerHTML = "";
     target.classList.remove("aicb-icon-svg", "aicb-icon-text");
-    if (!trimmed) {
-      target.appendChild(defaultLauncherIcon());
-      target.classList.add("aicb-icon-svg");
-      target.style.display = "grid";
-      return;
-    }
-    renderIcon(target, trimmed);
+    target.appendChild(defaultLauncherIcon());
+    target.classList.add("aicb-icon-svg");
+    target.style.display = "grid";
   }
 
   function greetingKey(greeting) {
@@ -813,7 +805,7 @@
     Array.prototype.forEach.call(shell.querySelectorAll("[data-aicb-avatar]"), function (el) {
       renderIcon(el, icon);
     });
-    renderLauncherIcon(shell.querySelector("[data-aicb-launcher-icon], .aicb-launcher-icon"), icon);
+    renderLauncherIcon(shell.querySelector("[data-aicb-launcher-icon], .aicb-launcher-icon"));
 
     /* --- Scrollen: die aktuelle Frage bleibt oben stehen ------------------ */
     function updateSpacer() {
@@ -991,8 +983,13 @@
     function addMessage(value, sender, rich, eventId) {
       // Reihenfolge: erst Karten/Aktionen, dann das Feedback (Daumen) ganz unten.
       var extra = richNodes(rich);
-      if (sender === "bot" && eventId) extra.push(feedbackRow(eventId));
-      var row = appendRow(createRow(sender, [createBubble(value, sender, rich && rich.sources)].concat(extra)));
+      var feedback = null;
+      if (sender === "bot" && eventId) {
+        feedback = feedbackRow(eventId);
+        extra.push(feedback);
+      }
+      var bubble = createBubble(value, sender, rich && rich.sources);
+      var row = appendRow(createRow(sender, [bubble].concat(extra)));
       if (sender === "user") {
         anchorRow = row;
         keepAnchorInView(true);
@@ -1001,7 +998,7 @@
       } else {
         scrollToBottom();
       }
-      return row;
+      return { row: row, bubble: bubble, stack: row.querySelector(".aicb-stack"), feedback: feedback };
     }
 
     function setTyping(bubble, value) {
@@ -1036,17 +1033,70 @@
       timers.forEach(clearTimeout);
       timers = [];
       if (!entry || !entry.bubble.isConnected) {
-        addMessage(value, "bot", rich, eventId);
-        return;
+        return addMessage(value, "bot", rich, eventId);
       }
       entry.bubble.classList.remove("aicb-typing");
       setBubbleContent(entry.bubble, value, false, rich && rich.sources);
       var stack = entry.row.querySelector(".aicb-stack");
       // Erst Karten/Aktionen anhaengen, dann das Feedback (Daumen) als letztes.
       richNodes(rich).forEach(function (node) { stack.appendChild(node); });
-      if (eventId) stack.appendChild(feedbackRow(eventId));
+      var feedback = null;
+      if (eventId) {
+        feedback = feedbackRow(eventId);
+        stack.appendChild(feedback);
+      }
       if (anchorRow) keepAnchorInView(false);
       else scrollToBottom();
+      return { bubble: entry.bubble, stack: stack, feedback: feedback };
+    }
+
+    /**
+     * Karten, Buttons und Quellen nachtraeglich an eine schon sichtbare Antwort
+     * haengen. Sie kommen aus einem zweiten Aufruf, damit der Antworttext nicht
+     * auf sie warten muss.
+     */
+    function applyRich(placed, answer, rich) {
+      if (!placed || !placed.bubble || !placed.bubble.isConnected || !rich) return;
+      // Quellen-Chips sitzen in der Blase - dafuer wird sie neu aufgebaut. Der
+      // Text bleibt identisch, sichtbar aendert sich nur die Fusszeile.
+      if (Array.isArray(rich.sources) && rich.sources.length) {
+        setBubbleContent(placed.bubble, answer, false, rich.sources);
+      }
+      var nodes = richNodes(rich);
+      if (nodes.length) {
+        nodes.forEach(function (node) {
+          if (placed.feedback && placed.feedback.isConnected) {
+            placed.stack.insertBefore(node, placed.feedback);
+          } else {
+            placed.stack.appendChild(node);
+          }
+        });
+      }
+      if (anchorRow) keepAnchorInView(false);
+      else scrollToBottom();
+    }
+
+    /** Gespeicherten Verlauf um die nachgelieferten Zusatzinhalte ergaenzen. */
+    function attachRichToStores(eventId, rich, answer) {
+      for (var i = transcript.length - 1; i >= 0; i--) {
+        if (transcript[i] && transcript[i].eventId === eventId) {
+          transcript[i].rich = rich;
+          saveTranscript();
+          break;
+        }
+      }
+      // Die Quellentitel der letzten Antwort schaerfen serverseitig die Suche
+      // bei Folgefragen - deshalb muessen sie in den Verlauf nachgetragen werden.
+      var sources = historySources(rich);
+      if (!sources.length) return;
+      var history = getHistory();
+      for (var j = history.length - 1; j >= 0; j--) {
+        if (history[j] && history[j].role === "assistant" && history[j].content === answer) {
+          history[j].sources = sources;
+          setHistory(history);
+          break;
+        }
+      }
     }
 
     // Gespeicherten Verlauf beim Laden wiederherstellen (bleibt bei Reload).
@@ -1174,7 +1224,6 @@
           return api("chat", {
             question: question,
             history: history,
-            offered: offeredActions.slice(-OFFERED_LIMIT),
             session_token: token,
             lang: lang(),
           });
@@ -1182,15 +1231,15 @@
         .then(function (data) {
           if (data.session_token) writeStore("localStorage", SESSION_KEY, data.session_token);
           var answer = data.answer || "";
-          var rich = data.rich || {};
-          if (Array.isArray(data.sources) && data.sources.length && !Array.isArray(rich.sources)) {
-            rich.sources = data.sources;
-          }
-          finishTyping(typing, answer, rich, data.event_id);
-          pushTranscript({ sender: "bot", text: answer, rich: rich, eventId: data.event_id || null });
+          var eventId = data.event_id || null;
+          // Antwort sofort zeigen. Karte, Buttons und Quellen kosten einen
+          // weiteren Modell-Aufruf und kommen gleich hinterher.
+          var placed = finishTyping(typing, answer, null, eventId);
+          pushTranscript({ sender: "bot", text: answer, rich: null, eventId: eventId });
           history.push({ role: "user", content: question });
-          history.push({ role: "assistant", content: answer, sources: historySources(rich) });
+          history.push({ role: "assistant", content: answer, sources: [] });
           setHistory(history);
+          if (eventId && data.has_actions) loadActions(eventId, placed, answer);
         })
         .catch(function (err) {
           finishTyping(typing, str("error") + (err && err.message ? err.message : ""), null);
@@ -1199,6 +1248,31 @@
           setBusy(false);
           syncComposer();
         });
+    }
+
+    /**
+     * Zweiter Schritt: Karte, Buttons und Quellen nachladen. Schlaegt er fehl,
+     * bleibt die Antwort trotzdem stehen - deshalb kein Fehler im Chat.
+     */
+    function loadActions(eventId, placed, answer) {
+      ensureSession()
+        .then(function (token) {
+          return api("actions", {
+            event_id: eventId,
+            session_token: token,
+            offered: offeredActions.slice(-OFFERED_LIMIT),
+          });
+        })
+        .then(function (data) {
+          var rich = data.rich || {};
+          if (Array.isArray(data.sources) && data.sources.length && !Array.isArray(rich.sources)) {
+            rich.sources = data.sources;
+          }
+          if (!rich.sources && !rich.actions && !rich.cards) return;
+          applyRich(placed, answer, rich);
+          attachRichToStores(eventId, rich, answer);
+        })
+        .catch(function () { /* Beiwerk - der Chat funktioniert auch ohne. */ });
     }
 
     /* --- Panel öffnen und schließen ------------------------------------- */
