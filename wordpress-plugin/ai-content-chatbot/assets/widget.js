@@ -201,6 +201,11 @@
       if (doc.querySelector("parsererror")) return null;
       var svg = doc.documentElement;
       if (!svg || svg.nodeName.toLowerCase() !== "svg") return null;
+      // Markdown-verlinkte xmlns-Werte reparieren, z.B.
+      // xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)".
+      var xmlns = svg.getAttribute("xmlns") || "";
+      var xmlnsMatch = xmlns.match(/https?:\/\/www\.w3\.org\/2000\/svg/i);
+      if (xmlnsMatch) svg.setAttribute("xmlns", xmlnsMatch[0]);
       ["script", "foreignObject", "iframe", "object", "embed", "link", "style"].forEach(function (tag) {
         Array.prototype.forEach.call(doc.querySelectorAll(tag), function (el) { el.remove(); });
       });
@@ -232,11 +237,20 @@
         });
         // Inline-Styles ebenfalls entschaerfen (fill/stroke).
         var style = el.getAttribute("style");
+        if (style && /(width|height)\s*:/i.test(style)) {
+          style = style
+            .replace(/(?:^|;)\s*(?:width|height)\s*:\s*[^;]+/gi, "")
+            .replace(/^;\s*|\s*;$/g, "")
+            .trim();
+          if (style) el.setAttribute("style", style);
+          else el.removeAttribute("style");
+        }
         if (style && /(fill|stroke)\s*:/i.test(style)) {
           style = style.replace(/(fill|stroke)\s*:\s*([^;]+)/gi, function (m, prop, val) {
             return isBlack(val) ? prop + ":currentColor" : (isColor(val) ? m : prop + ":" + val);
           });
-          el.setAttribute("style", style);
+          if (style) el.setAttribute("style", style);
+          else el.removeAttribute("style");
         }
         // Zeichenelemente ohne Fuellung: Default waere Schwarz.
         if (DRAW.indexOf(el.nodeName.toLowerCase()) !== -1) {
@@ -298,12 +312,24 @@
     return svg;
   }
 
-  function renderLauncherIcon(target) {
+  function renderLauncherIcon(target, value) {
     if (!target) return;
+    var trimmed = (value || "").trim();
     target.innerHTML = "";
-    target.classList.remove("aicb-icon-svg", "aicb-icon-text");
-    target.appendChild(defaultLauncherIcon());
-    target.classList.add("aicb-icon-svg");
+    target.classList.remove("aicb-icon-svg", "aicb-icon-text", "aicb-custom-icon");
+    if (!trimmed) {
+      target.appendChild(defaultLauncherIcon());
+      target.classList.add("aicb-icon-svg");
+    } else {
+      var safeSvg = sanitizeSvg(trimmed);
+      if (safeSvg) {
+        target.appendChild(safeSvg);
+        target.classList.add("aicb-icon-svg", "aicb-custom-icon");
+      } else {
+        target.textContent = trimmed;
+        target.classList.add("aicb-icon-text", "aicb-custom-icon");
+      }
+    }
     target.style.display = "grid";
   }
 
@@ -335,12 +361,12 @@
     return [page.url, questions].join("|");
   }
 
-  function pageSuggestionsEnabled() {
+  function questionTeaserEnabled() {
     return !cfg.page_suggestions || cfg.page_suggestions.enabled !== false;
   }
 
   function routeChangeSuggestionsEnabled() {
-    return pageSuggestionsEnabled() && (!cfg.page_suggestions || cfg.page_suggestions.show_on_route_change !== false);
+    return !cfg.page_suggestions || cfg.page_suggestions.show_on_route_change !== false;
   }
 
   // Kurze Ueberschrift ueber den Fragen im Teaser (falls kein Greeting-Text gesetzt).
@@ -805,7 +831,7 @@
     Array.prototype.forEach.call(shell.querySelectorAll("[data-aicb-avatar]"), function (el) {
       renderIcon(el, icon);
     });
-    renderLauncherIcon(shell.querySelector("[data-aicb-launcher-icon], .aicb-launcher-icon"));
+    renderLauncherIcon(shell.querySelector("[data-aicb-launcher-icon], .aicb-launcher-icon"), icon);
 
     /* --- Scrollen: die aktuelle Frage bleibt oben stehen ------------------ */
     function updateSpacer() {
@@ -1592,7 +1618,7 @@
         }
         return;
       }
-      if (showQuestionTeaser(pageQuestions, page)) return;
+      if (questionTeaserEnabled() && showQuestionTeaser(pageQuestions, page)) return;
       if (greetingOn) showGreetingTeaser();
     }
 
@@ -1602,14 +1628,6 @@
 
     function loadSuggestions(options) {
       if (configuredTopics().length) {
-        pageQuestions = [];
-        renderTopics();
-        if ((!options || !options.route) && !inline && teaserEl && greetingOn && !shell.classList.contains("aicb-open")) {
-          showGreetingTeaser();
-        }
-        return;
-      }
-      if (!pageSuggestionsEnabled()) {
         pageQuestions = [];
         renderTopics();
         if ((!options || !options.route) && !inline && teaserEl && greetingOn && !shell.classList.contains("aicb-open")) {

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 9.3.1
+ * Version: 9.3.4
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -34,7 +34,7 @@ final class AICB_Plugin {
     private const OLD_DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="12" r="1.65" fill="currentColor"/><circle cx="12" cy="12" r="1.65" fill="currentColor"/><circle cx="16" cy="12" r="1.65" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '9.3.1';
+    private const ASSET_VERSION = '9.3.4';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -1032,6 +1032,7 @@ final class AICB_Plugin {
         $style = $this->widget_css_vars($config);
         $classes = 'aicb-widget-shell aicb-mode-' . sanitize_html_class($mode);
         $icon_html = $this->icon_html((string) ($copy['icon'] ?? ''));
+        $launcher_icon_classes = 'aicb-launcher-icon' . ($icon_html !== '' ? ' aicb-custom-icon' : '');
         $privacy_url = (string) ($config['contact']['privacy_url'] ?? '');
         $inline = $mode === 'inline';
         $dir = !empty($config['rtl']) ? 'rtl' : 'ltr';
@@ -1049,7 +1050,7 @@ final class AICB_Plugin {
                 <button class="aicb-teaser-close" type="button" data-aicb-teaser-close aria-label="<?php echo esc_attr($pack['aria_teaser_close']); ?>">&times;</button>
             </div>
             <button class="aicb-launcher" type="button" aria-label="<?php echo esc_attr($copy['title']); ?>" data-aicb-launcher>
-                <span class="aicb-launcher-icon" data-aicb-launcher-icon><?php echo $this->default_launcher_icon(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
+                <span class="<?php echo esc_attr($launcher_icon_classes); ?>" data-aicb-launcher-icon><?php echo $icon_html !== '' ? $icon_html : $this->default_launcher_icon(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
             </button>
             <?php endif; ?>
             <div class="aicb-panel" data-aicb-panel <?php echo $inline ? '' : 'hidden'; ?>>
@@ -1223,6 +1224,22 @@ final class AICB_Plugin {
                     }
                     if (($an === 'fill' || $an === 'stroke') && $this->is_black_color($av)) {
                         $el->setAttribute($attr->nodeName, 'currentColor');
+                        continue;
+                    }
+                    if ($an === 'style') {
+                        $style = preg_replace('/(?:^|;)\s*(?:width|height)\s*:\s*[^;]+/i', '', $av) ?? '';
+                        $style = trim(trim($style), ';');
+                        $style = preg_replace_callback('/(fill|stroke)\s*:\s*([^;]+)/i', function (array $matches): string {
+                            return $this->is_black_color((string) $matches[2])
+                                ? $matches[1] . ':currentColor'
+                                : $matches[0];
+                        }, $style) ?? $style;
+                        $style = trim(trim($style), ';');
+                        if ($style === '') {
+                            $el->removeAttribute($attr->nodeName);
+                        } else {
+                            $el->setAttribute($attr->nodeName, $style);
+                        }
                     }
                 }
             }
