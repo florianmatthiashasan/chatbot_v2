@@ -90,27 +90,38 @@
     const DEFAULT_THEME = {
         accent: "#8c8875",
         accentStrong: "#756f5f",
-        avatarBg: "#e6e0d6",
+        statusDot: "#4f8a5b",
+        avatarBg: "#3a352c",
         launcherBg: "#8c8875",
-        bg: "#f4f1eb",
+        bg: "#f9f6f1",
         panel: "#ffffff",
-        border: "#e4ded5",
-        text: "#3d3a34",
-        userBubble: "#f2ede6",
-        userText: "#3d3a34",
+        text: "#2f2a24",
+        userBubble: "#ece5da",
+        userText: "#2f2a24",
         botBubble: "#ffffff",
-        botText: "#3d3a34",
+        botText: "#2f2a24",
+        composerBg: "#ffffff",
+        composerBorder: "#e8e2d8",
+        composerText: "#2f2a24",
+        composerButtonBg: "#3a352c",
+        composerButtonText: "#f8f6f1",
     };
     const DEFAULT_COPY = {
         de: {
             title: "Haben Sie Fragen?",
             subtitle: "",
+            status: "Antwortet sofort",
             intro1: "Hallo! Schoen, dass du da bist. Ich bin XY und finde gerne eine direkte Antwort fuer dich - stelle mir dazu eine Frage.",
+            disclaimer: "Der Assistent kann Fehler machen. Bitte pruefe wichtige Informationen.",
+            privacyLabel: "Datenschutz",
         },
         en: {
             title: "Any questions?",
             subtitle: "",
+            status: "Replies instantly",
             intro1: "Hi! Nice to have you here. I am XY and I am happy to help you find a direct answer - just ask a question.",
+            disclaimer: "The assistant can make mistakes. Please verify important information.",
+            privacyLabel: "Privacy",
         },
     };
 
@@ -175,6 +186,43 @@
                 theme: DEFAULT_THEME
             };
         });
+        // Widget-Inhalte (Begruessungs-Popup) aus dem Backend - fuer den Snippet-Default.
+        const [widgetCfg, setWidgetCfg] = useState({
+            greeting: { enabled: true, text: { de: "", en: "" }, delay_ms: 1200 },
+        });
+
+        useEffect(() => {
+            const load = async () => {
+                if (!AuthState.isLoggedIn() || !botSlug) return;
+                try {
+                    const params = new URLSearchParams();
+                    params.set("bot_slug", botSlug);
+                    const res = await fetch(`/api/admin/widget_config?${params.toString()}`, {
+                        headers: AuthState.buildHeaders(),
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.config) setWidgetCfg(data.config);
+                } catch (err) {
+                    console.warn("Widget-Konfiguration konnte nicht geladen werden", err);
+                }
+            };
+            load();
+        }, [botSlug]);
+
+        // Text sicher in generierten JS-Code einbetten (kein <\/script>-Ausbruch).
+        const greetingLiteral = useMemo(() => {
+            const greeting = (widgetCfg && widgetCfg.greeting) || {};
+            const payload = {
+                enabled: greeting.enabled !== false,
+                text: {
+                    de: (greeting.text && greeting.text.de) || "",
+                    en: (greeting.text && greeting.text.en) || "",
+                },
+                delay_ms: typeof greeting.delay_ms === "number" ? greeting.delay_ms : 1200,
+            };
+            return JSON.stringify(payload).replace(/</g, "\\u003c");
+        }, [widgetCfg]);
+
         const [heroToggleEnabled, setHeroToggleEnabled] = useState(() => {
             const saved = AuthState.getScopedItem("widget_integrate_cfg", AuthState.getBotSlug()) || "";
             if (saved) {
@@ -220,11 +268,38 @@
             if (customerId) params.set("customer_id", customerId);
             if (trimmedTitle && trimmedTitle !== DEFAULT_COPY.de.title) params.set("title_de", trimmedTitle);
             if (trimmedSubtitle) params.set("subtitle_de", trimmedSubtitle);
-            if (trimmedIcon) params.set("icon", trimmedIcon);
+            // Immer setzen: ein leeres Icon bedeutet "kein Avatar".
+            if (config.icon !== undefined) params.set("icon", trimmedIcon);
             if (trimmedIntro1 && trimmedIntro1 !== DEFAULT_COPY.de.intro1) params.set("intro1_de", trimmedIntro1);
             if (trimmedTitleEn && trimmedTitleEn !== DEFAULT_COPY.en.title) params.set("title_en", trimmedTitleEn);
             if (trimmedSubtitleEn) params.set("subtitle_en", trimmedSubtitleEn);
             if (trimmedIntro1En && trimmedIntro1En !== DEFAULT_COPY.en.intro1) params.set("intro1_en", trimmedIntro1En);
+            // Statuszeile und Fusszeile aus dem Widget-Design uebernehmen.
+            const trimmedStatus = (config.status !== undefined ? config.status : trimmedSubtitle).trim();
+            const trimmedStatusEn = (config.statusEn !== undefined ? config.statusEn : trimmedSubtitleEn).trim();
+            const trimmedDisclaimer = (config.disclaimer || "").trim();
+            const trimmedDisclaimerEn = (config.disclaimerEn || "").trim();
+            const trimmedPrivacyUrl = (config.privacyUrl || "").trim();
+            if (trimmedStatus) params.set("status_de", trimmedStatus);
+            if (trimmedStatusEn) params.set("status_en", trimmedStatusEn);
+            if (config.showStatus === false) params.set("show_status", "0");
+            if (trimmedDisclaimer && trimmedDisclaimer !== DEFAULT_COPY.de.disclaimer) {
+                params.set("disclaimer_de", trimmedDisclaimer);
+            }
+            if (trimmedDisclaimerEn && trimmedDisclaimerEn !== DEFAULT_COPY.en.disclaimer) {
+                params.set("disclaimer_en", trimmedDisclaimerEn);
+            }
+            if (trimmedPrivacyUrl) {
+                params.set("privacy_url", trimmedPrivacyUrl);
+                const privacyLabel = (config.privacyLabel || "").trim();
+                const privacyLabelEn = (config.privacyLabelEn || "").trim();
+                if (privacyLabel && privacyLabel !== DEFAULT_COPY.de.privacyLabel) {
+                    params.set("privacy_label_de", privacyLabel);
+                }
+                if (privacyLabelEn && privacyLabelEn !== DEFAULT_COPY.en.privacyLabel) {
+                    params.set("privacy_label_en", privacyLabelEn);
+                }
+            }
             if (!showPoweredBy) params.set("show_powered_by", "0");
             if (config.theme) {
                 Object.entries(config.theme).forEach(([key, value]) => {
@@ -246,7 +321,7 @@
   data-src="${fullEmbedUrl}"
   width="400"
   height="600"
-  style="border: none; border-radius: 0; box-shadow: 0 25px 50px rgba(0,0,0,0.3);"
+  style="border: none; border-radius: 20px; box-shadow: 0 24px 60px rgba(17,16,13,0.18);"
   title="AI Chat Widget"
   sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
 ></iframe>
@@ -311,7 +386,7 @@
     align-items: center;
     gap: 12px;
     padding: 10px 14px;
-    border-radius: 0;
+    border-radius: 14px;
     background: rgba(255, 255, 255, 0.9);
     border: 1px solid rgba(15, 23, 42, 0.12);
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
@@ -322,13 +397,61 @@
     background: #0f766e;
     color: #fff;
     padding: 8px 14px;
-    border-radius: 0;
+    border-radius: 999px;
     cursor: pointer;
     font-size: 14px;
     font-weight: 600;
   }
+  /* Begruessungs-Popup ueber dem Chat-Button */
+  #ai-chat-teaser {
+    position: absolute;
+    bottom: 80px;
+    right: 0;
+    display: none;
+    align-items: flex-start;
+    gap: 12px;
+    width: max-content;
+    max-width: 300px;
+    padding: 14px 16px;
+    background: #ffffff;
+    color: #1b1c1e;
+    border: 1px solid rgba(27, 28, 30, 0.10);
+    border-radius: 18px;
+    box-shadow: 0 18px 40px rgba(17, 16, 13, 0.16);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+    text-align: left;
+    cursor: pointer;
+  }
+  #ai-chat-teaser.ai-chat-teaser-visible {
+    display: flex;
+  }
+  #ai-chat-teaser-close {
+    flex-shrink: 0;
+    margin: -2px -4px 0 0;
+    padding: 0 2px;
+    border: none;
+    background: transparent;
+    color: rgba(27, 28, 30, 0.45);
+    font-size: 18px;
+    line-height: 1.1;
+    cursor: pointer;
+  }
+  #ai-chat-teaser-close:hover {
+    color: #1b1c1e;
+  }
+  @media (max-width: 640px) {
+    #ai-chat-teaser {
+      max-width: calc(100vw - 48px);
+    }
+  }
 </style>
 <div id="ai-chat-widget" style="position: fixed; bottom: 24px; right: 24px; z-index: 9999;">
+  <div id="ai-chat-teaser" role="button" tabindex="0" aria-label="Chat oeffnen">
+    <span id="ai-chat-teaser-text"></span>
+    <button type="button" id="ai-chat-teaser-close" aria-label="Hinweis schliessen">&times;</button>
+  </div>
   <button id="ai-chat-toggle" onclick="toggleAIChat()" style="
     width: var(--icon-size-md, 64px); height: var(--icon-size-md, 64px); border-radius: 50%; border: none;
     background: ${launcherBg};
@@ -337,8 +460,8 @@
   ">${config.icon || "💬"}</button>
   <div id="ai-chat-panel" style="
     display: none; position: absolute; bottom: 80px; right: 0;
-    width: 400px; height: 550px; border-radius: 0;
-    box-shadow: 0 25px 80px rgba(0,0,0,0.5); overflow: hidden;
+    width: 400px; height: 550px; border-radius: 20px;
+    box-shadow: 0 24px 60px rgba(17,16,13,0.20); overflow: hidden;
   ">
     <iframe id="ai-chat-embed" src="about:blank" data-src="${fullEmbedUrl}"
       width="100%" height="100%" style="border: none;"
@@ -383,12 +506,129 @@ if (typeof window.AIChatWidgetConfig.showHeroToggle === 'undefined') {
 function openAIChatPanel() {
   var panel = document.getElementById('ai-chat-panel');
   if (panel) panel.style.display = 'block';
+  hideAIChatTeaser(true);
 }
 
 function closeAIChatPanel() {
   var panel = document.getElementById('ai-chat-panel');
   if (panel) panel.style.display = 'none';
 }
+
+// Widget schliessen/minimieren aus dem Chat-Header heraus
+window.addEventListener('message', function (event) {
+  var data = event && event.data;
+  if (!data || typeof data !== 'object') return;
+  if (data.type === 'chat-close' || data.type === 'chat-minimize') closeAIChatPanel();
+});
+
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape') closeAIChatPanel();
+});
+
+/* --- Begruessungs-Popup: einmal pro Besucher ------------------------- */
+var AI_CHAT_GREETING = ${greetingLiteral};
+
+function aiChatEmbedUrl() {
+  var iframe = document.getElementById('ai-chat-embed');
+  if (!iframe) return '';
+  return iframe.getAttribute('data-src') || iframe.src || '';
+}
+
+function aiChatBotSlug() {
+  try {
+    var src = aiChatEmbedUrl();
+    if (!src) return '';
+    return new URL(src, window.location.origin).searchParams.get('bot_slug') || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function aiChatTeaserKey() {
+  return 'aiChatTeaserSeen:' + (aiChatBotSlug() || 'default');
+}
+
+function aiChatWidgetConfigUrl() {
+  try {
+    var src = aiChatEmbedUrl();
+    if (!src) return '';
+    var parsed = new URL(src, window.location.origin);
+    var slug = parsed.searchParams.get('bot_slug');
+    if (!slug) return '';
+    var query = 'bot_slug=' + encodeURIComponent(slug);
+    var customer = parsed.searchParams.get('customer_id');
+    if (customer) query += '&customer_id=' + encodeURIComponent(customer);
+    var lang = resolveAiChatLang();
+    if (lang) query += '&lang=' + encodeURIComponent(lang);
+    return parsed.origin + '/api/public/widget_config?' + query;
+  } catch (e) {
+    return '';
+  }
+}
+
+function hideAIChatTeaser(remember) {
+  var teaser = document.getElementById('ai-chat-teaser');
+  if (teaser) teaser.classList.remove('ai-chat-teaser-visible');
+  if (remember) {
+    try { window.localStorage.setItem(aiChatTeaserKey(), '1'); } catch (e) {}
+  }
+}
+
+(function () {
+  var teaser = document.getElementById('ai-chat-teaser');
+  var textEl = document.getElementById('ai-chat-teaser-text');
+  var closeBtn = document.getElementById('ai-chat-teaser-close');
+  if (!teaser || !textEl) return;
+
+  var seen = false;
+  try { seen = window.localStorage.getItem(aiChatTeaserKey()) === '1'; } catch (e) {}
+  if (seen) return;
+
+  if (closeBtn) {
+    closeBtn.addEventListener('click', function (event) {
+      event.stopPropagation();
+      hideAIChatTeaser(true);
+    });
+  }
+  teaser.addEventListener('click', function () {
+    hideAIChatTeaser(true);
+    openAIChatPanel();
+  });
+  teaser.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      hideAIChatTeaser(true);
+      openAIChatPanel();
+    }
+  });
+
+  var lang = resolveAiChatLang() === 'en' ? 'en' : 'de';
+  var injected = AI_CHAT_GREETING || {};
+  var injectedText = (injected.text && (injected.text[lang] || injected.text.de || injected.text.en)) || '';
+
+  // Live-Konfiguration hat Vorrang, damit Textaenderungen ohne neues Snippet wirken.
+  var url = aiChatWidgetConfigUrl();
+  var live = (url && window.fetch)
+    ? fetch(url).then(function (res) { return res.ok ? res.json() : null; }).catch(function () { return null; })
+    : null;
+  var settled = live
+    ? Promise.race([live, new Promise(function (resolve) { window.setTimeout(function () { resolve(null); }, 1500); })])
+    : Promise.resolve(null);
+
+  var delay = typeof injected.delay_ms === 'number' ? injected.delay_ms : 1200;
+  window.setTimeout(function () {
+    settled.then(function (cfg) {
+      var greeting = (cfg && cfg.greeting) ? cfg.greeting : injected;
+      if (greeting.enabled === false) return;
+      var text = (typeof greeting.text === 'string' && greeting.text) ? greeting.text : injectedText;
+      if (!text) return;
+      var panel = document.getElementById('ai-chat-panel');
+      if (panel && panel.style.display === 'block') return;
+      textEl.textContent = text;
+      teaser.classList.add('ai-chat-teaser-visible');
+    });
+  }, Math.max(0, delay));
+})();
 
 function toggleAIChat() {
   var panel = document.getElementById('ai-chat-panel');
@@ -714,7 +954,7 @@ function toggleAIChat() {
 	  window.addEventListener('ai-chat-route-change', scheduleRefreshHero);
 	})();
 	<\/script>`;
-        }, [fullEmbedUrl, config.icon, config.theme, heroToggleEnabled]);
+        }, [fullEmbedUrl, config.icon, config.theme, heroToggleEnabled, greetingLiteral]);
 
         const downloadWpPlugin = async () => {
             try {
@@ -726,6 +966,7 @@ function toggleAIChat() {
                         icon: config.icon || "💬",
                         launcher_bg: resolveLauncherBg(config.theme || {}),
                         show_hero_toggle: heroToggleEnabled,
+                        greeting: (widgetCfg && widgetCfg.greeting) || {},
                     }),
                 });
                 if (!res.ok) {

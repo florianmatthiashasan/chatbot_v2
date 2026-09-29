@@ -1,0 +1,5080 @@
+<?php
+/**
+ * Plugin Name: AI Content Chatbot
+ * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
+ * Version: 9.3.4
+ * Author: Local
+ * Requires at least: 6.2
+ * Requires PHP: 8.0
+ * Text Domain: ai-content-chatbot
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+final class AICB_Plugin {
+    private const OPTION_KEY = 'aicb_settings';
+    private const FAQ_OPTION_KEY = 'aicb_faqs';
+    private const WIDGET_OPTION_KEY = 'aicb_widget_config';
+    private const VERSION_OPTION = 'aicb_version';
+    private const ADMIN_ACCESS_CAP = 'edit_posts';
+    private const ADMIN_SENSITIVE_CAP = 'aicb_manage_sensitive';
+    // Feingranulare Inhaltsauswahl für das Training.
+    private const INDEX_MODE_OPTION = 'aicb_index_mode';        // 'all' | 'selected'
+    private const SELECTED_POSTS_OPTION = 'aicb_selected_posts'; // array<int> Post-IDs (nur publish)
+    private const SELECTED_PDFS_OPTION = 'aicb_selected_pdfs';   // array<int> Attachment-IDs (PDF)
+
+    /**
+     * Standard-Logo des Assistenten. Zeichnet sich in der Farbe des Avatars
+     * (currentColor), lässt sich im Widget-Tab durch ein eigenes SVG oder ein
+     * Emoji ersetzen.
+     */
+    private const LEGACY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3c-4.97 0-9 3.36-9 7.5 0 2.3 1.25 4.35 3.2 5.72-.13 1.3-.6 2.5-1.4 3.5-.2.26-.02.64.31.6 1.9-.2 3.6-.9 4.98-1.98.62.1 1.26.16 1.91.16 4.97 0 9-3.36 9-7.5S16.97 3 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="10.5" r="1.15" fill="currentColor"/><circle cx="12" cy="10.5" r="1.15" fill="currentColor"/><circle cx="15.75" cy="10.5" r="1.15" fill="currentColor"/></svg>';
+    private const OLD_DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
+    private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="12" r="1.65" fill="currentColor"/><circle cx="12" cy="12" r="1.65" fill="currentColor"/><circle cx="16" cy="12" r="1.65" fill="currentColor"/></svg>';
+    private const REST_NS = 'ai-content-chatbot/v1';
+    private const ASSET_VERSION = '9.3.4';
+    // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
+    private const CONTEXT_MIN_SCORE = 0.18;
+    private const CARD_MIN_SCORE = 0.28;
+    // Kleinere Chunks finden Details präziser, die Überlappung hält
+    // Zusammenhänge über die Grenze hinweg zusammen.
+    private const CHUNK_TARGET_TOKENS = 380;
+    private const CHUNK_OVERLAP_TOKENS = 70;
+    private const SESSION_TTL = 86400;
+    // Merkt sich, ob die Datenbank den Volltext-Index angelegt hat.
+    private const FULLTEXT_OPTION = 'aicb_fulltext_ready';
+    // Dimensionszahl der aktuell gespeicherten Vektoren.
+    private const INDEX_DIMS_OPTION = 'aicb_index_dims';
+    // Zwischenspeicher fuer den nachgelagerten Button-Call (Sekunden).
+    private const ACTION_TICKET_TTL = 180;
+    // Gewicht der aus dem Verlauf angereicherten Suchvariante gegenueber der
+    // aktuellen Frage. Bei einer echten Folgefrage ("und die Preise?") soll sie
+    // weiterhin fuehren duerfen; liegt die Rueckbezug-Pruefung daneben, daempft
+    // der Faktor den Schaden, statt die vorige Frage erneut beantworten zu
+    // lassen.
+    private const FOLLOWUP_QUERY_WEIGHT = 0.8;
+
+    /**
+     * Fuellwoerter, die die Volltext-Relevanz verwaessern wuerden. Bewusst nur
+     * Funktionswoerter - alles Inhaltliche bleibt drin.
+     */
+    private const KEYWORD_STOPWORDS = [
+        'aber' => 1, 'alle' => 1, 'allen' => 1, 'aller' => 1, 'alles' => 1, 'als' => 1, 'also' => 1,
+        'auch' => 1, 'auf' => 1, 'aus' => 1, 'bei' => 1, 'beim' => 1, 'bin' => 1, 'bis' => 1,
+        'bist' => 1, 'brauche' => 1, 'dafuer' => 1, 'damit' => 1, 'dann' => 1, 'das' => 1, 'dass' => 1,
+        'dem' => 1, 'den' => 1, 'denn' => 1, 'der' => 1, 'des' => 1, 'die' => 1, 'dies' => 1,
+        'diese' => 1, 'diesem' => 1, 'diesen' => 1, 'dieser' => 1, 'dieses' => 1, 'doch' => 1,
+        'dort' => 1, 'du' => 1, 'durch' => 1, 'ein' => 1, 'eine' => 1, 'einem' => 1, 'einen' => 1,
+        'einer' => 1, 'eines' => 1, 'etwas' => 1, 'euch' => 1, 'euer' => 1, 'eure' => 1, 'fuer' => 1,
+        'gibt' => 1, 'habe' => 1, 'haben' => 1, 'hallo' => 1, 'hat' => 1, 'hier' => 1, 'ich' => 1,
+        'ihm' => 1, 'ihn' => 1, 'ihnen' => 1, 'ihr' => 1, 'ihre' => 1, 'ihrem' => 1, 'ihren' => 1,
+        'ihrer' => 1, 'immer' => 1, 'ist' => 1, 'kann' => 1, 'kannst' => 1, 'koennen' => 1,
+        'koennt' => 1, 'mal' => 1, 'man' => 1, 'mehr' => 1, 'mein' => 1, 'meine' => 1, 'mich' => 1,
+        'mir' => 1, 'mit' => 1, 'moechte' => 1, 'muss' => 1, 'nach' => 1, 'nicht' => 1, 'noch' => 1,
+        'nur' => 1, 'ob' => 1, 'oder' => 1, 'ohne' => 1, 'schon' => 1, 'sehr' => 1, 'sein' => 1,
+        'seine' => 1, 'sich' => 1, 'sie' => 1, 'sind' => 1, 'so' => 1, 'soll' => 1, 'sonst' => 1,
+        'ueber' => 1, 'und' => 1, 'uns' => 1, 'unser' => 1, 'unsere' => 1, 'vom' => 1, 'von' => 1,
+        'vor' => 1, 'waere' => 1, 'wann' => 1, 'war' => 1, 'was' => 1, 'weil' => 1, 'welche' => 1,
+        'welchen' => 1, 'welcher' => 1, 'welches' => 1, 'wenn' => 1, 'wer' => 1, 'werde' => 1,
+        'werden' => 1, 'wie' => 1, 'wieder' => 1, 'will' => 1, 'wir' => 1, 'wird' => 1, 'wo' => 1,
+        'wollen' => 1, 'wuerde' => 1, 'zu' => 1, 'zum' => 1, 'zur' => 1,
+        'about' => 1, 'and' => 1, 'any' => 1, 'are' => 1, 'can' => 1, 'could' => 1, 'did' => 1,
+        'does' => 1, 'for' => 1, 'from' => 1, 'has' => 1, 'have' => 1, 'her' => 1, 'his' => 1,
+        'how' => 1, 'its' => 1, 'may' => 1, 'not' => 1, 'the' => 1, 'their' => 1, 'them' => 1,
+        'there' => 1, 'they' => 1, 'this' => 1, 'was' => 1, 'were' => 1, 'what' => 1, 'when' => 1,
+        'where' => 1, 'which' => 1, 'who' => 1, 'will' => 1, 'with' => 1, 'would' => 1, 'you' => 1,
+        'your' => 1,
+    ];
+
+    private static ?AICB_Plugin $instance = null;
+
+    public static function instance(): AICB_Plugin {
+        if (self::$instance === null) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+
+    private function __construct() {
+        add_action('init', [$this, 'maybe_upgrade'], 5);
+        add_action('init', [$this, 'register_shortcodes']);
+        add_action('admin_menu', [$this, 'register_admin_menu']);
+        // Volltext-Index fuer die Keyword-Haelfte der Hybrid-Suche. Bewusst nur
+        // im Admin: das ALTER baut die Tabelle bei InnoDB einmalig neu, das
+        // gehoert nicht in den Request eines Besuchers.
+        add_action('admin_init', [$this, 'ensure_fulltext_index']);
+        add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
+        add_action('wp_enqueue_scripts', [$this, 'enqueue_widget_assets']);
+        add_action('wp_footer', [$this, 'render_footer_widget']);
+        add_action('rest_api_init', [$this, 'register_rest_routes']);
+        add_action('save_post', [$this, 'schedule_post_reindex'], 20, 3);
+        add_action('aicb_reindex_single_post', [$this, 'cron_reindex_single_post']);
+    }
+
+    public static function activate(): void {
+        global $wpdb;
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+        $charset = $wpdb->get_charset_collate();
+        $chunks = $wpdb->prefix . 'aicb_chunks';
+        $sessions = $wpdb->prefix . 'aicb_sessions';
+        $events = $wpdb->prefix . 'aicb_events';
+
+        dbDelta("CREATE TABLE {$chunks} (
+            id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            source_id varchar(191) NOT NULL,
+            source_type varchar(64) NOT NULL,
+            source_url text NULL,
+            title text NULL,
+            section text NULL,
+            content longtext NOT NULL,
+            content_hash char(40) NOT NULL,
+            embedding longtext NULL,
+            embedding_packed longtext NULL,
+            token_estimate int(11) NOT NULL DEFAULT 0,
+            updated_at datetime NOT NULL,
+            PRIMARY KEY  (id),
+            KEY source_id (source_id),
+            KEY source_type (source_type),
+            KEY content_hash (content_hash)
+        ) {$charset};");
+
+        dbDelta("CREATE TABLE {$sessions} (
+            id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            token_hash char(64) NOT NULL,
+            expires_at datetime NOT NULL,
+            created_at datetime NOT NULL,
+            last_seen_at datetime NOT NULL,
+            ip_hash char(64) NULL,
+            user_agent varchar(255) NULL,
+            messages int(11) NOT NULL DEFAULT 0,
+            PRIMARY KEY  (id),
+            UNIQUE KEY token_hash (token_hash),
+            KEY expires_at (expires_at)
+        ) {$charset};");
+
+        dbDelta("CREATE TABLE {$events} (
+            id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            session_hash char(64) NULL,
+            user_id bigint(20) unsigned NULL,
+            question longtext NOT NULL,
+            answer longtext NULL,
+            status varchar(32) NOT NULL DEFAULT 'ok',
+            error text NULL,
+            input_tokens int(11) NOT NULL DEFAULT 0,
+            output_tokens int(11) NOT NULL DEFAULT 0,
+            model varchar(96) NULL,
+            feedback tinyint(4) NOT NULL DEFAULT 0,
+            created_at datetime NOT NULL,
+            PRIMARY KEY  (id),
+            KEY created_at (created_at),
+            KEY status (status),
+            KEY user_id (user_id),
+            KEY feedback (feedback)
+        ) {$charset};");
+
+        self::create_metrics_table();
+
+        if (!get_option(self::OPTION_KEY)) {
+            add_option(self::OPTION_KEY, self::default_settings());
+        }
+        if (!get_option(self::FAQ_OPTION_KEY)) {
+            add_option(self::FAQ_OPTION_KEY, []);
+        }
+        if (!get_option(self::WIDGET_OPTION_KEY)) {
+            add_option(self::WIDGET_OPTION_KEY, self::default_widget_config());
+        }
+        self::sync_role_caps();
+    }
+
+    public static function deactivate(): void {
+        wp_clear_scheduled_hook('aicb_reindex_single_post');
+    }
+
+    /**
+     * Leichtes Ereignis-Table fuer Nutzungs-Kennzahlen (Chat-Oeffnungen und
+     * Outcomes/Conversions nach dem Chat). Bewusst getrennt vom Q&A-Table
+     * aicb_events, damit dessen Auswertungen sauber bleiben. Idempotent (dbDelta),
+     * wird bei Aktivierung UND bei Versions-Upgrade sichergestellt.
+     */
+    private static function create_metrics_table(): void {
+        global $wpdb;
+        if (!function_exists('dbDelta')) {
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        }
+        $charset = $wpdb->get_charset_collate();
+        $metrics = $wpdb->prefix . 'aicb_metrics';
+        dbDelta("CREATE TABLE {$metrics} (
+            id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            type varchar(32) NOT NULL,
+            label varchar(191) NULL,
+            url text NULL,
+            session_hash char(64) NULL,
+            created_at datetime NOT NULL,
+            PRIMARY KEY  (id),
+            KEY type (type),
+            KEY created_at (created_at)
+        ) {$charset};");
+    }
+
+    private static function sync_role_caps(): void {
+        $admin = get_role('administrator');
+        if ($admin && !$admin->has_cap(self::ADMIN_SENSITIVE_CAP)) {
+            $admin->add_cap(self::ADMIN_SENSITIVE_CAP);
+        }
+    }
+
+    public static function default_settings(): array {
+        return [
+            'openai_api_key' => '',
+            'chat_model' => 'gpt-4o-mini',
+            'embedding_model' => 'text-embedding-3-large',
+            // Matryoshka-Kuerzung: 1024 statt 3072 Dimensionen. Die Trefferqualitaet
+            // bleibt praktisch gleich, die Suche wird dreimal schneller und die
+            // Tabelle dreimal kleiner. Greift erst nach einem Neu-Training.
+            'embedding_dims' => 1024,
+            'retriever_k' => 14,
+            'max_context_chars' => 24000,
+            'batch_size' => 4,
+            'auto_index_on_save' => true,
+            'widget_enabled' => true,
+            'enabled_post_types' => [],
+            'include_excerpts' => true,
+            'include_taxonomies' => true,
+            'privacy_url' => '',
+            'contact_url' => '',
+            'contact_email' => get_option('admin_email'),
+            'contact_phone' => '',
+            'system_prompt' => self::default_system_prompt(),
+        ];
+    }
+
+    public static function default_system_prompt(): string {
+        return "Du bist der digitale Assistent dieser Website - sachkundig, hilfsbereit und menschlich im Ton.\n"
+            . "Du kennst die Inhalte dieser Website genau und beantwortest inhaltliche Fragen ausschließlich "
+            . "auf Basis des bereitgestellten Kontexts.\n"
+            . "Antworte ausführlich und konkret: nenne alle relevanten Details, Zahlen und Fakten aus dem "
+            . "Kontext und erkläre Zusammenhänge verständlich.\n"
+            . "Steht etwas nicht im Kontext, sage ehrlich, dass du es nicht weißt, statt zu raten oder es zu erfinden.\n"
+            . "Schreibe natürlich und freundlich - wie ein kompetenter Mensch, nicht wie ein Formular. "
+            . "Gib Quellen als direkte URLs an.";
+    }
+
+    /**
+     * Oberflächentexte pro Sprache. Genutzt wird das Paket der Seitensprache;
+     * im Admin gesetzte Texte haben Vorrang. Unbekannte Sprachen fallen auf
+     * Englisch zurück.
+     */
+    private const LANG_PACKS = [
+        'de' => [
+            'title' => 'Haben Sie Fragen?',
+            'status' => 'Antwortet sofort',
+            'intro' => 'Hallo! Ich finde gerne eine direkte Antwort für dich.',
+            'topics_label' => 'Beliebte Themen',
+            'placeholder' => 'Schreibe deine Frage ...',
+            'disclaimer' => 'Der Assistent kann Fehler machen. Bitte prüfe wichtige Informationen.',
+            'privacy_label' => 'Datenschutz',
+            'greeting' => 'Hallo! Wie kann ich helfen?',
+            'action_contact' => 'Kontakt aufnehmen',
+            'action_email' => 'E-Mail schreiben',
+            'action_details' => 'Mehr Details',
+            'action_details_q' => 'Kannst du das genauer erklären?',
+            'steps' => ['Denke nach ...', 'Suche im Index ...', 'Formuliere Antwort ...'],
+            'error' => 'Es ist ein Fehler aufgetreten: ',
+            'sources' => 'Quellen',
+            'aria_minimize' => 'Chat minimieren',
+            'aria_close' => 'Chat schließen',
+            'aria_send' => 'Nachricht senden',
+            'aria_open' => 'Chat öffnen',
+            'aria_teaser_close' => 'Hinweis schließen',
+            'aria_hide_notice' => 'Hinweis ausblenden',
+            'no_index' => 'Ich bin noch nicht auf die Inhalte dieser Website trainiert. Zu allgemeinen Fragen helfe ich dir aber gerne weiter.',
+        ],
+        'en' => [
+            'title' => 'Any questions?',
+            'status' => 'Replies instantly',
+            'intro' => 'Hi! I am happy to find a direct answer for you.',
+            'topics_label' => 'Popular topics',
+            'placeholder' => 'Type your question ...',
+            'disclaimer' => 'The assistant can make mistakes. Please verify important information.',
+            'privacy_label' => 'Privacy',
+            'greeting' => 'Hi! How can I help?',
+            'action_contact' => 'Get in touch',
+            'action_email' => 'Send an email',
+            'action_details' => 'More details',
+            'action_details_q' => 'Can you explain that in more detail?',
+            'steps' => ['Thinking ...', 'Searching index ...', 'Drafting answer ...'],
+            'error' => 'Something went wrong: ',
+            'sources' => 'Sources',
+            'aria_minimize' => 'Minimize chat',
+            'aria_close' => 'Close chat',
+            'aria_send' => 'Send message',
+            'aria_open' => 'Open chat',
+            'aria_teaser_close' => 'Dismiss notice',
+            'aria_hide_notice' => 'Hide notice',
+            'no_index' => 'I have not been trained on this website yet. I am still happy to help with general questions.',
+        ],
+        'fr' => [
+            'title' => 'Des questions ?',
+            'status' => 'Repond immediatement',
+            'intro' => 'Bonjour ! Je trouve volontiers une reponse directe pour vous.',
+            'topics_label' => 'Sujets populaires',
+            'placeholder' => 'Ecrivez votre question ...',
+            'disclaimer' => "L'assistant peut se tromper. Merci de verifier les informations importantes.",
+            'privacy_label' => 'Confidentialite',
+            'greeting' => 'Bonjour ! Comment puis-je aider ?',
+            'action_contact' => 'Nous contacter',
+            'action_email' => 'Envoyer un e-mail',
+            'action_details' => 'Plus de details',
+            'action_details_q' => 'Peux-tu expliquer plus en detail ?',
+            'steps' => ['Je reflechis ...', 'Je cherche dans l\'index ...', 'Je formule la reponse ...'],
+            'error' => 'Une erreur est survenue : ',
+            'sources' => 'Sources',
+            'aria_minimize' => 'Reduire le chat',
+            'aria_close' => 'Fermer le chat',
+            'aria_send' => 'Envoyer le message',
+            'aria_open' => 'Ouvrir le chat',
+            'aria_teaser_close' => 'Fermer la notification',
+            'aria_hide_notice' => 'Masquer la note',
+            'no_index' => "Je ne suis pas encore entraine sur le contenu de ce site. Je peux tout de meme repondre a des questions generales.",
+        ],
+        'es' => [
+            'title' => '¿Tienes preguntas?',
+            'status' => 'Responde al instante',
+            'intro' => '¡Hola! Con gusto te doy una respuesta directa.',
+            'topics_label' => 'Temas populares',
+            'placeholder' => 'Escribe tu pregunta ...',
+            'disclaimer' => 'El asistente puede equivocarse. Verifica la informacion importante.',
+            'privacy_label' => 'Privacidad',
+            'greeting' => '¡Hola! ¿Como puedo ayudar?',
+            'action_contact' => 'Contactar',
+            'action_email' => 'Enviar un correo',
+            'action_details' => 'Mas detalles',
+            'action_details_q' => '¿Puedes explicarlo con mas detalle?',
+            'steps' => ['Pensando ...', 'Buscando en el indice ...', 'Redactando respuesta ...'],
+            'error' => 'Se ha producido un error: ',
+            'sources' => 'Fuentes',
+            'aria_minimize' => 'Minimizar el chat',
+            'aria_close' => 'Cerrar el chat',
+            'aria_send' => 'Enviar mensaje',
+            'aria_open' => 'Abrir el chat',
+            'aria_teaser_close' => 'Cerrar el aviso',
+            'aria_hide_notice' => 'Ocultar el aviso',
+            'no_index' => 'Todavia no estoy entrenado con el contenido de esta web. Aun asi puedo ayudarte con preguntas generales.',
+        ],
+        'it' => [
+            'title' => 'Hai domande?',
+            'status' => 'Risponde subito',
+            'intro' => 'Ciao! Trovo volentieri una risposta diretta per te.',
+            'topics_label' => 'Argomenti frequenti',
+            'placeholder' => 'Scrivi la tua domanda ...',
+            'disclaimer' => "L'assistente puo sbagliare. Verifica le informazioni importanti.",
+            'privacy_label' => 'Privacy',
+            'greeting' => 'Ciao! Come posso aiutare?',
+            'action_contact' => 'Contattaci',
+            'action_email' => 'Invia una email',
+            'action_details' => 'Piu dettagli',
+            'action_details_q' => 'Puoi spiegarlo piu in dettaglio?',
+            'steps' => ['Sto pensando ...', 'Cerco nell\'indice ...', 'Formulo la risposta ...'],
+            'error' => 'Si e verificato un errore: ',
+            'sources' => 'Fonti',
+            'aria_minimize' => 'Riduci la chat',
+            'aria_close' => 'Chiudi la chat',
+            'aria_send' => 'Invia messaggio',
+            'aria_open' => 'Apri la chat',
+            'aria_teaser_close' => 'Chiudi la notifica',
+            'aria_hide_notice' => 'Nascondi la nota',
+            'no_index' => 'Non sono ancora addestrato sui contenuti di questo sito. Posso comunque aiutarti con domande generali.',
+        ],
+        'nl' => [
+            'title' => 'Heb je vragen?',
+            'status' => 'Antwoordt direct',
+            'intro' => 'Hallo! Ik vind graag een direct antwoord voor je.',
+            'topics_label' => 'Populaire onderwerpen',
+            'placeholder' => 'Schrijf je vraag ...',
+            'disclaimer' => 'De assistent kan fouten maken. Controleer belangrijke informatie.',
+            'privacy_label' => 'Privacy',
+            'greeting' => 'Hallo! Hoe kan ik helpen?',
+            'action_contact' => 'Contact opnemen',
+            'action_email' => 'E-mail sturen',
+            'action_details' => 'Meer details',
+            'action_details_q' => 'Kun je dat uitgebreider uitleggen?',
+            'steps' => ['Aan het nadenken ...', 'Zoeken in de index ...', 'Antwoord opstellen ...'],
+            'error' => 'Er is een fout opgetreden: ',
+            'sources' => 'Bronnen',
+            'aria_minimize' => 'Chat minimaliseren',
+            'aria_close' => 'Chat sluiten',
+            'aria_send' => 'Bericht verzenden',
+            'aria_open' => 'Chat openen',
+            'aria_teaser_close' => 'Melding sluiten',
+            'aria_hide_notice' => 'Melding verbergen',
+            'no_index' => 'Ik ben nog niet getraind op de inhoud van deze site. Met algemene vragen help ik je graag.',
+        ],
+        'pt' => [
+            'title' => 'Tem perguntas?',
+            'status' => 'Responde na hora',
+            'intro' => 'Ola! Encontro com gosto uma resposta direta para voce.',
+            'topics_label' => 'Topicos populares',
+            'placeholder' => 'Escreva a sua pergunta ...',
+            'disclaimer' => 'O assistente pode errar. Verifique informacoes importantes.',
+            'privacy_label' => 'Privacidade',
+            'greeting' => 'Ola! Como posso ajudar?',
+            'action_contact' => 'Entrar em contacto',
+            'action_email' => 'Enviar e-mail',
+            'action_details' => 'Mais detalhes',
+            'action_details_q' => 'Podes explicar com mais detalhe?',
+            'steps' => ['A pensar ...', 'A procurar no indice ...', 'A redigir a resposta ...'],
+            'error' => 'Ocorreu um erro: ',
+            'sources' => 'Fontes',
+            'aria_minimize' => 'Minimizar o chat',
+            'aria_close' => 'Fechar o chat',
+            'aria_send' => 'Enviar mensagem',
+            'aria_open' => 'Abrir o chat',
+            'aria_teaser_close' => 'Fechar o aviso',
+            'aria_hide_notice' => 'Ocultar o aviso',
+            'no_index' => 'Ainda nao fui treinado com o conteudo deste site. Mesmo assim posso ajudar com perguntas gerais.',
+        ],
+        'tr' => [
+            'title' => 'Sorunuz mu var?',
+            'status' => 'Hemen yanitlar',
+            'intro' => 'Merhaba! Size dogrudan bir yanit bulmaktan memnuniyet duyarim.',
+            'topics_label' => 'Populer konular',
+            'placeholder' => 'Sorunuzu yazin ...',
+            'disclaimer' => 'Asistan hata yapabilir. Onemli bilgileri lutfen kontrol edin.',
+            'privacy_label' => 'Gizlilik',
+            'greeting' => 'Merhaba! Nasil yardimci olabilirim?',
+            'action_contact' => 'Iletisime gec',
+            'action_email' => 'E-posta gonder',
+            'action_details' => 'Daha fazla detay',
+            'action_details_q' => 'Bunu daha ayrintili anlatabilir misin?',
+            'steps' => ['Dusunuyorum ...', 'Dizinde ariyorum ...', 'Yaniti hazirliyorum ...'],
+            'error' => 'Bir hata olustu: ',
+            'sources' => 'Kaynaklar',
+            'aria_minimize' => 'Sohbeti kucult',
+            'aria_close' => 'Sohbeti kapat',
+            'aria_send' => 'Mesaj gonder',
+            'aria_open' => 'Sohbeti ac',
+            'aria_teaser_close' => 'Bildirimi kapat',
+            'aria_hide_notice' => 'Notu gizle',
+            'no_index' => 'Bu sitenin icerigi icin henuz egitilmedim. Genel sorularda yine de yardimci olabilirim.',
+        ],
+        'pl' => [
+            'title' => 'Masz pytania?',
+            'status' => 'Odpowiada natychmiast',
+            'intro' => 'Czesc! Chetnie znajde dla Ciebie bezposrednia odpowiedz.',
+            'topics_label' => 'Popularne tematy',
+            'placeholder' => 'Napisz swoje pytanie ...',
+            'disclaimer' => 'Asystent moze sie mylic. Sprawdz wazne informacje.',
+            'privacy_label' => 'Prywatnosc',
+            'greeting' => 'Czesc! Jak moge pomoc?',
+            'action_contact' => 'Kontakt',
+            'action_email' => 'Wyslij e-mail',
+            'action_details' => 'Wiecej szczegolow',
+            'action_details_q' => 'Czy mozesz to wyjasnic dokladniej?',
+            'steps' => ['Mysle ...', 'Szukam w indeksie ...', 'Formuluje odpowiedz ...'],
+            'error' => 'Wystapil blad: ',
+            'sources' => 'Zrodla',
+            'aria_minimize' => 'Zminimalizuj czat',
+            'aria_close' => 'Zamknij czat',
+            'aria_send' => 'Wyslij wiadomosc',
+            'aria_open' => 'Otworz czat',
+            'aria_teaser_close' => 'Zamknij powiadomienie',
+            'no_index' => 'Nie zostalem jeszcze wytrenowany na tresci tej strony. Chetnie pomoge w ogolnych pytaniach.',
+        ],
+        'ru' => [
+            'title' => 'Есть вопросы?',
+            'status' => 'Отвечает сразу',
+            'intro' => 'Здравствуйте! Я с радостью найду для вас точный ответ.',
+            'topics_label' => 'Популярные темы',
+            'placeholder' => 'Напишите свой вопрос ...',
+            'disclaimer' => 'Ассистент может ошибаться. Проверяйте важную информацию.',
+            'privacy_label' => 'Конфиденциальность',
+            'greeting' => 'Здравствуйте! Чем могу помочь?',
+            'action_contact' => 'Связаться',
+            'action_email' => 'Написать письмо',
+            'action_details' => 'Подробнее',
+            'action_details_q' => 'Можешь объяснить подробнее?',
+            'steps' => ['Думаю ...', 'Ищу в индексе ...', 'Формулирую ответ ...'],
+            'error' => 'Произошла ошибка: ',
+            'sources' => 'Источники',
+            'aria_minimize' => 'Свернуть чат',
+            'aria_close' => 'Закрыть чат',
+            'aria_send' => 'Отправить сообщение',
+            'aria_open' => 'Открыть чат',
+            'aria_teaser_close' => 'Закрыть уведомление',
+            'no_index' => 'Я ещё не обучен на содержимом этого сайта. С общими вопросами я всё равно помогу.',
+        ],
+        'ar' => [
+            'title' => 'هل لديك أسئلة؟',
+            'status' => 'يرد فوراً',
+            'intro' => 'مرحباً! يسعدني أن أجد لك إجابة مباشرة.',
+            'topics_label' => 'مواضيع شائعة',
+            'placeholder' => 'اكتب سؤالك ...',
+            'disclaimer' => 'قد يخطئ المساعد. يرجى التحقق من المعلومات المهمة.',
+            'privacy_label' => 'الخصوصية',
+            'greeting' => 'مرحباً! كيف أساعدك؟',
+            'action_contact' => 'تواصل معنا',
+            'action_email' => 'إرسال بريد',
+            'action_details' => 'مزيد من التفاصيل',
+            'action_details_q' => 'هل يمكنك التوضيح بمزيد من التفصيل؟',
+            'steps' => ['أفكر ...', 'أبحث في الفهرس ...', 'أصوغ الإجابة ...'],
+            'error' => 'حدث خطأ: ',
+            'sources' => 'المصادر',
+            'aria_minimize' => 'تصغير المحادثة',
+            'aria_close' => 'إغلاق المحادثة',
+            'aria_send' => 'إرسال الرسالة',
+            'aria_open' => 'فتح المحادثة',
+            'aria_teaser_close' => 'إغلاق التنبيه',
+            'no_index' => 'لم أتدرب بعد على محتوى هذا الموقع. لكن يسعدني مساعدتك في الأسئلة العامة.',
+        ],
+    ];
+
+    /** Sprachen mit Schreibrichtung von rechts nach links. */
+    private const RTL_LANGS = ['ar', 'he', 'fa', 'ur', 'ps', 'sd', 'yi'];
+
+    private static function normalize_lang(string $value): string {
+        $clean = strtolower(trim($value));
+        if ($clean === '') {
+            return '';
+        }
+        $clean = str_replace('_', '-', $clean);
+        return explode('-', $clean)[0];
+    }
+
+    /** Sprache der aktuellen Seite - bei WPML/Polylang pro Seite korrekt. */
+    private function site_lang(): string {
+        $lang = self::normalize_lang((string) get_bloginfo('language'));
+        return $lang !== '' ? $lang : 'en';
+    }
+
+    private function lang_pack(string $lang): array {
+        $key = self::normalize_lang($lang);
+        return self::LANG_PACKS[$key] ?? self::LANG_PACKS['en'];
+    }
+
+    private function is_rtl_lang(string $lang): bool {
+        return in_array(self::normalize_lang($lang), self::RTL_LANGS, true);
+    }
+
+    /** Alle Quellen-Bezeichnungen, damit der Quellenblock in jeder Sprache erkannt wird. */
+    /**
+     * Sprache der Nutzernachricht erkennen. Das Modell alleine entscheidet das
+     * unzuverlässig, sobald Verlauf und Kontext in einer anderen Sprache
+     * stehen - dann antwortet es in der Sprache der Website statt in der des
+     * Nutzers. Deshalb wird die Sprache hier bestimmt und vorgegeben.
+     */
+    private const LANG_NAMES = [
+        'de' => 'German (Deutsch)', 'en' => 'English', 'tr' => 'Turkish (Türkçe)',
+        'ar' => 'Arabic (العربية)', 'fr' => 'French (Français)', 'es' => 'Spanish (Español)',
+        'it' => 'Italian (Italiano)', 'nl' => 'Dutch (Nederlands)', 'pt' => 'Portuguese (Português)',
+        'pl' => 'Polish (Polski)', 'ru' => 'Russian (Русский)', 'el' => 'Greek (Ελληνικά)',
+        'he' => 'Hebrew (עברית)', 'uk' => 'Ukrainian (Українська)', 'zh' => 'Chinese (中文)',
+        'ja' => 'Japanese (日本語)', 'ko' => 'Korean (한국어)', 'hi' => 'Hindi (हिन्दी)',
+    ];
+
+    // Schriftsysteme sind eindeutig - wer arabisch schreibt, will arabisch lesen.
+    private const SCRIPT_PATTERNS = [
+        'ar' => '/[\x{0600}-\x{06FF}\x{0750}-\x{077F}]/u',
+        'he' => '/[\x{0590}-\x{05FF}]/u',
+        'ru' => '/[\x{0400}-\x{04FF}]/u',
+        'el' => '/[\x{0370}-\x{03FF}]/u',
+        'hi' => '/[\x{0900}-\x{097F}]/u',
+        'ja' => '/[\x{3040}-\x{30FF}]/u',
+        'ko' => '/[\x{AC00}-\x{D7AF}]/u',
+        'zh' => '/[\x{4E00}-\x{9FFF}]/u',
+    ];
+
+    // Häufige Funktionswörter. Kurze Nachrichten entscheidet oft ein einziges
+    // Wort ("merhaba", "danke"), deshalb sind Grüße mit aufgenommen.
+    private const LANG_STOPWORDS = [
+        'de' => ['der', 'die', 'das', 'und', 'ist', 'sind', 'ich', 'du', 'ihr', 'wir', 'nicht', 'wie', 'was', 'wo', 'wann', 'warum', 'kann', 'können', 'können', 'habt', 'haben', 'hat', 'mit', 'von', 'für', 'für', 'auf', 'eine', 'einen', 'mehr', 'gibt', 'bitte', 'danke', 'hallo', 'guten', 'tag', 'preis', 'preise', 'kosten', 'zimmer'],
+        'en' => ['the', 'is', 'are', 'how', 'what', 'where', 'when', 'why', 'can', 'you', 'your', 'we', 'do', 'does', 'have', 'has', 'please', 'thanks', 'thank', 'yes', 'with', 'for', 'about', 'more', 'there', 'hi', 'hello', 'hey', 'price', 'prices', 'cost', 'opening', 'hours'],
+        'tr' => ['bir', 'və', 've', 'için', 'icin', 'nasıl', 'nasil', 'var', 'yok', 'nerede', 'zaman', 'merhaba', 'selam', 'teşekkür', 'tesekkur', 'evet', 'hayır', 'hayir', 'ile', 'daha', 'çok', 'cok', 'mı', 'mi', 'mu', 'mü', 'fiyat', 'fiyatlar', 'oda', 'saat'],
+        'fr' => ['le', 'la', 'les', 'des', 'une', 'est', 'vous', 'je', 'nous', 'comment', 'quel', 'quelle', 'pour', 'avec', 'merci', 'oui', 'non', 'plus', 'bonjour', 'salut', 'prix', 'ouvert'],
+        'es' => ['el', 'los', 'las', 'una', 'usted', 'como', 'cómo', 'cual', 'cuál', 'para', 'con', 'gracias', 'sí', 'hola', 'más', 'mas', 'donde', 'dónde', 'precio', 'precios'],
+        'it' => ['il', 'lo', 'gli', 'le', 'una', 'come', 'quale', 'per', 'con', 'grazie', 'sì', 'più', 'piu', 'dove', 'ciao', 'buongiorno', 'prezzo', 'prezzi', 'camera', 'sono'],
+        'nl' => ['het', 'een', 'hoe', 'wat', 'waar', 'kan', 'jij', 'jullie', 'met', 'voor', 'dank', 'bedankt', 'nee', 'meer', 'hallo', 'prijs', 'prijzen', 'kamer', 'openingstijden'],
+        'pt' => ['os', 'as', 'uma', 'como', 'qual', 'para', 'com', 'obrigado', 'obrigada', 'sim', 'não', 'nao', 'mais', 'onde', 'olá', 'ola', 'preço', 'preco', 'quarto'],
+        'pl' => ['jak', 'co', 'gdzie', 'czy', 'nie', 'tak', 'dla', 'jest', 'są', 'sa', 'dziękuję', 'dziekuje', 'cześć', 'czesc', 'dzień', 'dobry', 'cena', 'ceny', 'pokój', 'pokoj'],
+    ];
+
+    // Diakritika als Zusatzsignal - "ı" und "ğ" gibt es praktisch nur im Türkischen.
+    private const LANG_HINT_CHARS = [
+        'tr' => ['ı', 'ş', 'ğ'],
+        'de' => ['ä', 'ö', 'ü', 'ß'],
+        'fr' => ['é', 'è', 'ê', 'à', 'ç'],
+        'es' => ['ñ', '¿', '¡'],
+        'pt' => ['ã', 'õ'],
+        'pl' => ['ą', 'ć', 'ę', 'ł', 'ń', 'ś', 'ź', 'ż'],
+        'it' => ['à', 'ò'],
+    ];
+
+    private function detect_message_lang(string $text): string {
+        $raw = trim($text);
+        if ($raw === '') {
+            return '';
+        }
+        foreach (self::SCRIPT_PATTERNS as $code => $pattern) {
+            $hits = preg_match_all($pattern, $raw);
+            if ($hits && $hits >= 3) {
+                return $code;
+            }
+        }
+
+        $lower = $this->str_lower($raw);
+        preg_match_all('/[\p{L}]+/u', $lower, $found);
+        $tokens = array_unique($found[0] ?? []);
+        if (!$tokens) {
+            return '';
+        }
+
+        $scores = [];
+        foreach (self::LANG_STOPWORDS as $code => $words) {
+            $score = (float) count(array_intersect($tokens, $words));
+            foreach (self::LANG_HINT_CHARS[$code] ?? [] as $char) {
+                if (mb_strpos($lower, $char) !== false) {
+                    $score += 1.5;
+                }
+            }
+            if ($score > 0) {
+                $scores[$code] = $score;
+            }
+        }
+        if (!$scores) {
+            return '';
+        }
+        arsort($scores);
+        $codes = array_keys($scores);
+        $best = $scores[$codes[0]];
+        $second = isset($codes[1]) ? $scores[$codes[1]] : 0.0;
+        // Bei Gleichstand lieber nichts sagen als falsch raten.
+        if ($best < 1 || ($best - $second) < 0.5) {
+            return '';
+        }
+        return $codes[0];
+    }
+
+    private function lang_display_name(string $code): string {
+        $key = self::normalize_lang($code);
+        return self::LANG_NAMES[$key] ?? ($key !== '' ? strtoupper($key) : "the user's language");
+    }
+
+    private function sources_labels(): array {
+        $labels = ['Quellen', 'Quelle', 'Sources', 'Source'];
+        foreach (self::LANG_PACKS as $pack) {
+            $labels[] = $pack['sources'];
+        }
+        return array_values(array_unique($labels));
+    }
+
+    /** Beschriftungen der Feedback-Leiste (👍/👎) je Sprache, Fallback Englisch. */
+    private function feedback_labels(string $lang): array {
+        $map = [
+            'de' => ['question' => 'War das hilfreich?', 'yes' => 'Hilfreich', 'no' => 'Nicht hilfreich', 'thanks' => 'Danke für dein Feedback!'],
+            'en' => ['question' => 'Was this helpful?', 'yes' => 'Helpful', 'no' => 'Not helpful', 'thanks' => 'Thanks for your feedback!'],
+            'fr' => ['question' => 'Cela vous a-t-il aide ?', 'yes' => 'Utile', 'no' => 'Pas utile', 'thanks' => 'Merci pour votre retour !'],
+            'es' => ['question' => 'Te resulto util?', 'yes' => 'Util', 'no' => 'No util', 'thanks' => 'Gracias por tu opinion!'],
+            'it' => ['question' => 'E stato utile?', 'yes' => 'Utile', 'no' => 'Non utile', 'thanks' => 'Grazie per il feedback!'],
+            'nl' => ['question' => 'Was dit nuttig?', 'yes' => 'Nuttig', 'no' => 'Niet nuttig', 'thanks' => 'Bedankt voor je feedback!'],
+            'pt' => ['question' => 'Isto foi util?', 'yes' => 'Util', 'no' => 'Nao util', 'thanks' => 'Obrigado pelo seu feedback!'],
+            'tr' => ['question' => 'Bu yardimci oldu mu?', 'yes' => 'Yardimci', 'no' => 'Yardimci degil', 'thanks' => 'Geri bildirimin icin tesekkurler!'],
+            'pl' => ['question' => 'Czy to bylo pomocne?', 'yes' => 'Pomocne', 'no' => 'Niepomocne', 'thanks' => 'Dziekujemy za opinie!'],
+            'ru' => ['question' => 'Это было полезно?', 'yes' => 'Полезно', 'no' => 'Не полезно', 'thanks' => 'Спасибо за отзыв!'],
+            'ar' => ['question' => 'هل كان هذا مفيدا؟', 'yes' => 'مفيد', 'no' => 'غير مفيد', 'thanks' => 'شكرا على ملاحظاتك!'],
+        ];
+        return $map[$lang] ?? $map['en'];
+    }
+
+    /** Beschriftungen fuer den Dialog beim Beenden der Unterhaltung. */
+    private function close_confirm_labels(string $lang): array {
+        $map = [
+            'de' => [
+                'title' => 'Willst du den Chat wirklich schließen?',
+                'message' => 'Der Verlauf wird dabei gelöscht.',
+                'confirm' => 'Ja, schließen',
+                'cancel' => 'Nein, weitermachen',
+            ],
+            'en' => [
+                'title' => 'Do you really want to close the chat?',
+                'message' => 'This will clear the conversation.',
+                'confirm' => 'Yes, close',
+                'cancel' => 'No, keep chatting',
+            ],
+        ];
+        return $map[$lang] ?? $map['en'];
+    }
+
+    public static function default_widget_config(): array {
+        return [
+            'theme' => [
+                'accent' => '#8c8875',
+                'accentStrong' => '#756f5f',
+                'statusDot' => '#4f8a5b',
+                'launcherBg' => '#736b5b',
+                'bg' => '#f9f6f1',
+                'panel' => '#ffffff',
+                'text' => '#2f2a24',
+                'avatarBg' => '#f1ece3',
+                'avatarFg' => '#5f5748',
+                'userBubble' => '#ece5da',
+                'botBubble' => '#ffffff',
+                'composerBg' => '#ffffff',
+                'composerBorder' => '#e8e2d8',
+                'composerButtonBg' => '#5f5748',
+                'composerButtonText' => '#f8f6f1',
+            ],
+            // Leere Texte werden automatisch aus dem Sprachpaket der Seite gefüllt.
+            'copy' => [
+                'icon' => self::DEFAULT_ICON_SVG,
+                'title' => '',
+                'status' => '',
+                'intro' => '',
+                'topics_label' => '',
+                'placeholder' => '',
+                'disclaimer' => '',
+                'privacy_label' => '',
+            ],
+            'greeting' => [
+                'enabled' => true,
+                'text' => '',
+                'delay_ms' => 1200,
+            ],
+            'page_suggestions' => [
+                'enabled' => true,
+                'show_on_route_change' => true,
+            ],
+            'hero' => [
+                // false = Chatbot auch im Hero zeigen (Default). true = im Hero
+                // ausblenden und erst nach dem Hero-Bereich einblenden.
+                'hide_in_hero' => false,
+                // Optionaler CSS-Selektor des Hero-Bereichs fuer praezise Erkennung.
+                // Leer -> Fallback auf die erste Bildschirmhoehe.
+                'selector' => '',
+            ],
+            'analytics' => [
+                // Chat-Oeffnungen zaehlen.
+                'track_opens' => true,
+                // Outcomes nach dem Chat zaehlen (Klick auf Booking-/CTA-Links,
+                // abgeschickte Anfrageformulare - in-Widget und auf der Seite).
+                'track_outcomes' => true,
+                // Optionale CSS-Selektoren fuer praezise Conversion-Erkennung auf
+                // der Seite. Leer -> Heuristik (Booking-/Kontakt-Muster).
+                'conversion_selector' => '',
+                'form_selector' => '',
+            ],
+            'topics' => [],
+        ];
+    }
+
+    /**
+     * Update-Migration. Beim Sprung auf 0.3.0 würden zwei Altlasten die neue
+     * Sprachlogik aushebeln: der auf Deutsch festgenagelte System-Prompt und die
+     * deutschen Standardtexte im Widget. Beides wird nur ersetzt, wenn es noch
+     * unverändert dem alten Standard entspricht - eigene Texte bleiben.
+     */
+    public function maybe_upgrade(): void {
+        self::sync_role_caps();
+        $installed_version = (string) get_option(self::VERSION_OPTION, '');
+        if ($installed_version === self::ASSET_VERSION) {
+            return;
+        }
+
+        $legacy_prompt = "Du bist ein Assistent, der nur auf Basis des bereitgestellten WordPress-Kontexts antwortet.\n"
+            . "Wenn etwas nicht im Kontext steht, sage ehrlich, dass du es nicht weißt.\n"
+            . "Antworte präzise auf Deutsch, nenne konkrete Fakten und gib Quellen als direkte URLs aus.";
+        $settings = $this->settings();
+        $settings_changed = false;
+        if (trim((string) ($settings['system_prompt'] ?? '')) === trim($legacy_prompt)) {
+            $settings['system_prompt'] = self::default_system_prompt();
+            $settings_changed = true;
+        }
+        // Alte Standardwerte anheben - mehr Kontext heißt mehr Details in der
+        // Antwort. Selbst gesetzte Werte bleiben unangetastet.
+        if ((int) ($settings['retriever_k'] ?? 0) === 8) {
+            $settings['retriever_k'] = 12;
+            $settings_changed = true;
+        }
+        if ((int) ($settings['max_context_chars'] ?? 0) === 14000) {
+            $settings['max_context_chars'] = 20000;
+            $settings_changed = true;
+        }
+        // Fuer vollstaendigeres Wissen weiter anheben (nur alte Standardwerte).
+        if ((int) ($settings['retriever_k'] ?? 0) === 12) {
+            $settings['retriever_k'] = 16;
+            $settings_changed = true;
+        }
+        if ((int) ($settings['max_context_chars'] ?? 0) === 20000) {
+            $settings['max_context_chars'] = 26000;
+            $settings_changed = true;
+        }
+        // Naechste Stufe fuer vollstaendigere, detailreichere Antworten (nur alte Standardwerte).
+        if ((int) ($settings['retriever_k'] ?? 0) === 16) {
+            $settings['retriever_k'] = 20;
+            $settings_changed = true;
+        }
+        if ((int) ($settings['max_context_chars'] ?? 0) === 26000) {
+            $settings['max_context_chars'] = 30000;
+            $settings_changed = true;
+        }
+        // Hybrid-Suche sortiert deutlich besser vor: weniger, dafuer treffendere
+        // Abschnitte. Das steigert die Antwortqualitaet (der relevante Absatz
+        // geht nicht mehr in der Mitte unter) und senkt zugleich die Wartezeit.
+        if ((int) ($settings['retriever_k'] ?? 0) === 20) {
+            $settings['retriever_k'] = 14;
+            $settings_changed = true;
+        }
+        if ((int) ($settings['max_context_chars'] ?? 0) === 30000) {
+            $settings['max_context_chars'] = 24000;
+            $settings_changed = true;
+        }
+        if (!isset($settings['embedding_dims'])) {
+            $settings['embedding_dims'] = 1024;
+            $settings_changed = true;
+        }
+        if ($settings_changed) {
+            update_option(self::OPTION_KEY, $settings, false);
+        }
+
+        $legacy_copy = [
+            'title' => ['Haben Sie Fragen?'],
+            'status' => ['Antwortet sofort'],
+            'intro' => ['Hallo! Ich finde gerne eine direkte Antwort für dich.'],
+            'topics_label' => ['Beliebte Themen'],
+            'placeholder' => ['Schreibe deine Frage ...', 'Frage schreiben...'],
+            'disclaimer' => ['Der Assistent kann Fehler machen. Bitte prüfe wichtige Informationen.'],
+            'privacy_label' => ['Datenschutz'],
+        ];
+        $widget = get_option(self::WIDGET_OPTION_KEY, null);
+        if (is_array($widget)) {
+            $changed = false;
+            foreach ($legacy_copy as $key => $values) {
+                $current = trim((string) ($widget['copy'][$key] ?? ''));
+                if ($current !== '' && in_array($current, $values, true)) {
+                    $widget['copy'][$key] = '';
+                    $changed = true;
+                }
+            }
+            if (trim((string) ($widget['greeting']['text'] ?? '')) === 'Hallo! Wie kann ich helfen?') {
+                $widget['greeting']['text'] = '';
+                $changed = true;
+            }
+            // Nur sehr alte Installationen hatten 💬 als Default. In neueren
+            // Versionen kann 💬 bewusst als eigenes Icon gesetzt sein.
+            if (version_compare($installed_version !== '' ? $installed_version : '0.0.0', '0.3.0', '<') && trim((string) ($widget['copy']['icon'] ?? '')) === '💬') {
+                $widget['copy']['icon'] = self::DEFAULT_ICON_SVG;
+                $changed = true;
+            }
+            if (in_array(trim((string) ($widget['copy']['icon'] ?? '')), [self::LEGACY_ICON_SVG, self::OLD_DEFAULT_ICON_SVG], true)) {
+                $widget['copy']['icon'] = self::DEFAULT_ICON_SVG;
+                $changed = true;
+            }
+            $theme_updates = [
+                'launcherBg' => ['#8c8875', '#736b5b'],
+                'avatarBg' => ['#3a352c', '#f1ece3'],
+                'avatarFg' => ['#f8f6f1', '#5f5748'],
+                'composerButtonBg' => ['#3a352c', '#5f5748'],
+            ];
+            foreach ($theme_updates as $key => [$old_value, $new_value]) {
+                if (strtolower((string) ($widget['theme'][$key] ?? '')) === $old_value) {
+                    $widget['theme'][$key] = $new_value;
+                    $changed = true;
+                }
+            }
+            $legacy_topics = [
+                ['label' => 'Leistungen', 'question' => 'Welche Leistungen bietet ihr an?'],
+                ['label' => 'Preise', 'question' => 'Was kostet das?'],
+                ['label' => 'Kontakt', 'question' => 'Wie kann ich Kontakt aufnehmen?'],
+            ];
+            $current_topics = array_map(fn($topic) => [
+                'label' => (string) ($topic['label'] ?? ''),
+                'question' => (string) ($topic['question'] ?? ''),
+            ], array_slice((array) ($widget['topics'] ?? []), 0, 3));
+            if (count((array) ($widget['topics'] ?? [])) === 3 && $current_topics === $legacy_topics) {
+                $widget['topics'] = [];
+                $changed = true;
+            }
+            if ($changed) {
+                update_option(self::WIDGET_OPTION_KEY, $widget, false);
+            }
+        }
+
+        // Migration: feedback-Spalte für 👍/👎 nachziehen (idempotent).
+        global $wpdb;
+        $events = $wpdb->prefix . 'aicb_events';
+        $has_feedback = $wpdb->get_var($wpdb->prepare(
+            "SHOW COLUMNS FROM {$events} LIKE %s",
+            'feedback'
+        ));
+        if (!$has_feedback) {
+            $wpdb->query("ALTER TABLE {$events} ADD COLUMN feedback tinyint(4) NOT NULL DEFAULT 0, ADD KEY feedback (feedback)");
+        }
+
+        // Migration: kompakte, schnelle Embedding-Spalte (Base64 gepackter float32).
+        $chunks_table = $wpdb->prefix . 'aicb_chunks';
+        $has_packed = $wpdb->get_var($wpdb->prepare(
+            "SHOW COLUMNS FROM {$chunks_table} LIKE %s",
+            'embedding_packed'
+        ));
+        if (!$has_packed) {
+            $wpdb->query("ALTER TABLE {$chunks_table} ADD COLUMN embedding_packed longtext NULL");
+        }
+
+        // Kennzahlen-Table (Chat-Oeffnungen + Outcomes) auch beim Update anlegen.
+        self::create_metrics_table();
+
+        update_option(self::VERSION_OPTION, self::ASSET_VERSION, false);
+    }
+
+    public function register_shortcodes(): void {
+        add_shortcode('ai_content_chatbot', [$this, 'shortcode_widget']);
+    }
+
+    public function register_admin_menu(): void {
+        add_menu_page(
+            'AI Chatbot',
+            'AI Chatbot',
+            self::ADMIN_ACCESS_CAP,
+            'ai-content-chatbot',
+            [$this, 'render_admin_page'],
+            'dashicons-format-chat',
+            58
+        );
+    }
+
+    public function enqueue_admin_assets(string $hook): void {
+        if ($hook !== 'toplevel_page_ai-content-chatbot') {
+            return;
+        }
+        $base = plugin_dir_url(__FILE__);
+        // Mediathek-Dialog (wp.media) für die PDF-Auswahl im Inhalte-Tab.
+        wp_enqueue_media();
+        wp_enqueue_style('aicb-admin', $base . 'assets/admin.css', [], self::ASSET_VERSION);
+
+        // Die Live-Vorschau im Widget-Tab nutzt exakt die Frontend-Assets und
+        // dasselbe Markup - so zeigt sie wirklich das, was Besucher sehen.
+        wp_enqueue_style('aicb-widget', $base . 'assets/widget.css', [], self::ASSET_VERSION);
+        wp_enqueue_script('aicb-widget', $base . 'assets/widget.js', [], self::ASSET_VERSION, true);
+        wp_localize_script('aicb-widget', 'AICBWidget', [
+            'restUrl' => esc_url_raw(rest_url(self::REST_NS . '/')),
+            'config' => $this->public_widget_config(),
+        ]);
+
+        // Chart.js (gebuendelt, kein CDN) fuer das Statistik-Dashboard.
+        wp_enqueue_script('aicb-chartjs', $base . 'assets/chart.umd.min.js', [], '4.4.4', true);
+
+        wp_enqueue_script('aicb-admin', $base . 'assets/admin.js', ['aicb-widget', 'aicb-chartjs'], self::ASSET_VERSION, true);
+        wp_localize_script('aicb-admin', 'AICBAdmin', [
+            'restUrl' => esc_url_raw(rest_url(self::REST_NS . '/')),
+            'nonce' => wp_create_nonce('wp_rest'),
+            'siteUrl' => home_url('/'),
+            'previewHtml' => $this->widget_shell_markup('inline'),
+            'widgetConfig' => $this->public_widget_config(),
+            'permissions' => [
+                'canAccessAdmin' => current_user_can(self::ADMIN_ACCESS_CAP),
+                'canManageSensitive' => current_user_can(self::ADMIN_SENSITIVE_CAP),
+            ],
+            // Sprachpaket der Seite: füllt leere Felder in der Vorschau genauso
+            // wie später im Frontend.
+            'copyDefaults' => $this->lang_pack($this->site_lang()),
+        ]);
+    }
+
+    public function enqueue_widget_assets(): void {
+        if (!$this->setting_bool('widget_enabled', true)) {
+            return;
+        }
+        $this->enqueue_widget_assets_now();
+    }
+
+    private function enqueue_widget_assets_now(): void {
+        $base = plugin_dir_url(__FILE__);
+        wp_enqueue_style('aicb-widget', $base . 'assets/widget.css', [], self::ASSET_VERSION);
+        wp_enqueue_script('aicb-widget', $base . 'assets/widget.js', [], self::ASSET_VERSION, true);
+        wp_localize_script('aicb-widget', 'AICBWidget', [
+            'restUrl' => esc_url_raw(rest_url(self::REST_NS . '/')),
+            'config' => $this->public_widget_config(),
+        ]);
+    }
+
+    public function render_admin_page(): void {
+        if (!current_user_can(self::ADMIN_ACCESS_CAP)) {
+            wp_die(esc_html__('You do not have permission to access this page.', 'ai-content-chatbot'));
+        }
+        echo '<div class="wrap aicb-admin"><div id="aicb-admin-root"></div></div>';
+    }
+
+    public function shortcode_widget(): string {
+        $this->enqueue_widget_assets_now();
+        ob_start();
+        $this->render_widget_shell('inline');
+        return (string) ob_get_clean();
+    }
+
+    public function render_footer_widget(): void {
+        if (!$this->setting_bool('widget_enabled', true)) {
+            return;
+        }
+        $this->render_widget_shell('floating');
+    }
+
+    private function widget_shell_markup(string $mode): string {
+        ob_start();
+        $this->render_widget_shell($mode);
+        return (string) ob_get_clean();
+    }
+
+    private function render_widget_shell(string $mode): void {
+        $config = $this->public_widget_config();
+        $copy = $config['copy'];
+        $pack = $this->lang_pack((string) ($config['lang'] ?? 'en'));
+        $style = $this->widget_css_vars($config);
+        $classes = 'aicb-widget-shell aicb-mode-' . sanitize_html_class($mode);
+        $icon_html = $this->icon_html((string) ($copy['icon'] ?? ''));
+        $launcher_icon_classes = 'aicb-launcher-icon' . ($icon_html !== '' ? ' aicb-custom-icon' : '');
+        $privacy_url = (string) ($config['contact']['privacy_url'] ?? '');
+        $inline = $mode === 'inline';
+        $dir = !empty($config['rtl']) ? 'rtl' : 'ltr';
+        $close_confirm = $config['strings']['close_confirm'] ?? $this->close_confirm_labels((string) ($config['lang'] ?? 'en'));
+        // Im-Hero-ausblenden: Klasse schon serverseitig setzen, damit der Launcher
+        // beim Laden nicht kurz aufblitzt, bevor das JS greift.
+        if (!$inline && !empty($config['hero']['hide_in_hero'])) {
+            $classes .= ' aicb-hide-in-hero';
+        }
+        ?>
+        <div class="<?php echo esc_attr($classes); ?>" style="<?php echo esc_attr($style); ?>" dir="<?php echo esc_attr($dir); ?>" lang="<?php echo esc_attr((string) ($config['lang'] ?? 'en')); ?>" data-aicb-widget>
+            <?php if (!$inline) : ?>
+            <div class="aicb-teaser" role="button" tabindex="0" data-aicb-teaser aria-label="<?php echo esc_attr($pack['aria_open']); ?>">
+                <div class="aicb-teaser-content" data-aicb-teaser-text></div>
+                <button class="aicb-teaser-close" type="button" data-aicb-teaser-close aria-label="<?php echo esc_attr($pack['aria_teaser_close']); ?>">&times;</button>
+            </div>
+            <button class="aicb-launcher" type="button" aria-label="<?php echo esc_attr($copy['title']); ?>" data-aicb-launcher>
+                <span class="<?php echo esc_attr($launcher_icon_classes); ?>" data-aicb-launcher-icon><?php echo $icon_html !== '' ? $icon_html : $this->default_launcher_icon(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
+            </button>
+            <?php endif; ?>
+            <div class="aicb-panel" data-aicb-panel <?php echo $inline ? '' : 'hidden'; ?>>
+                <div class="aicb-header">
+                    <div class="aicb-avatar" data-aicb-avatar aria-hidden="true"><?php echo $icon_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></div>
+                    <div class="aicb-meta">
+                        <p class="aicb-title"><?php echo esc_html($copy['title']); ?></p>
+                        <?php if (trim((string) $copy['status']) !== '') : ?>
+                        <p class="aicb-status"><span class="aicb-status-dot"></span><?php echo esc_html($copy['status']); ?></p>
+                        <?php endif; ?>
+                    </div>
+                    <?php if (!$inline) : ?>
+                    <div class="aicb-header-actions">
+                        <button class="aicb-icon-btn" type="button" data-aicb-minimize aria-label="<?php echo esc_attr($pack['aria_minimize']); ?>">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"></path></svg>
+                        </button>
+                        <button class="aicb-icon-btn" type="button" data-aicb-close aria-label="<?php echo esc_attr($pack['aria_close']); ?>">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6l-12 12"></path></svg>
+                        </button>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <div class="aicb-messages" data-aicb-messages>
+                    <div class="aicb-row aicb-bot" data-aicb-intro>
+                        <div class="aicb-row-avatar" data-aicb-avatar aria-hidden="true"><?php echo $icon_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></div>
+                        <div class="aicb-stack">
+                            <div class="aicb-bubble" dir="auto"><?php echo esc_html($copy['intro']); ?></div>
+                            <div class="aicb-topics aicb-hidden" data-aicb-topics>
+                                <div class="aicb-topics-label" data-aicb-topics-label></div>
+                                <div class="aicb-topics-list" data-aicb-topics-list></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="aicb-list" data-aicb-list></div>
+                    <div data-aicb-spacer aria-hidden="true"></div>
+                </div>
+                <div class="aicb-composer-area">
+                    <form class="aicb-composer" data-aicb-form>
+                        <textarea data-aicb-input rows="1" autocomplete="off" placeholder="<?php echo esc_attr($copy['placeholder']); ?>"></textarea>
+                        <button class="aicb-send aicb-idle" type="submit" data-aicb-send aria-label="<?php echo esc_attr($pack['aria_send']); ?>">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"></path><path d="M5 12l7-7 7 7"></path></svg>
+                        </button>
+                    </form>
+                    <div class="aicb-footer">
+                        <p class="aicb-disclaimer"><?php echo esc_html($copy['disclaimer']); ?></p>
+                        <?php if ($privacy_url !== '') : ?>
+                        <a class="aicb-privacy" href="<?php echo esc_url($privacy_url); ?>" target="_blank" rel="noreferrer noopener"><?php echo esc_html($copy['privacy_label']); ?></a>
+                        <?php endif; ?>
+                        <?php if (!$inline) : ?>
+                        <button class="aicb-footer-dismiss" type="button" data-aicb-footer-dismiss aria-label="<?php echo esc_attr($pack['aria_hide_notice']); ?>">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6l-12 12"></path></svg>
+                        </button>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <?php if (!$inline) : ?>
+                <div class="aicb-close-confirm" data-aicb-close-confirm hidden>
+                    <div class="aicb-close-confirm-backdrop" data-aicb-close-cancel></div>
+                    <div class="aicb-close-confirm-sheet" role="dialog" aria-modal="true" aria-label="<?php echo esc_attr((string) ($close_confirm['title'] ?? 'End conversation?')); ?>">
+                        <div class="aicb-close-confirm-title"><?php echo esc_html((string) ($close_confirm['title'] ?? 'End conversation?')); ?></div>
+                        <div class="aicb-close-confirm-message"><?php echo esc_html((string) ($close_confirm['message'] ?? 'Do you want to end this conversation and start over?')); ?></div>
+                        <div class="aicb-close-confirm-actions">
+                            <button class="aicb-close-confirm-end" type="button" data-aicb-close-confirm-end><?php echo esc_html((string) ($close_confirm['confirm'] ?? 'End conversation')); ?></button>
+                            <button class="aicb-close-confirm-cancel" type="button" data-aicb-close-cancel><?php echo esc_html((string) ($close_confirm['cancel'] ?? 'Cancel')); ?></button>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php
+    }
+
+    /**
+     * Icon des Betreibers: Emoji/Text oder ein eigenes SVG (auf sichere Tags reduziert).
+     */
+    private function icon_html(string $icon): string {
+        $icon = trim($icon);
+        if ($icon === '') {
+            return '';
+        }
+        if (stripos($icon, '<svg') === 0) {
+            return $this->sanitize_svg_markup($icon);
+        }
+        return esc_html($icon);
+    }
+
+    /**
+     * Icon speichern: sanitize_text_field würde ein SVG restlos entfernen,
+     * deshalb laufen SVGs über den SVG-Sanitizer und nur Text über die
+     * Standard-Bereinigung.
+     */
+    private function sanitize_icon(string $icon): string {
+        $trimmed = trim($icon);
+        if ($trimmed === '') {
+            return '';
+        }
+        if (stripos($trimmed, '<svg') === 0) {
+            return $this->sanitize_svg_markup($trimmed);
+        }
+        return sanitize_text_field($trimmed);
+    }
+
+    private function is_black_color(string $value): bool {
+        $v = strtolower(preg_replace('/\s+/', '', $value));
+        return in_array($v, ['#000', '#000000', '#000000ff', 'black', 'rgb(0,0,0)', 'rgba(0,0,0,1)'], true);
+    }
+
+    /**
+     * SVG-Logos sicher bereinigen - OHNE die Gross-/Kleinschreibung zu zerstoeren.
+     * wp_kses ist fuer HTML gedacht und schreibt camelCase-SVG-Tags wie
+     * linearGradient/feDropShadow/viewBox klein -> das macht Gradients/Filter
+     * ungueltig. Deshalb hier ein DOM-basierter Sanitizer, der:
+     *  - gefaehrliche Elemente/Attribute entfernt (script, on*, externe href),
+     *  - Groesse vom Icon entkoppelt (width/height weg, preserveAspectRatio setzen),
+     *    damit CSS die Groesse bestimmt und das Logo IMMER in den Kreis passt,
+     *  - reines Schwarz / fehlende Fuellung auf die Theme-Farbe (currentColor) legt.
+     */
+    private function sanitize_svg_markup(string $svg): string {
+        $svg = trim($svg);
+        if ($svg === '' || stripos($svg, '<svg') === false) {
+            return '';
+        }
+        // Kaputte xmlns-URLs mancher Editoren korrigieren.
+        $svg = preg_replace('/xmlns="\[?(https?:\/\/www\.w3\.org\/2000\/svg)\]?\([^"]*\)"/i', 'xmlns="$1"', $svg) ?? $svg;
+        // DOCTYPE/Entities -> XXE/Billion-Laughs vermeiden.
+        if (preg_match('/<!DOCTYPE|<!ENTITY/i', $svg)) {
+            return '';
+        }
+        if (!class_exists('DOMDocument')) {
+            // Fallback: nur Text/Emoji, kein SVG ohne DOM-Bereinigung.
+            return '';
+        }
+
+        $prev = libxml_use_internal_errors(true);
+        $doc = new DOMDocument();
+        $ok = $doc->loadXML($svg, LIBXML_NONET);
+        libxml_clear_errors();
+        libxml_use_internal_errors($prev);
+        if (!$ok || !$doc->documentElement || strtolower($doc->documentElement->localName) !== 'svg') {
+            return '';
+        }
+        $root = $doc->documentElement;
+
+        $blocked = ['script', 'foreignobject', 'iframe', 'object', 'embed', 'link', 'style', 'animate', 'animatetransform', 'animatemotion', 'set', 'handler', 'audio', 'video'];
+        $draw = ['path', 'circle', 'rect', 'ellipse', 'line', 'polyline', 'polygon'];
+
+        foreach (iterator_to_array($doc->getElementsByTagName('*')) as $el) {
+            $name = strtolower($el->localName);
+            if (in_array($name, $blocked, true)) {
+                if ($el->parentNode) {
+                    $el->parentNode->removeChild($el);
+                }
+                continue;
+            }
+            if ($el->hasAttributes()) {
+                foreach (iterator_to_array($el->attributes) as $attr) {
+                    $an = strtolower($attr->nodeName);
+                    $av = trim((string) $attr->nodeValue);
+                    if (strpos($an, 'on') === 0) {
+                        $el->removeAttribute($attr->nodeName);
+                        continue;
+                    }
+                    if (($an === 'href' || $an === 'xlink:href') && $av !== '' && $av[0] !== '#') {
+                        $el->removeAttribute($attr->nodeName);
+                        continue;
+                    }
+                    if (preg_match('/(javascript|data)\s*:/i', $av) && ($an === 'href' || $an === 'xlink:href' || $an === 'src')) {
+                        $el->removeAttribute($attr->nodeName);
+                        continue;
+                    }
+                    if (($an === 'fill' || $an === 'stroke') && $this->is_black_color($av)) {
+                        $el->setAttribute($attr->nodeName, 'currentColor');
+                        continue;
+                    }
+                    if ($an === 'style') {
+                        $style = preg_replace('/(?:^|;)\s*(?:width|height)\s*:\s*[^;]+/i', '', $av) ?? '';
+                        $style = trim(trim($style), ';');
+                        $style = preg_replace_callback('/(fill|stroke)\s*:\s*([^;]+)/i', function (array $matches): string {
+                            return $this->is_black_color((string) $matches[2])
+                                ? $matches[1] . ':currentColor'
+                                : $matches[0];
+                        }, $style) ?? $style;
+                        $style = trim(trim($style), ';');
+                        if ($style === '') {
+                            $el->removeAttribute($attr->nodeName);
+                        } else {
+                            $el->setAttribute($attr->nodeName, $style);
+                        }
+                    }
+                }
+            }
+            // Zeichenelement ohne Fuellung: Default waere Schwarz -> Theme-Farbe / Outline.
+            if (in_array($name, $draw, true) && !$el->hasAttribute('fill')) {
+                $el->setAttribute('fill', $el->hasAttribute('stroke') ? 'none' : 'currentColor');
+            }
+        }
+
+        // Groesse entkoppeln: CSS bestimmt die Groesse, viewBox bleibt.
+        $root->removeAttribute('width');
+        $root->removeAttribute('height');
+        if (!$root->getAttribute('preserveAspectRatio')) {
+            $root->setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        }
+
+        $out = $doc->saveXML($root);
+        return is_string($out) ? $out : '';
+    }
+
+    private function default_launcher_icon(): string {
+        return '<svg viewBox="0 0 24 24" aria-hidden="true">'
+            . '<circle cx="8" cy="12" r="1.65" fill="currentColor" stroke="none"></circle>'
+            . '<circle cx="12" cy="12" r="1.65" fill="currentColor" stroke="none"></circle>'
+            . '<circle cx="16" cy="12" r="1.65" fill="currentColor" stroke="none"></circle></svg>';
+    }
+
+    private function widget_css_vars(array $config): string {
+        $theme = $config['theme'] ?? [];
+        $vars = [];
+        foreach ($theme as $key => $value) {
+            $css_key = strtolower(preg_replace('/([a-z])([A-Z])/', '$1-$2', (string) $key));
+            $vars[] = '--aicb-' . sanitize_key($css_key) . ':' . sanitize_hex_color($value);
+        }
+        return implode(';', array_filter($vars));
+    }
+
+    public function register_rest_routes(): void {
+        register_rest_route(self::REST_NS, '/config', [
+            'methods' => 'GET',
+            'callback' => fn() => rest_ensure_response($this->public_widget_config()),
+            'permission_callback' => '__return_true',
+        ]);
+
+        register_rest_route(self::REST_NS, '/session', [
+            'methods' => 'POST',
+            'callback' => [$this, 'rest_create_session'],
+            'permission_callback' => '__return_true',
+        ]);
+
+        register_rest_route(self::REST_NS, '/chat', [
+            'methods' => 'POST',
+            'callback' => [$this, 'rest_chat'],
+            'permission_callback' => '__return_true',
+        ]);
+
+        // Karte, Quellen und Buttons kosten einen eigenen Modell-Aufruf. Er
+        // laeuft nachgelagert, damit die Antwort nicht darauf warten muss.
+        register_rest_route(self::REST_NS, '/actions', [
+            'methods' => 'POST',
+            'callback' => [$this, 'rest_actions'],
+            'permission_callback' => '__return_true',
+        ]);
+
+        register_rest_route(self::REST_NS, '/suggestions', [
+            'methods' => 'POST',
+            'callback' => [$this, 'rest_suggestions'],
+            'permission_callback' => '__return_true',
+        ]);
+
+        register_rest_route(self::REST_NS, '/feedback', [
+            'methods' => 'POST',
+            'callback' => [$this, 'rest_feedback'],
+            'permission_callback' => '__return_true',
+        ]);
+
+        register_rest_route(self::REST_NS, '/metric', [
+            'methods' => 'POST',
+            'callback' => [$this, 'rest_metric'],
+            'permission_callback' => '__return_true',
+        ]);
+
+        $admin_routes = [
+            ['/admin/settings', ['GET', 'POST'], 'rest_admin_settings', self::ADMIN_SENSITIVE_CAP],
+            ['/admin/widget', ['GET', 'POST'], 'rest_admin_widget', self::ADMIN_SENSITIVE_CAP],
+            ['/admin/faqs', ['GET', 'POST'], 'rest_admin_faqs', self::ADMIN_ACCESS_CAP],
+            ['/admin/train/start', ['POST'], 'rest_train_start', self::ADMIN_ACCESS_CAP],
+            ['/admin/train/step', ['POST'], 'rest_train_step', self::ADMIN_ACCESS_CAP],
+            ['/admin/train/status', ['GET'], 'rest_train_status', self::ADMIN_ACCESS_CAP],
+            ['/admin/memory', ['GET', 'POST', 'DELETE'], 'rest_admin_memory', self::ADMIN_SENSITIVE_CAP],
+            ['/admin/stats', ['GET'], 'rest_admin_stats', self::ADMIN_ACCESS_CAP],
+            ['/admin/post-types', ['GET'], 'rest_post_types', self::ADMIN_SENSITIVE_CAP],
+            ['/admin/content', ['GET', 'POST'], 'rest_admin_content', self::ADMIN_SENSITIVE_CAP],
+        ];
+
+        foreach ($admin_routes as [$route, $methods, $callback, $capability]) {
+            register_rest_route(self::REST_NS, $route, [
+                'methods' => $methods,
+                'callback' => [$this, $callback],
+                'permission_callback' => fn() => current_user_can($capability),
+            ]);
+        }
+    }
+
+    public function rest_create_session(WP_REST_Request $request): WP_REST_Response {
+        return rest_ensure_response($this->create_session_payload());
+    }
+
+    public function rest_suggestions(WP_REST_Request $request): WP_REST_Response {
+        $params = $request->get_json_params();
+        $url = esc_url_raw((string) ($params['url'] ?? ''));
+        $title = sanitize_text_field((string) ($params['title'] ?? ''));
+        $page_text = sanitize_textarea_field((string) ($params['page_text'] ?? ''));
+        $lang = self::normalize_lang((string) ($params['lang'] ?? $this->site_lang()));
+        if ($url === '') {
+            return rest_ensure_response(['questions' => []]);
+        }
+
+        $cache_key = 'aicb_suggest_' . md5(untrailingslashit($url) . '|' . $lang . '|' . $title);
+        $cached = get_transient($cache_key);
+        if (is_array($cached)) {
+            return rest_ensure_response(['questions' => $cached, 'cached' => true]);
+        }
+
+        try {
+            $questions = $this->generate_page_suggestions($url, $title, $page_text, $lang);
+            if ($questions) {
+                set_transient($cache_key, $questions, 12 * HOUR_IN_SECONDS);
+            }
+            return rest_ensure_response(['questions' => $questions, 'cached' => false]);
+        } catch (Throwable $e) {
+            error_log('AICB page suggestion generation failed: ' . $e->getMessage());
+            return rest_ensure_response(['questions' => []]);
+        }
+    }
+
+    public function rest_chat(WP_REST_Request $request): WP_REST_Response {
+        $params = $request->get_json_params();
+        $question = sanitize_textarea_field((string) ($params['question'] ?? $params['message'] ?? ''));
+        $history = is_array($params['history'] ?? null) ? $params['history'] : [];
+        $lang = sanitize_key((string) ($params['lang'] ?? 'de'));
+
+        if ($question === '') {
+            return new WP_REST_Response(['error' => 'Keine Frage übergeben.'], 400);
+        }
+
+        $session_payload = $this->ensure_session_payload((string) ($params['session_token'] ?? ''));
+        $session_hash = $session_payload['session_hash'];
+
+        try {
+            $answer_payload = $this->answer_question($question, $history, $lang);
+            $event_id = $this->record_event($session_hash, $question, $answer_payload['answer'], 'ok', null, $answer_payload['usage']);
+            $this->touch_session($session_hash);
+            // Alles, was der nachgelagerte /actions-Aufruf braucht. Nur IDs und
+            // Scores - die Texte holt er sich frisch aus der Tabelle.
+            set_transient($this->action_ticket_key($session_hash, $event_id), [
+                'question' => $question,
+                'answer' => $answer_payload['answer'],
+                'lang' => $answer_payload['lang'],
+                'scores' => $answer_payload['scores'],
+                'history' => $this->compact_history($history),
+            ], self::ACTION_TICKET_TTL);
+            return rest_ensure_response([
+                'answer' => $answer_payload['answer'],
+                'event_id' => $event_id,
+                // Buttons, Karte und Quellen folgen ueber /actions.
+                'has_actions' => true,
+                'session_token' => $session_payload['token'],
+                'session_expires_at' => $session_payload['expires_at'],
+            ]);
+        } catch (Throwable $e) {
+            $this->record_event($session_hash, $question, null, 'error', $e->getMessage(), []);
+            return new WP_REST_Response([
+                'error' => $e->getMessage(),
+                'session_token' => $session_payload['token'],
+                'session_expires_at' => $session_payload['expires_at'],
+            ], 500);
+        }
+    }
+
+    /**
+     * Zweiter Schritt einer Antwort: Karte, Quellen und Buttons.
+     *
+     * Diese kosten einen weiteren Modell-Aufruf, hängen aber nur an der bereits
+     * fertigen Antwort. Sie hier nachzuladen nimmt ein bis drei Sekunden aus der
+     * Wartezeit, die der Nutzer vor dem ersten Wort verbringt.
+     */
+    public function rest_actions(WP_REST_Request $request): WP_REST_Response {
+        $params = $request->get_json_params();
+        $event_id = (int) ($params['event_id'] ?? 0);
+        $empty = ['rich' => ['version' => 1, 'actions' => [], 'sources' => []]];
+        if ($event_id <= 0) {
+            return rest_ensure_response($empty);
+        }
+
+        $offered = [];
+        foreach ((array) ($params['offered'] ?? []) as $item) {
+            $label = sanitize_text_field((string) $item);
+            if ($label !== '') {
+                $offered[] = $label;
+            }
+        }
+        $offered = array_slice($offered, -10);
+
+        // Der Ticket-Key enthält den Session-Hash: eine fremde Session findet
+        // das Ticket nicht und bekommt schlicht nichts.
+        $session_payload = $this->ensure_session_payload((string) ($params['session_token'] ?? ''));
+        $ticket = get_transient($this->action_ticket_key($session_payload['session_hash'], $event_id));
+        if (!is_array($ticket)) {
+            return rest_ensure_response($empty);
+        }
+
+        try {
+            $answer = (string) ($ticket['answer'] ?? '');
+            $lang = (string) ($ticket['lang'] ?? 'de');
+            $matches = $this->hydrate_chunks((array) ($ticket['scores'] ?? []), false);
+            $candidates = $this->card_candidates($matches, $answer);
+            $actions = $this->build_actions(
+                $candidates,
+                (string) ($ticket['question'] ?? ''),
+                $answer,
+                (array) ($ticket['history'] ?? []),
+                $lang,
+                $matches,
+                $offered
+            );
+
+            // Ähnlichkeitswerte allein trennen Begrüßung und fremdsprachige
+            // Fachfrage nicht (gemessen: 0.32 vs 0.31). Deshalb meldet der
+            // Button-Call, ob die Antwort überhaupt eine inhaltliche Auskunft ist.
+            $is_content = $actions['content'] === null ? true : (bool) $actions['content'];
+            // Karte NUR, wenn das Modell aktiv eine wirklich passende Seite gewählt
+            // hat. Nie den besten Suchtreffer als Notlösung aufdrängen - eine
+            // unpassende Karte (z. B. ein Projekt bei einer Frage zur UID) ist
+            // schlechter als gar keine.
+            $card_row = $actions['card'];
+            $card = ($is_content && $card_row) ? $this->build_card($card_row) : null;
+
+            // Quellen strukturiert ausliefern; das Widget rendert sie als kompakte
+            // Titel-Chips statt als lange URL-Liste im Antworttext.
+            $sources = ($matches && $is_content) ? $this->sources_from_matches($matches) : [];
+            $rich = ['version' => 1, 'actions' => $actions['actions'], 'sources' => $sources];
+            if ($card) {
+                $rich['cards'] = [$card];
+            }
+            return rest_ensure_response(['rich' => $rich, 'sources' => $sources]);
+        } catch (Throwable $e) {
+            error_log('AICB actions failed: ' . $e->getMessage());
+            return rest_ensure_response($empty);
+        }
+    }
+
+    private function action_ticket_key(string $session_hash, int $event_id): string {
+        return 'aicb_act_' . md5($session_hash . '|' . $event_id);
+    }
+
+    /** Verlauf auf das eindampfen, was der Button-Aufruf tatsächlich liest. */
+    private function compact_history(array $history): array {
+        $out = [];
+        foreach (array_slice($history, -4) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $content = trim((string) ($item['content'] ?? $item['text'] ?? ''));
+            if ($content === '') {
+                continue;
+            }
+            $out[] = [
+                'role' => (string) ($item['role'] ?? $item['sender'] ?? 'user'),
+                'content' => $this->limit_text($content, 240),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Nimmt die 👍/👎-Bewertung zu einer Antwort entgegen. Nur der Besitzer der
+     * Session (passender session_token) darf sein eigenes Event bewerten.
+     */
+    public function rest_feedback(WP_REST_Request $request): WP_REST_Response {
+        global $wpdb;
+        $params = $request->get_json_params();
+        $event_id = (int) ($params['event_id'] ?? 0);
+        $raw_value = (int) ($params['value'] ?? 0);
+        $token = trim((string) ($params['session_token'] ?? ''));
+
+        if ($event_id <= 0 || $token === '') {
+            return new WP_REST_Response(['error' => 'event_id und session_token erforderlich.'], 400);
+        }
+        // 1 = hilfreich, -1 = nicht hilfreich, 0 = zurücknehmen.
+        $value = $raw_value > 0 ? 1 : ($raw_value < 0 ? -1 : 0);
+        $hash = $this->hash_token($token);
+
+        $events = $wpdb->prefix . 'aicb_events';
+        $owner = $wpdb->get_var($wpdb->prepare(
+            "SELECT session_hash FROM {$events} WHERE id = %d",
+            $event_id
+        ));
+        if ($owner === null) {
+            return new WP_REST_Response(['error' => 'Antwort nicht gefunden.'], 404);
+        }
+        if (!hash_equals((string) $owner, $hash)) {
+            return new WP_REST_Response(['error' => 'Keine Berechtigung für diese Antwort.'], 403);
+        }
+
+        $wpdb->update($events, ['feedback' => $value], ['id' => $event_id], ['%d'], ['%d']);
+        return rest_ensure_response(['status' => 'ok', 'value' => $value]);
+    }
+
+    /**
+     * Nutzungs-Kennzahlen aus dem Widget: 'open' (Chat geoeffnet) und 'outcome'
+     * (Conversion nach dem Chat, z. B. Klick auf Booking-Link oder abgeschicktes
+     * Anfrageformular). Jede Kennzahl wird an eine echte Session gebunden (leichte
+     * Missbrauchs-Bremse); ein fehlendes Token erzeugt eine Session und wird
+     * zurueckgegeben, damit Folge-Events dieselbe Session nutzen.
+     */
+    public function rest_metric(WP_REST_Request $request): WP_REST_Response {
+        global $wpdb;
+        $params = $request->get_json_params();
+        $type = sanitize_key((string) ($params['type'] ?? ''));
+        if (!in_array($type, ['open', 'outcome'], true)) {
+            return new WP_REST_Response(['error' => 'Ungueltiger Typ.'], 400);
+        }
+
+        // Respektiere die im Widget gewaehlten Analytics-Optionen.
+        $cfg = (array) get_option(self::WIDGET_OPTION_KEY, self::default_widget_config());
+        $analytics = (array) ($cfg['analytics'] ?? []);
+        if ($type === 'open' && ($analytics['track_opens'] ?? true) === false) {
+            return rest_ensure_response(['status' => 'skipped']);
+        }
+        if ($type === 'outcome' && ($analytics['track_outcomes'] ?? true) === false) {
+            return rest_ensure_response(['status' => 'skipped']);
+        }
+
+        $session = $this->ensure_session_payload((string) ($params['session_token'] ?? ''));
+        $label = substr(sanitize_text_field((string) ($params['label'] ?? '')), 0, 191);
+        $url = esc_url_raw((string) ($params['url'] ?? ''));
+        if (strlen($url) > 2000) {
+            $url = substr($url, 0, 2000);
+        }
+
+        $wpdb->insert($wpdb->prefix . 'aicb_metrics', [
+            'type' => $type,
+            'label' => $label !== '' ? $label : null,
+            'url' => $url !== '' ? $url : null,
+            'session_hash' => $session['session_hash'],
+            'created_at' => gmdate('Y-m-d H:i:s'),
+        ], ['%s', '%s', '%s', '%s', '%s']);
+
+        return rest_ensure_response(['status' => 'ok', 'session_token' => $session['token']]);
+    }
+
+    public function rest_admin_settings(WP_REST_Request $request): WP_REST_Response {
+        if ($request->get_method() === 'GET') {
+            return rest_ensure_response($this->settings_for_admin());
+        }
+
+        $payload = $request->get_json_params();
+        $settings = $this->settings();
+        $allowed = [
+            'chat_model', 'embedding_model', 'embedding_dims', 'retriever_k', 'max_context_chars', 'batch_size',
+            'auto_index_on_save', 'widget_enabled', 'enabled_post_types', 'include_excerpts',
+            'include_taxonomies', 'privacy_url', 'contact_url', 'contact_email', 'contact_phone',
+            'system_prompt',
+        ];
+        foreach ($allowed as $key) {
+            if (!array_key_exists($key, $payload)) {
+                continue;
+            }
+            $settings[$key] = $this->sanitize_setting_value($key, $payload[$key]);
+        }
+        if (array_key_exists('openai_api_key', $payload)) {
+            $new_key = trim((string) $payload['openai_api_key']);
+            if ($new_key !== '' && $new_key !== '********') {
+                $settings['openai_api_key'] = $new_key;
+            }
+        }
+
+        update_option(self::OPTION_KEY, $settings, false);
+        return rest_ensure_response($this->settings_for_admin());
+    }
+
+    public function rest_admin_widget(WP_REST_Request $request): WP_REST_Response {
+        if ($request->get_method() === 'GET') {
+            return rest_ensure_response($this->sanitize_widget_config((array) get_option(self::WIDGET_OPTION_KEY, self::default_widget_config())));
+        }
+        $payload = $request->get_json_params();
+        $config = $this->sanitize_widget_config(is_array($payload) ? $payload : []);
+        update_option(self::WIDGET_OPTION_KEY, $config, false);
+        return rest_ensure_response($config);
+    }
+
+    public function rest_admin_faqs(WP_REST_Request $request): WP_REST_Response {
+        if ($request->get_method() === 'GET') {
+            return rest_ensure_response(['faqs' => $this->faqs()]);
+        }
+        $payload = $request->get_json_params();
+        $faqs = [];
+        foreach ((array) ($payload['faqs'] ?? []) as $item) {
+            $q = sanitize_textarea_field((string) ($item['question'] ?? ''));
+            $a = sanitize_textarea_field((string) ($item['answer'] ?? ''));
+            if ($q !== '' || $a !== '') {
+                $faqs[] = ['question' => $q, 'answer' => $a];
+            }
+        }
+        update_option(self::FAQ_OPTION_KEY, $faqs, false);
+        return rest_ensure_response(['status' => 'ok', 'faqs' => $faqs]);
+    }
+
+    public function rest_post_types(): WP_REST_Response {
+        return rest_ensure_response(['post_types' => $this->available_post_types()]);
+    }
+
+    /**
+     * Inhalte-Tab: Liste veröffentlichter Inhalte (mit Auswahlstatus) + gewählte PDFs.
+     * GET  -> aktueller Stand. POST -> Auswahl speichern und aktualisierten Stand liefern.
+     * Es werden ausschließlich veröffentlichte Inhalte gelistet (keine Entwürfe).
+     */
+    public function rest_admin_content(WP_REST_Request $request): WP_REST_Response {
+        if ($request->get_method() === 'POST') {
+            $payload = $request->get_json_params();
+            $mode = (($payload['mode'] ?? 'all') === 'selected') ? 'selected' : 'all';
+            $post_ids = array_values(array_unique(array_filter(array_map('intval', (array) ($payload['post_ids'] ?? [])))));
+            $pdf_ids = array_values(array_unique(array_filter(array_map('intval', (array) ($payload['pdf_ids'] ?? [])))));
+
+            update_option(self::INDEX_MODE_OPTION, $mode, false);
+            update_option(self::SELECTED_POSTS_OPTION, $post_ids, false);
+            update_option(self::SELECTED_PDFS_OPTION, $pdf_ids, false);
+        }
+
+        $search = trim((string) $request->get_param('q'));
+        return rest_ensure_response($this->content_overview($search));
+    }
+
+    private function content_overview(string $search = ''): array {
+        $selected_posts = array_flip(array_map('intval', (array) get_option(self::SELECTED_POSTS_OPTION, [])));
+        $per_type_cap = 300;
+
+        $groups = [];
+        foreach ($this->available_post_types_without_selection() as $type) {
+            $args = [
+                'post_type' => $type['name'],
+                'post_status' => 'publish',
+                'posts_per_page' => $per_type_cap,
+                'orderby' => 'title',
+                'order' => 'ASC',
+                'no_found_rows' => false,
+                'ignore_sticky_posts' => true,
+                'suppress_filters' => false,
+            ];
+            if ($search !== '') {
+                $args['s'] = $search;
+            }
+            $query = new WP_Query($args);
+            $items = [];
+            foreach ($query->posts as $post) {
+                $items[] = [
+                    'id' => (int) $post->ID,
+                    'title' => html_entity_decode(get_the_title($post) ?: ('#' . $post->ID), ENT_QUOTES),
+                    'url' => get_permalink($post),
+                    'selected' => isset($selected_posts[(int) $post->ID]),
+                ];
+            }
+            $total = (int) $query->found_posts;
+            wp_reset_postdata();
+
+            if (!$items) {
+                continue;
+            }
+            $groups[] = [
+                'name' => $type['name'],
+                'label' => $type['label'],
+                'total' => $total,
+                'truncated' => $total > count($items),
+                'items' => $items,
+            ];
+        }
+
+        $pdfs = [];
+        foreach ($this->selected_pdf_ids() as $aid) {
+            $pdfs[] = [
+                'id' => (int) $aid,
+                'title' => html_entity_decode(get_the_title($aid) ?: wp_basename((string) get_attached_file($aid)), ENT_QUOTES),
+                'url' => wp_get_attachment_url($aid),
+            ];
+        }
+
+        return [
+            'mode' => $this->index_mode(),
+            'post_types' => $groups,
+            'pdfs' => $pdfs,
+            'selected_count' => count($selected_posts),
+        ];
+    }
+
+    public function rest_train_start(WP_REST_Request $request): WP_REST_Response {
+        $params = $request->get_json_params();
+        $clear = !array_key_exists('clear', $params) || rest_sanitize_boolean($params['clear']);
+        $job = $this->create_training_job($clear);
+        return rest_ensure_response($job);
+    }
+
+    public function rest_train_step(WP_REST_Request $request): WP_REST_Response {
+        $params = $request->get_json_params();
+        $job_id = sanitize_key((string) ($params['job_id'] ?? ''));
+        if ($job_id === '') {
+            return new WP_REST_Response(['error' => 'job_id fehlt.'], 400);
+        }
+        try {
+            return rest_ensure_response($this->run_training_step($job_id));
+        } catch (Throwable $e) {
+            return new WP_REST_Response(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function rest_train_status(WP_REST_Request $request): WP_REST_Response {
+        $job_id = sanitize_key((string) $request->get_param('job_id'));
+        $job = $job_id ? get_transient($this->job_key($job_id)) : get_option('aicb_last_training_job');
+        return rest_ensure_response($job ?: ['status' => 'idle']);
+    }
+
+    public function rest_admin_memory(WP_REST_Request $request): WP_REST_Response {
+        global $wpdb;
+        $table = $wpdb->prefix . 'aicb_chunks';
+
+        if ($request->get_method() === 'GET') {
+            $q = trim((string) $request->get_param('q'));
+            $limit = max(1, min(200, (int) ($request->get_param('limit') ?: 80)));
+            if ($q !== '') {
+                $like = '%' . $wpdb->esc_like($q) . '%';
+                $rows = $wpdb->get_results($wpdb->prepare(
+                    "SELECT id, source_id, source_type, source_url, title, section, content, token_estimate, updated_at
+                     FROM {$table}
+                     WHERE title LIKE %s OR content LIKE %s OR source_url LIKE %s
+                     ORDER BY updated_at DESC LIMIT %d",
+                    $like,
+                    $like,
+                    $like,
+                    $limit
+                ), ARRAY_A);
+            } else {
+                $rows = $wpdb->get_results($wpdb->prepare(
+                    "SELECT id, source_id, source_type, source_url, title, section, content, token_estimate, updated_at
+                     FROM {$table}
+                     ORDER BY updated_at DESC LIMIT %d",
+                    $limit
+                ), ARRAY_A);
+            }
+            return rest_ensure_response(['items' => $rows ?: [], 'total' => (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table}")]);
+        }
+
+        $payload = $request->get_json_params();
+        $id = absint($payload['id'] ?? 0);
+        if (!$id) {
+            return new WP_REST_Response(['error' => 'id fehlt.'], 400);
+        }
+
+        if ($request->get_method() === 'DELETE') {
+            $wpdb->delete($table, ['id' => $id], ['%d']);
+            return rest_ensure_response(['status' => 'ok', 'deleted' => $id]);
+        }
+
+        $content = sanitize_textarea_field((string) ($payload['content'] ?? ''));
+        $title = sanitize_text_field((string) ($payload['title'] ?? ''));
+        if ($content === '') {
+            return new WP_REST_Response(['error' => 'content fehlt.'], 400);
+        }
+        // Dimension des bestehenden Index verwenden, sonst passt der Vektor
+        // nicht zum Rest der Tabelle. Und in die gepackte Spalte schreiben -
+        // die JSON-Spalte ist nur noch der Altlast-Pfad.
+        $embedding = $this->embed_text($content, $this->index_dimensions());
+        $wpdb->update($table, [
+            'title' => $title,
+            'content' => $content,
+            'content_hash' => sha1($content),
+            'embedding' => null,
+            'embedding_packed' => $this->pack_embedding($embedding),
+            'token_estimate' => $this->estimate_tokens($content),
+            'updated_at' => gmdate('Y-m-d H:i:s'),
+        ], ['id' => $id], ['%s', '%s', '%s', '%s', '%s', '%d', '%s'], ['%d']);
+        return rest_ensure_response(['status' => 'ok', 'id' => $id]);
+    }
+
+    public function rest_admin_stats(): WP_REST_Response {
+        global $wpdb;
+        $events = $wpdb->prefix . 'aicb_events';
+        $chunks = $wpdb->prefix . 'aicb_chunks';
+        $sessions = $wpdb->prefix . 'aicb_sessions';
+        $now = time();
+        $since_week = gmdate('Y-m-d H:i:s', $now - 7 * DAY_IN_SECONDS);
+        $since_month = gmdate('Y-m-d H:i:s', $now - 30 * DAY_IN_SECONDS);
+        $today_local = wp_date('Y-m-d');
+
+        // Rohdaten fuer Zeitreihen/Verteilungen (nach lokaler Zeit gebucketet).
+        $rows = $wpdb->get_results("SELECT question, status, feedback, created_at FROM {$events} ORDER BY created_at DESC LIMIT 5000", ARRAY_A);
+
+        $ok_states = ['ok', 'answered', 'success'];
+        $top = [];
+        $daily_total = [];
+        $daily_answered = [];
+        $weekday = array_fill(1, 7, 0);   // 1=Mo ... 7=So
+        $hourly = array_fill(0, 24, 0);
+        $today_chats = 0;
+        $day_cutoff = wp_date('Y-m-d', $now - 29 * DAY_IN_SECONDS);
+
+        foreach ($rows ?: [] as $row) {
+            $created = (string) $row['created_at'];
+            $is_ok = in_array(strtolower((string) $row['status']), $ok_states, true);
+            $q = trim((string) $row['question']);
+            if ($q !== '') {
+                $top[$q] = ($top[$q] ?? 0) + 1;
+            }
+            // GMT -> lokale Zeit fuer alle zeitbasierten Auswertungen.
+            $local_day = get_date_from_gmt($created, 'Y-m-d');
+            $local_wd = (int) get_date_from_gmt($created, 'N');
+            $local_hr = (int) get_date_from_gmt($created, 'G');
+            if ($local_wd >= 1 && $local_wd <= 7) {
+                $weekday[$local_wd]++;
+            }
+            if ($local_hr >= 0 && $local_hr <= 23) {
+                $hourly[$local_hr]++;
+            }
+            if ($local_day === $today_local) {
+                $today_chats++;
+            }
+            if ($local_day >= $day_cutoff) {
+                $daily_total[$local_day] = ($daily_total[$local_day] ?? 0) + 1;
+                if ($is_ok) {
+                    $daily_answered[$local_day] = ($daily_answered[$local_day] ?? 0) + 1;
+                }
+            }
+        }
+        arsort($top);
+
+        // 30 Tage lueckenlos auffuellen.
+        $daily = [];
+        for ($i = 29; $i >= 0; $i--) {
+            $d = wp_date('Y-m-d', $now - $i * DAY_IN_SECONDS);
+            $total = (int) ($daily_total[$d] ?? 0);
+            $ans = (int) ($daily_answered[$d] ?? 0);
+            $daily[] = [
+                'date' => $d,
+                'label' => wp_date('d.m', strtotime($d . ' 12:00:00')),
+                'total' => $total,
+                'answered' => $ans,
+                'unanswered' => max(0, $total - $ans),
+            ];
+        }
+
+        $wd_labels = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+        $by_weekday = [];
+        for ($w = 1; $w <= 7; $w++) {
+            $by_weekday[] = ['label' => $wd_labels[$w - 1], 'count' => (int) $weekday[$w]];
+        }
+        $by_hour = [];
+        for ($h = 0; $h < 24; $h++) {
+            $by_hour[] = ['label' => sprintf('%02d', $h), 'count' => (int) $hourly[$h]];
+        }
+
+        // Genaue Gesamtzahlen (unabhaengig vom Zeilenlimit).
+        $total_chats = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$events}");
+        $answered_total = (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM {$events} WHERE LOWER(status) IN ('ok','answered','success')"
+        );
+        $error_total = max(0, $total_chats - $answered_total);
+
+        // Feedback (👍/👎).
+        $helpful = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$events} WHERE feedback = 1");
+        $not_helpful = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$events} WHERE feedback = -1");
+        $rated = $helpful + $not_helpful;
+        $helpful_month = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$events} WHERE feedback = 1 AND created_at >= %s", $since_month));
+        $not_helpful_month = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$events} WHERE feedback = -1 AND created_at >= %s", $since_month));
+
+        // Sessions.
+        $sessions_total = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$sessions}");
+        $sessions_active = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$sessions} WHERE expires_at > %s", gmdate('Y-m-d H:i:s', $now)));
+        $avg_messages = (float) $wpdb->get_var("SELECT AVG(messages) FROM {$sessions}");
+
+        // Negativ (👎) bewertete Gespraeche: Frage + gegebene Antwort, damit man
+        // gezielt nachbessern kann. Neueste zuerst.
+        $negative_rows = $wpdb->get_results(
+            "SELECT id, question, answer, created_at FROM {$events} WHERE feedback = -1 ORDER BY created_at DESC LIMIT 50",
+            ARRAY_A
+        );
+        $negative = [];
+        foreach ($negative_rows ?: [] as $row) {
+            $negative[] = [
+                'id' => (int) $row['id'],
+                'question' => (string) $row['question'],
+                'answer' => (string) $row['answer'],
+                'created_at' => get_date_from_gmt((string) $row['created_at'], 'd.m.Y H:i'),
+            ];
+        }
+
+        // --- Nutzungs-Kennzahlen: Chat-Oeffnungen + Outcomes nach dem Chat ---
+        $metrics = $wpdb->prefix . 'aicb_metrics';
+        $has_metrics = (bool) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $metrics));
+        $today_start_gmt = get_gmt_from_date($today_local . ' 00:00:00');
+        $engagement = [
+            'opens_total' => 0, 'opens_week' => 0, 'opens_month' => 0, 'opens_today' => 0,
+            'outcomes_total' => 0, 'outcomes_week' => 0, 'outcomes_month' => 0,
+            'conversion_rate' => null, 'outcomes_by_label' => [], 'top_outcome_urls' => [],
+        ];
+        if ($has_metrics) {
+            $engagement['opens_total'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$metrics} WHERE type = 'open'");
+            $engagement['opens_week'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$metrics} WHERE type = 'open' AND created_at >= %s", $since_week));
+            $engagement['opens_month'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$metrics} WHERE type = 'open' AND created_at >= %s", $since_month));
+            $engagement['opens_today'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$metrics} WHERE type = 'open' AND created_at >= %s", $today_start_gmt));
+            $engagement['outcomes_total'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$metrics} WHERE type = 'outcome'");
+            $engagement['outcomes_week'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$metrics} WHERE type = 'outcome' AND created_at >= %s", $since_week));
+            $engagement['outcomes_month'] = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$metrics} WHERE type = 'outcome' AND created_at >= %s", $since_month));
+            $engagement['conversion_rate'] = $engagement['opens_total'] > 0
+                ? (int) round(100 * $engagement['outcomes_total'] / $engagement['opens_total'])
+                : null;
+            foreach ($wpdb->get_results("SELECT COALESCE(label, '') AS label, COUNT(*) AS c FROM {$metrics} WHERE type = 'outcome' GROUP BY label ORDER BY c DESC LIMIT 10", ARRAY_A) ?: [] as $r) {
+                $engagement['outcomes_by_label'][] = ['label' => (string) $r['label'], 'count' => (int) $r['c']];
+            }
+            foreach ($wpdb->get_results("SELECT url, COUNT(*) AS c FROM {$metrics} WHERE type = 'outcome' AND url IS NOT NULL AND url <> '' GROUP BY url ORDER BY c DESC LIMIT 10", ARRAY_A) ?: [] as $r) {
+                $engagement['top_outcome_urls'][] = ['url' => (string) $r['url'], 'count' => (int) $r['c']];
+            }
+        }
+
+        return rest_ensure_response([
+            'overview' => [
+                'total_chats' => $total_chats,
+                'week_chats' => (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$events} WHERE created_at >= %s", $since_week)),
+                'month_chats' => (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$events} WHERE created_at >= %s", $since_month)),
+                'today_chats' => $today_chats,
+                'answered' => $answered_total,
+                'errors' => $error_total,
+                'answer_rate' => $total_chats > 0 ? (int) round(100 * $answered_total / $total_chats) : null,
+                'chunks' => (int) $wpdb->get_var("SELECT COUNT(*) FROM {$chunks}"),
+                'sessions' => $sessions_total,
+                'active_sessions' => $sessions_active,
+                'avg_messages' => round($avg_messages, 1),
+            ],
+            'feedback' => [
+                'helpful' => $helpful,
+                'not_helpful' => $not_helpful,
+                'unrated' => max(0, $total_chats - $rated),
+                'rated' => $rated,
+                'satisfaction' => $rated > 0 ? (int) round(100 * $helpful / $rated) : null,
+                'helpful_month' => $helpful_month,
+                'not_helpful_month' => $not_helpful_month,
+            ],
+            'engagement' => $engagement,
+            'daily' => $daily,
+            'by_weekday' => $by_weekday,
+            'by_hour' => $by_hour,
+            'top_questions' => array_slice(array_map(fn($q, $c) => ['question' => $q, 'count' => $c], array_keys($top), $top), 0, 12),
+            'negative' => $negative,
+        ]);
+    }
+
+    public function schedule_post_reindex(int $post_id, WP_Post $post, bool $update): void {
+        if (!$this->setting_bool('auto_index_on_save', true)) {
+            return;
+        }
+        if (wp_is_post_revision($post_id) || wp_is_post_autosave($post_id)) {
+            return;
+        }
+        if ($post->post_status !== 'publish') {
+            return;
+        }
+        // Im Modus "Nur ausgewählte" nur nachindexieren, wenn der Post ausgewählt ist;
+        // im Modus "Alle" gilt weiterhin die Post-Type-Auswahl aus den Einstellungen.
+        if ($this->index_mode() === 'selected') {
+            if (!in_array($post_id, $this->selected_post_ids_raw(), true)) {
+                return;
+            }
+        } elseif (!in_array($post->post_type, $this->enabled_post_type_names(), true)) {
+            return;
+        }
+        if (!wp_next_scheduled('aicb_reindex_single_post', [$post_id])) {
+            wp_schedule_single_event(time() + 60, 'aicb_reindex_single_post', [$post_id]);
+        }
+    }
+
+    public function cron_reindex_single_post(int $post_id): void {
+        $post = get_post($post_id);
+        if (!$post || $post->post_status !== 'publish') {
+            $this->delete_source_chunks('post:' . $post_id);
+            return;
+        }
+        // Abgewählte Inhalte im Selektiv-Modus nicht (wieder) aufnehmen.
+        if ($this->index_mode() === 'selected' && !in_array($post_id, $this->selected_post_ids_raw(), true)) {
+            $this->delete_source_chunks('post:' . $post_id);
+            return;
+        }
+        try {
+            $this->index_post($post);
+        } catch (Throwable $e) {
+            error_log('AICB post reindex failed: ' . $e->getMessage());
+        }
+    }
+
+    private function create_training_job(bool $clear): array {
+        if ($clear) {
+            $this->clear_chunks();
+        }
+
+        // Queue aus ausgewählten (bzw. allen veröffentlichten) Posts + gewählten PDFs.
+        $queue = [];
+        foreach ($this->training_post_ids() as $post_id) {
+            $queue[] = ['kind' => 'post', 'id' => (int) $post_id];
+        }
+        foreach ($this->selected_pdf_ids() as $pdf_id) {
+            $queue[] = ['kind' => 'pdf', 'id' => (int) $pdf_id];
+        }
+
+        $mode_label = $this->index_mode() === 'selected' ? 'Nur ausgewählte Inhalte' : 'Alle veröffentlichten Inhalte';
+        $job = [
+            'job_id' => wp_generate_uuid4(),
+            'status' => 'running',
+            'queue' => $queue,
+            'total' => count($queue),
+            'cursor' => 0,
+            'processed' => 0,
+            'chunks' => 0,
+            'logs' => [sprintf('Training gestartet (%s, %d Quellen).', $mode_label, count($queue))],
+            'faq_indexed' => false,
+            'started_at' => gmdate('c'),
+            'finished_at' => null,
+        ];
+        set_transient($this->job_key($job['job_id']), $job, DAY_IN_SECONDS);
+        update_option('aicb_last_training_job', $this->public_job($job), false);
+        return $this->public_job($job);
+    }
+
+    private function run_training_step(string $job_id): array {
+        $job = get_transient($this->job_key($job_id));
+        if (!$job || !is_array($job)) {
+            throw new RuntimeException('Training-Job nicht gefunden oder abgelaufen.');
+        }
+        if (($job['status'] ?? '') === 'done') {
+            return $this->public_job($job);
+        }
+
+        $batch = max(1, min(20, (int) $this->setting('batch_size', 4)));
+        $queue = $job['queue'] ?? [];
+        $cursor = (int) ($job['cursor'] ?? 0);
+        $slice = array_slice($queue, $cursor, $batch);
+
+        foreach ($slice as $item) {
+            $kind = (string) ($item['kind'] ?? 'post');
+            $id = (int) ($item['id'] ?? 0);
+            $job['cursor']++;
+
+            if ($kind === 'pdf') {
+                try {
+                    $count = $this->index_pdf($id);
+                    $job['chunks'] += $count;
+                    $job['processed']++;
+                    if ($count > 0) {
+                        $job['logs'][] = sprintf('PDF indexiert: #%d %s (%d Chunks)', $id, get_the_title($id), $count);
+                    } else {
+                        $job['logs'][] = sprintf('PDF ohne Textebene übersprungen: #%d %s', $id, get_the_title($id));
+                    }
+                } catch (Throwable $e) {
+                    $job['logs'][] = sprintf('PDF-Fehler #%d: %s', $id, $e->getMessage());
+                }
+                continue;
+            }
+
+            $post = get_post($id);
+            if (!$post || $post->post_status !== 'publish') {
+                $job['logs'][] = "Übersprungen: Post {$id}";
+                continue;
+            }
+            $count = $this->index_post($post);
+            $job['chunks'] += $count;
+            $job['processed']++;
+            $job['logs'][] = sprintf('Indexiert: #%d %s (%d Chunks)', $post->ID, get_the_title($post), $count);
+        }
+
+        if ($job['cursor'] >= $job['total'] && empty($job['faq_indexed'])) {
+            $faq_chunks = $this->index_faqs();
+            $job['chunks'] += $faq_chunks;
+            $job['faq_indexed'] = true;
+            $job['logs'][] = sprintf('FAQs indexiert (%d Chunks)', $faq_chunks);
+        }
+
+        if ($job['cursor'] >= $job['total'] && !empty($job['faq_indexed'])) {
+            $job['status'] = 'done';
+            $job['finished_at'] = gmdate('c');
+            $job['logs'][] = 'Training abgeschlossen.';
+        }
+
+        $job['logs'] = array_slice($job['logs'], -80);
+        set_transient($this->job_key($job_id), $job, DAY_IN_SECONDS);
+        update_option('aicb_last_training_job', $this->public_job($job), false);
+        return $this->public_job($job);
+    }
+
+    private function index_post(WP_Post $post): int {
+        $source_id = 'post:' . $post->ID;
+        $this->delete_source_chunks($source_id);
+        $document = $this->post_to_document($post);
+        if (trim($document['content']) === '') {
+            return 0;
+        }
+        return $this->insert_document_chunks($source_id, $post->post_type, $document['url'], $document['title'], $document['content']);
+    }
+
+    private function index_faqs(): int {
+        $this->delete_source_chunks_by_type('faq');
+        $count = 0;
+        foreach ($this->faqs() as $idx => $faq) {
+            $title = trim((string) ($faq['question'] ?? 'FAQ'));
+            $body = "Frage: {$title}\n\nAntwort: " . trim((string) ($faq['answer'] ?? ''));
+            if (trim($body) === '') {
+                continue;
+            }
+            $count += $this->insert_document_chunks('faq:' . $idx, 'faq', home_url('/'), $title, $body);
+        }
+        return $count;
+    }
+
+    /* ----------------------------------------------------------------------
+     * Feingranulare Auswahl (Inhalte-Tab)
+     * -------------------------------------------------------------------- */
+
+    private function index_mode(): string {
+        return get_option(self::INDEX_MODE_OPTION, 'all') === 'selected' ? 'selected' : 'all';
+    }
+
+    private function selected_post_ids_raw(): array {
+        return array_values(array_filter(array_map('intval', (array) get_option(self::SELECTED_POSTS_OPTION, []))));
+    }
+
+    /** Post-IDs für das Training: nur ausgewählte (Selektiv) bzw. alle veröffentlichten (Alle). */
+    private function training_post_ids(): array {
+        if ($this->index_mode() === 'selected') {
+            $ids = [];
+            foreach ($this->selected_post_ids_raw() as $id) {
+                $post = get_post($id);
+                if ($post && $post->post_status === 'publish') {
+                    $ids[] = (int) $id;
+                }
+            }
+            return $ids;
+        }
+
+        $query = new WP_Query([
+            'post_type' => $this->enabled_post_type_names(),
+            'post_status' => 'publish',
+            'posts_per_page' => -1,
+            'fields' => 'ids',
+            'orderby' => 'ID',
+            'order' => 'ASC',
+            'no_found_rows' => true,
+        ]);
+        return array_map('intval', $query->posts ?: []);
+    }
+
+    /** Gültige, ausgewählte PDF-Attachments. */
+    private function selected_pdf_ids(): array {
+        $ids = [];
+        foreach (array_map('intval', (array) get_option(self::SELECTED_PDFS_OPTION, [])) as $id) {
+            if ($id <= 0) {
+                continue;
+            }
+            $post = get_post($id);
+            if ($post && $post->post_type === 'attachment' && get_post_mime_type($id) === 'application/pdf') {
+                $ids[] = $id;
+            }
+        }
+        return array_values(array_unique($ids));
+    }
+
+    /* ----------------------------------------------------------------------
+     * PDF-Indexierung (Mediathek)
+     * -------------------------------------------------------------------- */
+
+    private function index_pdf(int $attachment_id): int {
+        $source_id = 'pdf:' . $attachment_id;
+        $this->delete_source_chunks($source_id);
+
+        if (get_post_mime_type($attachment_id) !== 'application/pdf') {
+            return 0;
+        }
+        $path = get_attached_file($attachment_id);
+        if (!$path || !file_exists($path) || !is_readable($path)) {
+            throw new RuntimeException('PDF-Datei nicht gefunden.');
+        }
+        // 1) Beste & robusteste Extraktion: gebündelte Bibliothek (Smalot/PdfParser).
+        //    Beherrscht CID/Type0, ToUnicode, Differences, CFF und Positionierung.
+        $text = $this->normalize_text($this->pdf_text_via_smalot($path));
+
+        // 2) Fallback: pdftotext (poppler), falls auf dem Host verfügbar.
+        if (trim($text) === '' || !$this->pdf_looks_like_text($text)) {
+            $text = $this->normalize_text($this->pdf_text_via_pdftotext($path));
+        }
+
+        // 3) Letzter Fallback: eingebaute reine PHP-Extraktion.
+        if (trim($text) === '' || !$this->pdf_looks_like_text($text)) {
+            $bytes = (string) file_get_contents($path);
+            if ($bytes !== '') {
+                $text = $this->normalize_text($this->pdf_to_text($bytes));
+            }
+        }
+
+        if (trim($text) === '' || !$this->pdf_looks_like_text($text)) {
+            // Kein lesbarer Textlayer: gescanntes Bild-PDF, verschlüsselt oder
+            // Font ohne verwertbare Kodierung - nichts indexieren.
+            return 0;
+        }
+
+        $title = trim((string) get_the_title($attachment_id));
+        if ($title === '') {
+            $title = wp_basename($path);
+        }
+        $url = wp_get_attachment_url($attachment_id) ?: home_url('/');
+        $content = '# ' . $title . "\n\n" . $text . "\n\nQuelle: " . $url;
+        return $this->insert_document_chunks($source_id, 'pdf', $url, $title, $content);
+    }
+
+    /**
+     * Extrahiert Text aus einem PDF (reines PHP, ohne externe Bibliothek).
+     * Unterstützt FlateDecode-Streams, literale/hexadezimale Strings, Tj/TJ
+     * sowie ToUnicode-CMaps (bfchar/bfrange). Gescannte (nur Bild-) PDFs und
+     * verschlüsselte PDFs liefern keinen Text.
+     */
+    private function pdf_to_text(string $bytes): string {
+        $streams = $this->pdf_decode_streams($bytes);
+        if (!$streams) {
+            return '';
+        }
+        $cmap = $this->pdf_build_tounicode($streams);
+        // Fonts mit /Encoding /Differences (Glyphnamen) statt ToUnicode: häufig
+        // bei Subset-Fonts aus Word/LibreOffice/InDesign. Ohne diese Abbildung
+        // wäre der Text Zeichensalat.
+        $diff = $this->pdf_build_differences_map($streams, $bytes);
+        $parts = [];
+        foreach ($streams as $stream) {
+            if (strpos($stream, 'Tj') === false && strpos($stream, 'TJ') === false) {
+                continue;
+            }
+            $parts[] = $this->pdf_tokenize_text($stream, $cmap['map'], (int) $cmap['code_len'], $diff);
+        }
+        return trim(implode("\n", array_filter($parts)));
+    }
+
+    /**
+     * Extrahiert Text mit der gebündelten Bibliothek Smalot/PdfParser (reines PHP).
+     * Wird lazy geladen und nur beim Indexieren eines PDFs benötigt.
+     */
+    private function pdf_text_via_smalot(string $path): string {
+        if (!class_exists('\\Smalot\\PdfParser\\Parser')) {
+            $autoload = plugin_dir_path(__FILE__) . 'vendor/autoload.php';
+            if (!is_readable($autoload)) {
+                return '';
+            }
+            require_once $autoload;
+            if (!class_exists('\\Smalot\\PdfParser\\Parser')) {
+                return '';
+            }
+        }
+        try {
+            // Bilder nicht im Speicher halten - spart RAM bei bildlastigen PDFs.
+            if (class_exists('\\Smalot\\PdfParser\\Config')) {
+                $config = new \Smalot\PdfParser\Config();
+                if (method_exists($config, 'setRetainImageContent')) {
+                    $config->setRetainImageContent(false);
+                }
+                $parser = new \Smalot\PdfParser\Parser([], $config);
+            } else {
+                $parser = new \Smalot\PdfParser\Parser();
+            }
+            $pdf = $parser->parseFile($path);
+            return (string) $pdf->getText();
+        } catch (\Throwable $e) {
+            error_log('AICB Smalot PDF-Parsing fehlgeschlagen (' . wp_basename($path) . '): ' . $e->getMessage());
+            return '';
+        }
+    }
+
+    /** Ruft pdftotext (poppler) auf, falls verfügbar. Sonst leerer String. */
+    private function pdf_text_via_pdftotext(string $path): string {
+        if (!function_exists('shell_exec')) {
+            return '';
+        }
+        $disabled = array_map('trim', explode(',', (string) ini_get('disable_functions')));
+        if (in_array('shell_exec', $disabled, true)) {
+            return '';
+        }
+        // -q still, -enc UTF-8, Ausgabe nach stdout ("-").
+        $out = @shell_exec('pdftotext -q -enc UTF-8 ' . escapeshellarg($path) . ' - 2>/dev/null');
+        return is_string($out) ? $out : '';
+    }
+
+    /**
+     * Baut aus allen /Encoding /Differences-Arrays eine Abbildung Byte->UTF-8.
+     * Global gemergt (erste Zuordnung gewinnt) - deckt den häufigen Fall eines
+     * konsistenten Zeichensatzes ab.
+     */
+    private function pdf_build_differences_map(array $streams, string $bytes): array {
+        $diff = [];
+        $sources = $streams;
+        $sources[] = $bytes; // Font-Dicts liegen oft unkomprimiert vor.
+        foreach ($sources as $text) {
+            if (strpos($text, '/Differences') === false) {
+                continue;
+            }
+            if (!preg_match_all('/\/Differences\s*\[(.*?)\]/s', $text, $blocks)) {
+                continue;
+            }
+            foreach ($blocks[1] as $arr) {
+                if (!preg_match_all('/(\d+)|\/([A-Za-z0-9._]+)/', $arr, $toks, PREG_SET_ORDER)) {
+                    continue;
+                }
+                $code = 0;
+                foreach ($toks as $t) {
+                    if (($t[1] ?? '') !== '') {
+                        $code = (int) $t[1];
+                    } else {
+                        $cp = $this->pdf_glyph_to_codepoint($t[2]);
+                        if ($cp !== null && $code >= 0 && $code <= 255 && !isset($diff[$code])) {
+                            $diff[$code] = $this->pdf_codepoint_to_utf8($cp);
+                        }
+                        $code++;
+                    }
+                }
+            }
+        }
+        return $diff;
+    }
+
+    /** Adobe-Glyphname -> Unicode-Codepoint (Teilmenge + uniXXXX + Einzelzeichen). */
+    private function pdf_glyph_to_codepoint(string $name): ?int {
+        if ($name === '' || $name === '.notdef') {
+            return null;
+        }
+        static $agl = [
+            'space' => 32, 'exclam' => 33, 'quotedbl' => 34, 'numbersign' => 35, 'dollar' => 36,
+            'percent' => 37, 'ampersand' => 38, 'quotesingle' => 39, 'parenleft' => 40, 'parenright' => 41,
+            'asterisk' => 42, 'plus' => 43, 'comma' => 44, 'hyphen' => 45, 'period' => 46, 'slash' => 47,
+            'zero' => 48, 'one' => 49, 'two' => 50, 'three' => 51, 'four' => 52, 'five' => 53, 'six' => 54,
+            'seven' => 55, 'eight' => 56, 'nine' => 57, 'colon' => 58, 'semicolon' => 59, 'less' => 60,
+            'equal' => 61, 'greater' => 62, 'question' => 63, 'at' => 64, 'bracketleft' => 91,
+            'backslash' => 92, 'bracketright' => 93, 'asciicircum' => 94, 'underscore' => 95, 'grave' => 96,
+            'braceleft' => 123, 'bar' => 124, 'braceright' => 125, 'asciitilde' => 126,
+            'quoteleft' => 0x2018, 'quoteright' => 0x2019, 'quotedblleft' => 0x201C, 'quotedblright' => 0x201D,
+            'quotesinglbase' => 0x201A, 'quotedblbase' => 0x201E, 'bullet' => 0x2022, 'endash' => 0x2013,
+            'emdash' => 0x2014, 'ellipsis' => 0x2026, 'guillemotleft' => 0xAB, 'guillemotright' => 0xBB,
+            'guilsinglleft' => 0x2039, 'guilsinglright' => 0x203A, 'Euro' => 0x20AC, 'trademark' => 0x2122,
+            'degree' => 0xB0, 'plusminus' => 0xB1, 'section' => 0xA7, 'paragraph' => 0xB6,
+            'periodcentered' => 0xB7, 'cent' => 0xA2, 'sterling' => 0xA3, 'yen' => 0xA5, 'copyright' => 0xA9,
+            'registered' => 0xAE, 'ordfeminine' => 0xAA, 'ordmasculine' => 0xBA,
+            'germandbls' => 0xDF, 'adieresis' => 0xE4, 'odieresis' => 0xF6, 'udieresis' => 0xFC,
+            'Adieresis' => 0xC4, 'Odieresis' => 0xD6, 'Udieresis' => 0xDC,
+            'aacute' => 0xE1, 'agrave' => 0xE0, 'acircumflex' => 0xE2, 'atilde' => 0xE3, 'aring' => 0xE5,
+            'ae' => 0xE6, 'ccedilla' => 0xE7, 'eacute' => 0xE9, 'egrave' => 0xE8, 'ecircumflex' => 0xEA,
+            'edieresis' => 0xEB, 'iacute' => 0xED, 'igrave' => 0xEC, 'icircumflex' => 0xEE, 'idieresis' => 0xEF,
+            'ntilde' => 0xF1, 'oacute' => 0xF3, 'ograve' => 0xF2, 'ocircumflex' => 0xF4, 'otilde' => 0xF5,
+            'oslash' => 0xF8, 'uacute' => 0xFA, 'ugrave' => 0xF9, 'ucircumflex' => 0xFB, 'yacute' => 0xFD,
+            'ydieresis' => 0xFF, 'Aacute' => 0xC1, 'Agrave' => 0xC0, 'Acircumflex' => 0xC2, 'Atilde' => 0xC3,
+            'Aring' => 0xC5, 'AE' => 0xC6, 'Ccedilla' => 0xC7, 'Eacute' => 0xC9, 'Egrave' => 0xC8,
+            'Ecircumflex' => 0xCA, 'Edieresis' => 0xCB, 'Iacute' => 0xCD, 'Igrave' => 0xCC, 'Ntilde' => 0xD1,
+            'Oacute' => 0xD3, 'Ograve' => 0xD2, 'Ocircumflex' => 0xD4, 'Otilde' => 0xD5, 'Oslash' => 0xD8,
+            'Uacute' => 0xDA, 'Ugrave' => 0xD9, 'Ucircumflex' => 0xDB, 'Yacute' => 0xDD,
+            'fi' => 0xFB01, 'fl' => 0xFB02,
+        ];
+        if (isset($agl[$name])) {
+            return $agl[$name];
+        }
+        if (strlen($name) === 1) {
+            return ord($name); // A-Z, a-z, ASCII-Symbole
+        }
+        if (preg_match('/^uni([0-9A-Fa-f]{4})$/', $name, $m)) {
+            return hexdec($m[1]);
+        }
+        if (preg_match('/^u([0-9A-Fa-f]{4,6})$/', $name, $m)) {
+            return hexdec($m[1]);
+        }
+        // Namen wie "g12" / "cid34" o. ä. sind ohne Font nicht auflösbar.
+        return null;
+    }
+
+    /**
+     * Qualitätsgate: Erkennt, ob der extrahierte Text echter Fließtext ist.
+     * PDFs mit Subset-Fonts ohne ToUnicode liefern falsch gemappte Glyphen
+     * (Zeichensalat) - solcher "Text" darf nicht in den Index gelangen.
+     */
+    private function pdf_looks_like_text(string $text): bool {
+        $trim = trim($text);
+        if ($trim === '') {
+            return false;
+        }
+        $nonspace = preg_replace('/\s+/u', '', $trim);
+        $letters = preg_replace('/[^\p{L}]/u', '', $trim);
+        $nonspace_len = function_exists('mb_strlen') ? mb_strlen((string) $nonspace) : strlen((string) $nonspace);
+        $letters_len = function_exists('mb_strlen') ? mb_strlen((string) $letters) : strlen((string) $letters);
+        $letter_ratio = $nonspace_len > 0 ? $letters_len / $nonspace_len : 0.0;
+
+        // Zu wenige Buchstaben (fast nur Symbole/Zahlen) => kein sinnvoller Text.
+        if ($letter_ratio < 0.45) {
+            return false;
+        }
+
+        // Nicht-lateinische Schriften (kyrillisch, arabisch, CJK, Hangul): die
+        // Wortliste greift nicht, ein guter Buchstabenanteil genügt.
+        if (preg_match('/[\x{0400}-\x{04FF}\x{0600}-\x{06FF}\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}]/u', $trim)) {
+            return $letter_ratio >= 0.5;
+        }
+
+        $lower = ' ' . (function_exists('mb_strtolower') ? mb_strtolower($trim) : strtolower($trim)) . ' ';
+        $token_count = max(1, count(preg_split('/\s+/', trim($lower))));
+
+        // Sehr kurze Texte: zu wenig Statistik, dann reicht ein hoher Buchstabenanteil.
+        if ($token_count < 40) {
+            return $letter_ratio >= 0.6;
+        }
+
+        // Häufige Funktionswörter der unterstützten lateinischen Sprachen.
+        $common = [
+            'der', 'die', 'das', 'und', 'ist', 'von', 'den', 'mit', 'für', 'ein', 'eine', 'auf', 'sich', 'nicht', 'auch',
+            'the', 'and', 'of', 'to', 'is', 'in', 'for', 'on', 'with', 'are', 'this', 'that', 'as', 'by',
+            'les', 'des', 'une', 'est', 'que', 'pour', 'dans', 'avec', 'sur',
+            'los', 'las', 'una', 'para', 'con', 'por', 'del',
+            'che', 'per', 'una', 'del', 'gli', 'sono',
+            'het', 'een', 'van', 'met', 'voor',
+            'dos', 'das', 'uma', 'não', 'com',
+        ];
+        $hits = 0;
+        foreach (array_unique($common) as $w) {
+            $hits += preg_match_all('/(?<![\p{L}])' . preg_quote($w, '/') . '(?![\p{L}])/u', $lower);
+        }
+        $per_1000 = 1000 * $hits / $token_count;
+
+        return $per_1000 >= 12;
+    }
+
+    /** Findet alle Streams und dekomprimiert sie (Flate/raw). Nur Text-/CMap-Streams behalten. */
+    private function pdf_decode_streams(string $bytes): array {
+        $streams = [];
+        $offset = 0;
+        $len = strlen($bytes);
+        while (($start = strpos($bytes, 'stream', $offset)) !== false) {
+            $p = $start + 6;
+            if ($p < $len && $bytes[$p] === "\r") {
+                $p++;
+            }
+            if ($p < $len && $bytes[$p] === "\n") {
+                $p++;
+            }
+            $end = strpos($bytes, 'endstream', $p);
+            if ($end === false) {
+                break;
+            }
+            $raw = substr($bytes, $p, $end - $p);
+            $raw = preg_replace('/(\r\n|\r|\n)$/', '', $raw);
+            $decoded = $this->pdf_inflate((string) $raw);
+            if ($decoded !== '' && preg_match('/BT|Tj|TJ|bfchar|bfrange|begincmap/', $decoded)) {
+                $streams[] = $decoded;
+            }
+            $offset = $end + 9;
+        }
+        return $streams;
+    }
+
+    private function pdf_inflate(string $raw): string {
+        $out = @gzuncompress($raw);
+        if ($out === false) {
+            $out = @gzinflate($raw);
+        }
+        if ($out === false) {
+            $out = @gzdecode($raw);
+        }
+        if ($out === false) {
+            $out = $raw; // unkomprimierter Content-Stream
+        }
+        return (string) $out;
+    }
+
+    /** Baut aus allen ToUnicode-CMaps eine Abbildung Quellcode(hex) -> UTF-8. */
+    private function pdf_build_tounicode(array $streams): array {
+        $map = [];
+        $code_len = 0;
+
+        foreach ($streams as $s) {
+            if (strpos($s, 'beginbfchar') === false && strpos($s, 'beginbfrange') === false) {
+                continue;
+            }
+
+            if (preg_match_all('/beginbfchar(.*?)endbfchar/s', $s, $blocks)) {
+                foreach ($blocks[1] as $blk) {
+                    if (preg_match_all('/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/', $blk, $m, PREG_SET_ORDER)) {
+                        foreach ($m as $pair) {
+                            $src = strtoupper($pair[1]);
+                            $code_len = max($code_len, intdiv(strlen($src), 2));
+                            $map[$src] = $this->pdf_hex_to_utf8($pair[2]);
+                        }
+                    }
+                }
+            }
+
+            if (preg_match_all('/beginbfrange(.*?)endbfrange/s', $s, $blocks)) {
+                foreach ($blocks[1] as $blk) {
+                    if (preg_match_all('/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(\[[^\]]*\]|<[0-9A-Fa-f]+>)/s', $blk, $ranges, PREG_SET_ORDER)) {
+                        foreach ($ranges as $r) {
+                            $src_len = intdiv(strlen($r[1]), 2);
+                            $code_len = max($code_len, $src_len);
+                            $lo = hexdec($r[1]);
+                            $hi = hexdec($r[2]);
+                            if ($hi - $lo > 65535) {
+                                continue; // Schutz vor absurden Bereichen
+                            }
+                            if ($r[3][0] === '[') {
+                                preg_match_all('/<([0-9A-Fa-f]+)>/', $r[3], $dm);
+                                $i = 0;
+                                for ($c = $lo; $c <= $hi && $i < count($dm[1]); $c++, $i++) {
+                                    $key = strtoupper(str_pad(dechex($c), $src_len * 2, '0', STR_PAD_LEFT));
+                                    $map[$key] = $this->pdf_hex_to_utf8($dm[1][$i]);
+                                }
+                            } else {
+                                $base = hexdec(trim($r[3], '<>'));
+                                $n = 0;
+                                for ($c = $lo; $c <= $hi; $c++, $n++) {
+                                    $key = strtoupper(str_pad(dechex($c), $src_len * 2, '0', STR_PAD_LEFT));
+                                    $map[$key] = $this->pdf_codepoint_to_utf8($base + $n);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return ['map' => $map, 'code_len' => $code_len ?: 1];
+    }
+
+    /** UTF-16BE-Hex (ToUnicode-Ziel) -> UTF-8. */
+    private function pdf_hex_to_utf8(string $hex): string {
+        $hex = preg_replace('/[^0-9A-Fa-f]/', '', $hex);
+        if ($hex === '') {
+            return '';
+        }
+        if (strlen($hex) % 4 !== 0) {
+            $hex = str_pad($hex, (int) (ceil(strlen($hex) / 4) * 4), '0', STR_PAD_LEFT);
+        }
+        $units = str_split($hex, 4);
+        $out = '';
+        for ($i = 0, $c = count($units); $i < $c; $i++) {
+            $cu = hexdec($units[$i]);
+            if ($cu >= 0xD800 && $cu <= 0xDBFF && $i + 1 < $c) {
+                $lo = hexdec($units[$i + 1]);
+                $i++;
+                $cp = 0x10000 + (($cu - 0xD800) << 10) + ($lo - 0xDC00);
+                $out .= $this->pdf_codepoint_to_utf8($cp);
+            } else {
+                $out .= $this->pdf_codepoint_to_utf8($cu);
+            }
+        }
+        return $out;
+    }
+
+    private function pdf_codepoint_to_utf8(int $cp): string {
+        if ($cp <= 0) {
+            return '';
+        }
+        if ($cp < 0x80) {
+            return chr($cp);
+        }
+        if ($cp < 0x800) {
+            return chr(0xC0 | ($cp >> 6)) . chr(0x80 | ($cp & 0x3F));
+        }
+        if ($cp < 0x10000) {
+            return chr(0xE0 | ($cp >> 12)) . chr(0x80 | (($cp >> 6) & 0x3F)) . chr(0x80 | ($cp & 0x3F));
+        }
+        return chr(0xF0 | ($cp >> 18)) . chr(0x80 | (($cp >> 12) & 0x3F))
+            . chr(0x80 | (($cp >> 6) & 0x3F)) . chr(0x80 | ($cp & 0x3F));
+    }
+
+    /** Liest Text-Show-Operatoren aus einem Content-Stream in Dokumentreihenfolge. */
+    private function pdf_tokenize_text(string $content, array $map, int $code_len, array $diff = []): string {
+        $has_map = !empty($map);
+        $n = strlen($content);
+        $i = 0;
+        $out = '';
+        $gap = '';
+
+        $append = function (string $text) use (&$out, &$gap): void {
+            if ($text === '') {
+                return;
+            }
+            if ($out === '') {
+                $out = $text;
+            } else {
+                $sep = (strpos($gap, 'T*') !== false || strpos($gap, 'Td') !== false || strpos($gap, 'TD') !== false)
+                    ? "\n"
+                    : ' ';
+                $out .= $sep . $text;
+            }
+            $gap = '';
+        };
+
+        while ($i < $n) {
+            $ch = $content[$i];
+            if ($ch === '(') {
+                [$raw, $i] = $this->pdf_read_literal($content, $i);
+                $append($this->pdf_decode_bytes($raw, $map, $code_len, $has_map, $diff));
+                continue;
+            }
+            if ($ch === '<' && ($i + 1 >= $n || $content[$i + 1] !== '<')) {
+                $close = strpos($content, '>', $i);
+                if ($close === false) {
+                    break;
+                }
+                $hex = substr($content, $i + 1, $close - $i - 1);
+                $append($this->pdf_decode_bytes($this->pdf_hex_to_bytes($hex), $map, $code_len, $has_map, $diff));
+                $i = $close + 1;
+                continue;
+            }
+            if ($ch === '[') {
+                $close = strpos($content, ']', $i);
+                if ($close === false) {
+                    break;
+                }
+                $arr = substr($content, $i + 1, $close - $i - 1);
+                $append($this->pdf_decode_array($arr, $map, $code_len, $has_map, $diff));
+                $i = $close + 1;
+                continue;
+            }
+            $gap .= $ch;
+            $i++;
+        }
+
+        return $out;
+    }
+
+    /** Liest ab Position $i (auf '(') einen balancierten Literal-String; gibt [bytes, next_i]. */
+    private function pdf_read_literal(string $content, int $i): array {
+        $n = strlen($content);
+        $i++; // über '('
+        $depth = 1;
+        $buf = '';
+        while ($i < $n) {
+            $ch = $content[$i];
+            if ($ch === '\\') {
+                $next = $i + 1 < $n ? $content[$i + 1] : '';
+                switch ($next) {
+                    case 'n': $buf .= "\n"; $i += 2; break;
+                    case 'r': $buf .= "\r"; $i += 2; break;
+                    case 't': $buf .= "\t"; $i += 2; break;
+                    case 'b': $buf .= "\x08"; $i += 2; break;
+                    case 'f': $buf .= "\x0C"; $i += 2; break;
+                    case '(': $buf .= '('; $i += 2; break;
+                    case ')': $buf .= ')'; $i += 2; break;
+                    case '\\': $buf .= '\\'; $i += 2; break;
+                    case "\r": $i += 2; if ($i < $n && $content[$i] === "\n") { $i++; } break; // Zeilenfortsetzung
+                    case "\n": $i += 2; break;
+                    default:
+                        if ($next !== '' && $next >= '0' && $next <= '7') {
+                            $oct = '';
+                            $j = $i + 1;
+                            while ($j < $n && strlen($oct) < 3 && $content[$j] >= '0' && $content[$j] <= '7') {
+                                $oct .= $content[$j];
+                                $j++;
+                            }
+                            $buf .= chr(octdec($oct) & 0xFF);
+                            $i = $j;
+                        } else {
+                            $buf .= $next;
+                            $i += 2;
+                        }
+                }
+                continue;
+            }
+            if ($ch === '(') {
+                $depth++;
+                $buf .= $ch;
+                $i++;
+                continue;
+            }
+            if ($ch === ')') {
+                $depth--;
+                if ($depth === 0) {
+                    $i++;
+                    break;
+                }
+                $buf .= $ch;
+                $i++;
+                continue;
+            }
+            $buf .= $ch;
+            $i++;
+        }
+        return [$buf, $i];
+    }
+
+    private function pdf_hex_to_bytes(string $hex): string {
+        $hex = preg_replace('/[^0-9A-Fa-f]/', '', $hex);
+        if (strlen($hex) % 2 !== 0) {
+            $hex .= '0';
+        }
+        return (string) @hex2bin($hex);
+    }
+
+    /** Dekodiert eine TJ-Array-Zeichenkette: Strings zusammenfügen, große Kerning-Lücken -> Space. */
+    private function pdf_decode_array(string $arr, array $map, int $code_len, bool $has_map, array $diff = []): string {
+        $n = strlen($arr);
+        $i = 0;
+        $out = '';
+        while ($i < $n) {
+            $ch = $arr[$i];
+            if ($ch === '(') {
+                [$raw, $i] = $this->pdf_read_literal($arr, $i);
+                $out .= $this->pdf_decode_bytes($raw, $map, $code_len, $has_map, $diff);
+                continue;
+            }
+            if ($ch === '<') {
+                $close = strpos($arr, '>', $i);
+                if ($close === false) {
+                    break;
+                }
+                $out .= $this->pdf_decode_bytes($this->pdf_hex_to_bytes(substr($arr, $i + 1, $close - $i - 1)), $map, $code_len, $has_map, $diff);
+                $i = $close + 1;
+                continue;
+            }
+            // Zahl (Kerning): große Beträge signalisieren Wortabstand.
+            if ($ch === '-' || $ch === '+' || $ch === '.' || ($ch >= '0' && $ch <= '9')) {
+                $j = $i;
+                while ($j < $n && ($arr[$j] === '-' || $arr[$j] === '+' || $arr[$j] === '.' || ($arr[$j] >= '0' && $arr[$j] <= '9'))) {
+                    $j++;
+                }
+                $num = (float) substr($arr, $i, $j - $i);
+                if (abs($num) >= 100 && ($out === '' || substr($out, -1) !== ' ')) {
+                    $out .= ' ';
+                }
+                $i = $j;
+                continue;
+            }
+            $i++;
+        }
+        return $out;
+    }
+
+    /**
+     * Wandelt rohe String-Bytes in UTF-8 um. Reihenfolge: ToUnicode-CMap ->
+     * /Differences-Abbildung (Glyphnamen) -> CP1252/Latin-1.
+     */
+    private function pdf_decode_bytes(string $raw, array $map, int $code_len, bool $has_map, array $diff = []): string {
+        if ($raw === '') {
+            return '';
+        }
+        if ($has_map && $code_len >= 1) {
+            $out = '';
+            $len = strlen($raw);
+            $step = max(1, $code_len);
+            for ($i = 0; $i + $step <= $len; $i += $step) {
+                $chunk = substr($raw, $i, $step);
+                $key = strtoupper(bin2hex($chunk));
+                if (isset($map[$key])) {
+                    $out .= $map[$key];
+                } elseif ($step === 2 && isset($map[strtoupper(bin2hex($chunk[1]))])) {
+                    $out .= $map[strtoupper(bin2hex($chunk[1]))];
+                } elseif ($step === 1 && isset($diff[ord($chunk)])) {
+                    $out .= $diff[ord($chunk)];
+                } else {
+                    $out .= $this->pdf_bytes_latin1(($step === 1) ? $chunk : substr($chunk, -1));
+                }
+            }
+            if ($out !== '') {
+                return $out;
+            }
+        }
+        // Keine CMap: erst /Differences (byteweise) versuchen, sonst Latin-1.
+        if (!empty($diff)) {
+            $out = '';
+            $len = strlen($raw);
+            for ($i = 0; $i < $len; $i++) {
+                $b = ord($raw[$i]);
+                if (isset($diff[$b])) {
+                    $out .= $diff[$b];
+                } elseif ($b >= 0x20) {
+                    $out .= $this->pdf_bytes_latin1($raw[$i]);
+                }
+            }
+            if ($out !== '') {
+                return $out;
+            }
+        }
+        return $this->pdf_bytes_latin1($raw);
+    }
+
+    /** CP1252/Latin-1-Bytes -> UTF-8 (Fallback ohne Font-Encoding-Info). */
+    private function pdf_bytes_latin1(string $raw): string {
+        static $cp1252 = [
+            0x80 => 0x20AC, 0x82 => 0x201A, 0x83 => 0x0192, 0x84 => 0x201E, 0x85 => 0x2026,
+            0x86 => 0x2020, 0x87 => 0x2021, 0x88 => 0x02C6, 0x89 => 0x2030, 0x8A => 0x0160,
+            0x8B => 0x2039, 0x8C => 0x0152, 0x8E => 0x017D, 0x91 => 0x2018, 0x92 => 0x2019,
+            0x93 => 0x201C, 0x94 => 0x201D, 0x95 => 0x2022, 0x96 => 0x2013, 0x97 => 0x2014,
+            0x98 => 0x02DC, 0x99 => 0x2122, 0x9A => 0x0161, 0x9B => 0x203A, 0x9C => 0x0153,
+            0x9E => 0x017E, 0x9F => 0x0178,
+        ];
+        $out = '';
+        $len = strlen($raw);
+        for ($i = 0; $i < $len; $i++) {
+            $b = ord($raw[$i]);
+            if ($b === 0) {
+                continue;
+            }
+            $cp = ($b >= 0x80 && $b <= 0x9F && isset($cp1252[$b])) ? $cp1252[$b] : $b;
+            $out .= $this->pdf_codepoint_to_utf8($cp);
+        }
+        return $out;
+    }
+
+    private function insert_document_chunks(string $source_id, string $source_type, string $url, string $title, string $content): int {
+        global $wpdb;
+        $table = $wpdb->prefix . 'aicb_chunks';
+        $chunks = $this->chunk_text($content, $title);
+        if (!$chunks) {
+            return 0;
+        }
+        $texts = array_column($chunks, 'content');
+        $embeddings = $this->embed_texts($texts);
+        $now = gmdate('Y-m-d H:i:s');
+        $inserted = 0;
+
+        foreach ($chunks as $idx => $chunk) {
+            $embedding = $embeddings[$idx] ?? null;
+            if (!$embedding) {
+                continue;
+            }
+            $wpdb->insert($table, [
+                'source_id' => $source_id,
+                'source_type' => $source_type,
+                'source_url' => esc_url_raw($url),
+                'title' => $title,
+                'section' => $chunk['section'],
+                'content' => $chunk['content'],
+                'content_hash' => sha1($chunk['content']),
+                // Kompakte, schnelle Form (Base64 gepackter, normalisierter float32).
+                // JSON-Spalte bleibt leer -> weniger Speicher, schnelleres Laden.
+                'embedding' => null,
+                'embedding_packed' => $this->pack_embedding($embedding),
+                'token_estimate' => $this->estimate_tokens($chunk['content']),
+                'updated_at' => $now,
+            ], ['%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s']);
+            $inserted++;
+        }
+        return $inserted;
+    }
+
+    private function post_to_document(WP_Post $post): array {
+        $parts = [];
+        $title = wp_strip_all_tags(get_the_title($post));
+        $parts[] = '# ' . $title;
+
+        if ($this->setting_bool('include_excerpts', true) && trim((string) $post->post_excerpt) !== '') {
+            $parts[] = "Auszug:\n" . $this->clean_text($post->post_excerpt);
+        }
+
+        $content = $post->post_content;
+        $content = strip_shortcodes($content);
+        $content = apply_filters('the_content', $content);
+        $parts[] = $this->clean_text($content);
+
+        if ($this->setting_bool('include_taxonomies', true)) {
+            $terms = $this->post_terms_text($post);
+            if ($terms !== '') {
+                $parts[] = "Taxonomien:\n" . $terms;
+            }
+        }
+
+        $parts[] = 'Quelle: ' . get_permalink($post);
+
+        return [
+            'title' => $title ?: ('Post ' . $post->ID),
+            'url' => get_permalink($post),
+            'content' => trim(implode("\n\n", array_filter($parts))),
+        ];
+    }
+
+    private function post_terms_text(WP_Post $post): string {
+        $taxonomies = get_object_taxonomies($post->post_type, 'objects');
+        $lines = [];
+        foreach ($taxonomies as $taxonomy) {
+            if (empty($taxonomy->public)) {
+                continue;
+            }
+            $terms = get_the_terms($post, $taxonomy->name);
+            if (!$terms || is_wp_error($terms)) {
+                continue;
+            }
+            $names = array_map(fn($term) => $term->name, $terms);
+            $lines[] = $taxonomy->label . ': ' . implode(', ', $names);
+        }
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Kleinere Abschnitte mit Überlappung. Kleiner heißt: eine konkrete
+     * Angabe (Preis, Uhrzeit, Bedingung) dominiert den Chunk und wird bei der
+     * Suche auch gefunden. Die Überlappung sorgt dafür, dass ein Detail an
+     * der Grenze zweier Abschnitte nicht verloren geht.
+     */
+    private function chunk_text(string $text, string $title): array {
+        $clean = $this->normalize_text($text);
+        if ($clean === '') {
+            return [];
+        }
+
+        $sections = $this->split_sections($clean, $title);
+        $chunks = [];
+        foreach ($sections as $section) {
+            $paragraphs = preg_split("/\n{2,}/", $section['content']) ?: [];
+            $buffer = '';
+            foreach ($paragraphs as $paragraph) {
+                $paragraph = trim($paragraph);
+                if ($paragraph === '') {
+                    continue;
+                }
+                $candidate = trim($buffer . "\n\n" . $paragraph);
+                if ($buffer !== '' && $this->estimate_tokens($candidate) > self::CHUNK_TARGET_TOKENS) {
+                    $chunks[] = [
+                        'section' => $section['title'],
+                        'content' => $this->format_chunk($title, $section['title'], $buffer),
+                    ];
+                    // Der letzte Absatz wandert in den nächsten Chunk mit.
+                    $overlap = $this->chunk_overlap_tail($buffer);
+                    $buffer = trim($overlap === '' ? $paragraph : $overlap . "\n\n" . $paragraph);
+                } else {
+                    $buffer = $candidate;
+                }
+            }
+            if (trim($buffer) !== '') {
+                $chunks[] = [
+                    'section' => $section['title'],
+                    'content' => $this->format_chunk($title, $section['title'], $buffer),
+                ];
+            }
+        }
+        return $chunks;
+    }
+
+    /** Letzter Absatz eines Chunks als Überlappung für den nächsten. */
+    private function chunk_overlap_tail(string $buffer): string {
+        $parts = preg_split("/\n{2,}/", trim($buffer)) ?: [];
+        if (!$parts) {
+            return '';
+        }
+        $tail = trim((string) end($parts));
+        if ($tail === '' || $this->estimate_tokens($tail) > self::CHUNK_OVERLAP_TOKENS) {
+            // Zu langer Absatz: nur die letzten Sätze mitnehmen.
+            $sentences = preg_split('/(?<=[.!?])\s+/u', $tail) ?: [];
+            $tail = '';
+            while ($sentences && $this->estimate_tokens($tail) < self::CHUNK_OVERLAP_TOKENS) {
+                $tail = trim(array_pop($sentences) . ' ' . $tail);
+            }
+        }
+        return trim($tail);
+    }
+
+    private function split_sections(string $text, string $default_title): array {
+        $lines = preg_split('/\n/', $text) ?: [];
+        $sections = [];
+        $current = $default_title ?: 'Inhalt';
+        $buffer = [];
+        foreach ($lines as $line) {
+            if (preg_match('/^#{1,6}\s+(.+)$/', trim($line), $m)) {
+                if (trim(implode("\n", $buffer)) !== '') {
+                    $sections[] = ['title' => $current, 'content' => trim(implode("\n", $buffer))];
+                }
+                $current = trim($m[1]);
+                $buffer = [];
+                continue;
+            }
+            $buffer[] = $line;
+        }
+        if (trim(implode("\n", $buffer)) !== '') {
+            $sections[] = ['title' => $current, 'content' => trim(implode("\n", $buffer))];
+        }
+        return $sections ?: [['title' => $default_title ?: 'Inhalt', 'content' => $text]];
+    }
+
+    private function format_chunk(string $title, string $section, string $body): string {
+        return "Document: {$title}\nSection: {$section}\n" . trim($body);
+    }
+
+    private function answer_question(string $question, array $history, string $lang): array {
+        global $wpdb;
+        $chunks_table = $wpdb->prefix . 'aicb_chunks';
+        $count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$chunks_table}");
+        $pack = $this->lang_pack($lang);
+
+        // Auch ohne Index wird geantwortet: Begrüßungen und Small Talk sollen
+        // funktionieren, statt eine Fehlermeldung auszuwerfen.
+        $matches = [];
+        if ($count > 0) {
+            // Mit Originalfrage und angereicherter Variante suchen: das fängt
+            // Folgefragen und fremdsprachige Fragen gleichzeitig ab. Die
+            // Anreicherung kommt aus dem Verlauf, nicht aus einem eigenen
+            // Modell-Aufruf - der kostete früher eine ganze Sekunde vorweg.
+            $expanded = $this->expand_followup_query($question, $history);
+            $queries = [$question];
+            if ($expanded !== $question) {
+                $queries[] = $expanded;
+            }
+            $vectors = array_values(array_filter($this->embed_texts($queries, $this->index_dimensions())));
+            if ($vectors) {
+                // Der Volltext-Zweig bekommt immer nur die unveraenderte Frage.
+                // Sonst suchte er nach den Woertern des alten Themas mit - und
+                // die sind bei einer kurzen Frage schnell in der Ueberzahl.
+                $matches = $this->search_chunks($vectors, $question);
+            }
+        }
+
+        // Schwache Treffer fliegen raus - bei "hallo" passt kein Abschnitt und
+        // die Tokens wären verschenkt.
+        $relevant = array_values(array_filter(
+            $matches,
+            fn($row) => (float) ($row['score'] ?? 0) >= self::CONTEXT_MIN_SCORE
+        ));
+
+        // Sprache der aktuellen Nachricht schlägt die Sprache der Website.
+        $target_lang = $this->detect_message_lang($question) ?: $lang;
+        $context = $relevant ? $this->build_context($relevant) : '';
+        $messages = $this->build_chat_messages($question, $history, $context, $target_lang, $count > 0);
+        // Etwas Temperatur laesst die Antwort natuerlicher klingen (statt roboterhaft);
+        // die strikte Kontext-Bindung im Prompt verhindert weiterhin Halluzinationen.
+        // 900 Tokens reichen fuer eine vollstaendige Auskunft; der Prompt haelt die
+        // Antwort faktendicht statt wortreich, das spart mehrere Sekunden Ausgabe.
+        $chat = $this->openai_chat($messages, ['temperature' => 0.4, 'max_tokens' => 900]);
+        $answer = trim((string) ($chat['answer'] ?? ''));
+        if ($answer === '') {
+            $answer = $count > 0 ? $pack['error'] : $pack['no_index'];
+        }
+
+        // Karte, Quellen und Buttons brauchen einen weiteren Modell-Aufruf. Der
+        // laeuft nicht mehr hier, sondern nachgelagert ueber /actions - die
+        // Antwort steht dadurch ein bis drei Sekunden frueher im Chat.
+        return [
+            'answer' => $answer,
+            'usage' => $chat['usage'] ?? [],
+            'lang' => $target_lang,
+            'scores' => $this->match_scores($relevant),
+        ];
+    }
+
+    /** [id => score] aus den Treffern - reicht, um sie spaeter neu zu laden. */
+    private function match_scores(array $matches): array {
+        $scores = [];
+        foreach ($matches as $row) {
+            $id = (int) ($row['id'] ?? 0);
+            if ($id > 0) {
+                $scores[$id] = round((float) ($row['score'] ?? 0), 5);
+            }
+        }
+        return $scores;
+    }
+
+    /** Steht im Antworttext schon ein Quellenblock (in irgendeiner Sprache)? */
+    private function has_sources_block(string $answer): bool {
+        foreach ($this->sources_labels() as $label) {
+            if (stripos($answer, $label . ':') !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Kurze Folgefragen ("und die Preise?") für die Suche eigenständig machen.
+     *
+     * Früher lief dafür ein eigener Modell-Aufruf, der eine halbe bis anderthalb
+     * Sekunden vor jede Antwort setzte. Für Retrieval genügt aber, was der
+     * Verlauf ohnehin hergibt: die vorige Frage und die Titel der damals
+     * genannten Quellen. Der Vektor liegt dann zwischen altem Thema und neuer
+     * Frage - genau das, was die Umformulierung erreichen sollte.
+     */
+    private function expand_followup_query(string $question, array $history): string {
+        if (!$history || $this->str_len($question) > 90 || str_word_count($question) > 12) {
+            return $question;
+        }
+        // Reine Grußfloskeln nicht anreichern - sonst zieht "hallo" nach einem
+        // Fachgespräch plötzlich Fachabschnitte heran.
+        if ($this->is_pure_smalltalk($question)) {
+            return $question;
+        }
+        // Und nur, wenn die Frage ohne den Verlauf gar nicht dasteht. "Was ist
+        // die Telefonnummer von Moar Gut?" nennt ihr Thema selbst - wird sie
+        // trotzdem mit dem alten Thema angereichert, sucht das Plugin nach dem
+        // alten Thema und beantwortet die vorige Frage ein zweites Mal.
+        if (!$this->refers_to_previous($question)) {
+            return $question;
+        }
+
+        $previous_question = '';
+        $topic = '';
+        foreach (array_reverse(array_slice($history, -6)) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $role = strtolower((string) ($item['role'] ?? $item['sender'] ?? 'user'));
+            $is_bot = in_array($role, ['assistant', 'ai', 'bot'], true);
+            if ($is_bot && $topic === '') {
+                // Die Quellentitel der letzten Antwort benennen das Thema am
+                // schärfsten - besser als der Antworttext selbst.
+                $titles = [];
+                foreach ((array) ($item['sources'] ?? []) as $source) {
+                    $title = trim((string) (is_array($source) ? ($source['title'] ?? '') : ''));
+                    if ($title !== '' && !in_array($title, $titles, true)) {
+                        $titles[] = $title;
+                    }
+                    if (count($titles) >= 2) {
+                        break;
+                    }
+                }
+                $topic = implode(' ', $titles);
+            }
+            if (!$is_bot && $previous_question === '') {
+                $previous_question = $this->limit_text(trim((string) ($item['content'] ?? $item['text'] ?? '')), 160);
+            }
+            if ($previous_question !== '' && $topic !== '') {
+                break;
+            }
+        }
+
+        $expanded = trim(implode(' ', array_filter([$previous_question, $topic, $question])));
+        return $expanded !== '' ? $expanded : $question;
+    }
+
+    /**
+     * Verweist die Frage auf das bisher Gesagte, statt ihr Thema selbst zu
+     * nennen? Nur dann darf der Verlauf in die Suche einfließen.
+     *
+     * Drei Signale: ein Anschlusswort am Anfang ("und die Preise?"), eine
+     * Pro-Form ("welche davon?") oder überhaupt kein eigenes Inhaltswort
+     * ("sonst nichts?"). Alles andere - jede Frage, die ihr Thema selbst
+     * benennt - bleibt unangetastet.
+     */
+    private function refers_to_previous(string $question): bool {
+        $plain = $this->str_lower(trim($question));
+        $words = array_values(array_filter(preg_split('/[^\p{L}\p{N}]+/u', $plain) ?: [], fn($w) => $w !== ''));
+        if (!$words) {
+            return false;
+        }
+
+        // 1) Anschlusswort am Satzanfang.
+        $openers = [
+            'und' => 1, 'auch' => 1, 'oder' => 1, 'sonst' => 1, 'dann' => 1, 'ausserdem' => 1,
+            'außerdem' => 1, 'weiter' => 1, 'weitere' => 1, 'noch' => 1, 'aber' => 1,
+            'and' => 1, 'also' => 1, 'else' => 1, 'more' => 1,
+        ];
+        if (!empty($openers[$words[0]])) {
+            return true;
+        }
+
+        // 2) Pro-Form irgendwo im Satz - sie zeigt auf etwas zuvor Genanntes.
+        $proforms = [
+            'davon' => 1, 'dazu' => 1, 'dabei' => 1, 'dafür' => 1, 'dafuer' => 1, 'damit' => 1,
+            'darin' => 1, 'darüber' => 1, 'darueber' => 1, 'daran' => 1, 'darauf' => 1,
+            'dort' => 1, 'dieses' => 1, 'diese' => 1, 'dieser' => 1, 'diesem' => 1, 'diesen' => 1,
+            'jene' => 1, 'derselbe' => 1, 'genannten' => 1, 'erwähnten' => 1, 'erwaehnten' => 1,
+            'thereof' => 1, 'those' => 1, 'them' => 1,
+        ];
+        foreach ($words as $word) {
+            if (!empty($proforms[$word])) {
+                return true;
+            }
+        }
+
+        // 3) Kein eigenes Inhaltswort - die Frage steht ohne Verlauf nicht.
+        return !$this->keyword_terms($question);
+    }
+
+    /** Nur Gruß, Dank oder Bestätigung - ohne eigenes Thema. */
+    private function is_pure_smalltalk(string $text): bool {
+        $words = preg_split('/[^\p{L}\p{N}]+/u', $this->str_lower(trim($text))) ?: [];
+        $words = array_values(array_filter($words, fn($w) => $w !== ''));
+        if (!$words || count($words) > 4) {
+            return false;
+        }
+        $smalltalk = [
+            'hallo' => 1, 'hi' => 1, 'hey' => 1, 'servus' => 1, 'moin' => 1, 'guten' => 1,
+            'tag' => 1, 'morgen' => 1, 'abend' => 1, 'grüß' => 1, 'gruess' => 1, 'gott' => 1,
+            'danke' => 1, 'dank' => 1, 'vielen' => 1, 'super' => 1, 'perfekt' => 1, 'top' => 1,
+            'ok' => 1, 'okay' => 1, 'alles' => 1, 'klar' => 1, 'tschüss' => 1, 'tschuess' => 1,
+            'ciao' => 1, 'bye' => 1, 'hello' => 1, 'thanks' => 1, 'thank' => 1, 'you' => 1,
+            'good' => 1, 'great' => 1, 'nice' => 1, 'cool' => 1,
+        ];
+        foreach ($words as $word) {
+            if (!isset($smalltalk[$word])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Kandidaten für die Antwortkarte. Ausgewählt wird später vom Modell -
+     * hier fallen nur die Seiten raus, die als Karte nie Sinn ergeben.
+     */
+    private function card_candidates(array $matches, string $answer): array {
+        if (!$matches || $this->looks_unanswered($answer)) {
+            return [];
+        }
+        $candidates = [];
+        $seen = [];
+        foreach ($matches as $row) {
+            if (count($candidates) >= 3) {
+                break;
+            }
+            // Bei Begrüßungen und Small Talk passt kein Abschnitt wirklich.
+            if ((float) ($row['score'] ?? 0) < self::CARD_MIN_SCORE) {
+                continue;
+            }
+            $url = esc_url_raw((string) ($row['source_url'] ?? ''));
+            $title = trim((string) ($row['title'] ?? ''));
+            // Ohne Ziel und ohne Titel ist eine Karte wertlos.
+            if ($url === '' || $title === '' || isset($seen[$url])) {
+                continue;
+            }
+            if ($this->is_boilerplate_page($title, $url)) {
+                continue;
+            }
+            $seen[$url] = true;
+            $candidates[] = $row;
+        }
+        return $candidates;
+    }
+
+    /**
+     * Seiten, die als Antwortkarte nie weiterhelfen: Rechtstexte, Startseite,
+     * Archive, Konto- und Shop-Funktionsseiten.
+     */
+    private function is_boilerplate_page(string $title, string $url): bool {
+        $haystack = $this->str_lower($title . ' ' . $url);
+        $markers = [
+            'impressum', 'datenschutz', 'privacy', 'agb', 'terms', 'cookie', 'sitemap',
+            'widerruf', 'disclaimer', 'haftung', 'newsletter', 'login', 'anmelden',
+            'warenkorb', 'checkout', 'kasse', 'mein-konto', 'my-account', 'suche', 'search',
+            '404', 'blog/page', 'category/', 'tag/', 'author/',
+        ];
+        foreach ($markers as $marker) {
+            if (strpos($haystack, $marker) !== false) {
+                return true;
+            }
+        }
+        // Startseite: nichts, was man als Detailseite verlinken möchte.
+        $path = trim((string) wp_parse_url($url, PHP_URL_PATH), '/');
+        return $path === '';
+    }
+
+    /** Aus einem Treffer die fertige Karte bauen. */
+    private function build_card(array $row): ?array {
+        $title = trim((string) ($row['title'] ?? ''));
+        $section = trim((string) ($row['section'] ?? ''));
+        $url = esc_url_raw((string) ($row['source_url'] ?? ''));
+        if ($title === '' || $url === '') {
+            return null;
+        }
+
+        $card = [
+            'title' => $title,
+            'description' => $this->card_teaser((string) ($row['content'] ?? ''), $title, $section),
+            'details' => [],
+            'url' => $url,
+        ];
+        $image = $this->card_image((string) ($row['source_id'] ?? ''), $url);
+        if ($image !== '') {
+            $card['image_url'] = $image;
+        }
+        if ($section !== '' && $section !== $title) {
+            $card['details'][] = $section;
+        }
+        return $card;
+    }
+
+    private function card_teaser(string $content, string $title, string $section): string {
+        $lines = preg_split('/\n/', $content) ?: [];
+        $body = [];
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+            // Die Chunk-Kopfzeilen und die Überschriften selbst sind kein Teaser.
+            if ($trimmed === '' || stripos($trimmed, 'Document:') === 0 || stripos($trimmed, 'Section:') === 0) {
+                continue;
+            }
+            if ($trimmed === $title || $trimmed === $section || preg_match('/^#{1,6}\s/', $trimmed)) {
+                continue;
+            }
+            $body[] = $trimmed;
+            if (strlen(implode(' ', $body)) > 200) {
+                break;
+            }
+        }
+        $teaser = trim(implode(' ', $body));
+        if ($teaser === '') {
+            return '';
+        }
+        if (strlen($teaser) > 170) {
+            $cut = substr($teaser, 0, 170);
+            $space = strrpos($cut, ' ');
+            $teaser = ($space ? substr($cut, 0, $space) : $cut) . '...';
+        }
+        return sanitize_text_field($teaser);
+    }
+
+    private function card_image(string $source_id, string $url): string {
+        if (strpos($source_id, 'post:') === 0) {
+            $post_id = absint(substr($source_id, 5));
+            if ($post_id && has_post_thumbnail($post_id)) {
+                return (string) get_the_post_thumbnail_url($post_id, 'medium');
+            }
+        }
+        $post_id = $url !== '' ? url_to_postid($url) : 0;
+        if ($post_id && has_post_thumbnail($post_id)) {
+            return (string) get_the_post_thumbnail_url($post_id, 'medium');
+        }
+        return '';
+    }
+
+    private function looks_unanswered(string $answer): bool {
+        $plain = trim(strtolower($answer));
+        if ($plain === '') {
+            return true;
+        }
+        $markers = [
+            'keine passenden informationen', 'keine informationen', 'weiß ich nicht', 'weiß ich nicht',
+            'nicht im kontext', 'kann ich nicht beantworten', 'liegen mir nicht vor',
+            'no relevant information', 'i do not know', "i don't know", 'not in the context',
+        ];
+        foreach ($markers as $marker) {
+            if (strpos($plain, $marker) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Nachrichtenliste für die Chat-API. Der Verlauf wird als echte Rollen
+     * übergeben, damit sich der Bot wie ein normaler Chat verhält und
+     * Folgefragen versteht.
+     */
+    private function build_chat_messages(string $question, array $history, string $context, string $lang, bool $has_index): array {
+        $behaviour = "Verhalten:\n"
+            . "- Du führst ein normales, fortlaufendes Gespräch. Begrüßungen, Dank, Small Talk und "
+            . "Fragen zu dir selbst beantwortest du kurz, freundlich und direkt.\n"
+            . "- Bei Begrüßung oder Small Talk nennst du keine Quellen und sagst nicht, dass "
+            . "Informationen fehlen. Frage stattdessen freundlich, wobei du helfen kannst.\n"
+            . "- Inhaltliche Fragen zu dieser Website, dem Unternehmen, den Produkten oder Leistungen "
+            . "beantwortest du ausschließlich mit dem bereitgestellten Kontext. Steht die Information "
+            . "dort nicht, sage klar, dass du sie nicht hast - erfinde nichts und nutze kein Weltwissen.\n"
+            . "- WICHTIG: Beantworte immer die AKTUELLE Nachricht, nie die vorherige. Fragt der "
+            . "Nutzer nach etwas Neuem (z. B. erst nach Zimmern, dann nach der Telefonnummer), "
+            . "wechsle das Thema vollständig. Der Kontext unten kann noch Abschnitte zum alten "
+            . "Thema enthalten - ignoriere sie dann. Steht die Antwort auf die aktuelle Frage nicht "
+            . "im Kontext, sage das offen, statt ersatzweise das vorherige Thema zu wiederholen.\n"
+            . "- Beziehe dich auf den bisherigen Verlauf nur, wenn die aktuelle Nachricht das "
+            . "verlangt: bei Folgefragen wie \"und die Preise?\", die ohne das zuletzt besprochene "
+            . "Thema unvollständig wären.\n"
+            . "- Hakt der Nutzer zu einer bereits beantworteten Sache nach (z. B. \"sonst nichts?\", "
+            . "\"okay?\", \"welche davon?\"), nutze zuerst die vorherige Antwort und deren Quellen. "
+            . "Sage dann kurz, was bereits genannt wurde, nenne den passenden Link, wenn er im "
+            . "Verlauf oder Kontext steht, und frage bei Bedarf nach dem nächsten Schritt. Behaupte "
+            . "in diesem Fall nicht, es gebe keinen Kontext.\n"
+            . "- Nennst du Fakten aus dem Kontext, gib die ein bis zwei wichtigsten Quellen als "
+            . "direkte URL an - nicht jede Quelle zu jedem Satz.\n"
+            . "- Nenne konkrete Details aus dem Kontext: Zahlen, Preise, Uhrzeiten, Dauer, Namen, "
+            . "Bedingungen, Ausstattung. Fasse nicht vage zusammen, wenn genaue Angaben dastehen.\n"
+            . "- Stehen mehrere Varianten im Kontext (z. B. mehrere Zimmer, Tarife oder Pakete), "
+            . "nenne sie einzeln mit ihren jeweiligen Angaben statt nur einer Sammelaussage.\n"
+            . "- Antworte faktendicht statt wortreich. Jeder Satz muss eine Information tragen: "
+            . "keine Einleitungsfloskel, keine Wiederholung der Frage, keine Zusammenfassung am "
+            . "Ende. Ziel sind rund 120 bis 150 Wörter; nur wenn du mehrere Varianten aufzählen "
+            . "musst, darfst du länger werden.\n"
+            . "- Gliedere Aufzählungen als kurze Liste: ein Punkt pro Variante mit ihren konkreten "
+            . "Angaben. Fließtext nur für zusammenhängende Erklärungen.\n"
+            . "- Beantworte die gestellte Frage und höre dann auf. Zähle nicht von dir aus weitere "
+            . "Themen oder mögliche Folgefragen auf - dafür stehen Buttons unter der Antwort.\n"
+            . "- Schreibe in einem natürlichen, warmen Gesprächston - wie ein kompetenter, freundlicher "
+            . "Mensch. Variiere die Satzstruktur und vermeide steife Bausteinsätze oder wörtliche "
+            . "Wiederholungen aus dem Kontext.";
+
+        $target_name = $this->lang_display_name($lang);
+        $language_rule = "MANDATORY LANGUAGE RULE - this overrides every other instruction:\n"
+            . "- The user's current message is written in " . $target_name . ".\n"
+            . "- Write the ENTIRE answer in " . $target_name . ".\n"
+            . "- Never switch to another language, not even if the context, the system prompt or the "
+            . "previous chat history are written in a different language.\n"
+            . "- Translate facts from the context into that language. Keep proper nouns, product "
+            . "names, prices, URLs and e-mail addresses unchanged.";
+
+        $messages = [[
+            'role' => 'system',
+            'content' => $this->setting('system_prompt', self::default_system_prompt())
+                . "\n\n" . $behaviour . "\n\n" . $language_rule,
+        ]];
+
+        foreach (array_slice($history, -10) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $role = sanitize_key((string) ($item['role'] ?? $item['sender'] ?? 'user'));
+            $content = sanitize_textarea_field((string) ($item['content'] ?? $item['text'] ?? ''));
+            if ($content === '') {
+                continue;
+            }
+            $sources = $this->history_sources_note($item);
+            if ($sources !== '') {
+                $content = $this->limit_text($content, 900)
+                    . "\n\nQuellen aus dieser frueheren Antwort:\n" . $sources;
+            }
+            $messages[] = [
+                'role' => in_array($role, ['assistant', 'ai', 'bot'], true) ? 'assistant' : 'user',
+                'content' => $this->limit_text($content, 1200),
+            ];
+        }
+
+        if ($context !== '') {
+            $context_note = "Kontext aus dieser Website (nur für inhaltliche Fragen verwenden):\n" . $context;
+        } elseif ($has_index) {
+            $context_note = 'Kontext aus dieser Website: keine passenden Abschnitte gefunden. '
+                . 'Wenn die aktuelle Nachricht eine Nachfrage zum bisherigen Gespräch ist, antworte '
+                . 'aus dem bisherigen Verlauf und sage nicht, dass Kontext fehlt. Nur wenn auch der '
+                . 'Verlauf die Frage nicht beantwortet, sage bei einer inhaltlichen Frage offen, dass '
+                . 'du dazu keine Informationen hast. Bei Small Talk antworte einfach normal.';
+        } else {
+            $context_note = 'Kontext aus dieser Website: der Index ist noch leer. '
+                . 'Wenn die aktuelle Nachricht eine Nachfrage zum bisherigen Gespräch ist, antworte '
+                . 'aus dem bisherigen Verlauf. Beantworte neue inhaltliche Fragen nicht aus dem '
+                . 'Gedächtnis, sondern sage, dass du dazu noch keine Informationen hast; Small Talk '
+                . 'beantworte normal.';
+        }
+
+        $messages[] = [
+            'role' => 'user',
+            'content' => $context_note . "\n\nNachricht des Nutzers: " . $question
+                . "\n\n(Reminder: answer THIS message - \"" . $this->limit_text($question, 160)
+                . "\" - not the previous one, and answer in " . $target_name . ".)",
+        ];
+
+        return $messages;
+    }
+
+    private function history_sources_note(array $item): string {
+        $sources = [];
+        foreach ((array) ($item['sources'] ?? []) as $source) {
+            if (!is_array($source)) {
+                continue;
+            }
+            $title = sanitize_text_field((string) ($source['title'] ?? ''));
+            $url = esc_url_raw((string) ($source['url'] ?? ''));
+            if ($title === '' && $url === '') {
+                continue;
+            }
+            $sources[] = trim(($title !== '' ? $title . ': ' : '') . $url);
+            if (count($sources) >= 4) {
+                break;
+            }
+        }
+        return implode("\n", $sources);
+    }
+
+    /**
+     * @param array $query_vectors Ein Vektor oder eine Liste von Vektoren. Bei
+     *                             mehreren zählt pro Abschnitt der beste Treffer.
+     */
+    /**
+     * Hybrid-Suche: Vektor-Ähnlichkeit und Volltext-Treffer werden getrennt
+     * gerankt und per Reciprocal Rank Fusion zusammengeführt.
+     *
+     * Reine Vektorsuche verfehlt systematisch alles Wörtliche - Produktnamen,
+     * Artikelnummern, "UID", Eigennamen -, weil ein Embedding Bedeutung abbildet
+     * und nicht Zeichenketten. Der Volltext-Zweig fängt genau diese Fälle ab.
+     *
+     * Gescannt wird nur noch (id, embedding); Titel und Text werden erst für die
+     * finalen Treffer nachgeladen. Das spart bei jeder Frage den Transfer der
+     * kompletten Chunk-Tabelle.
+     *
+     * @param array  $query_vectors  Liste von Query-Vektoren. Der erste MUSS die
+     *                               aktuelle Frage sein; weitere sind aus dem
+     *                               Verlauf angereicherte Varianten und zaehlen
+     *                               nur halb, damit sie die Frage ergaenzen und
+     *                               nicht ueberstimmen.
+     * @param string $keyword_query  Rohtext für den Volltext-Zweig ('' = aus).
+     *                               Immer die unveraenderte aktuelle Frage.
+     */
+    private function search_chunks(array $query_vectors, string $keyword_query = ''): array {
+        $limit = max(1, min(32, (int) $this->setting('retriever_k', 14)));
+        // Breiteres Kandidatenfenster als die Ausgabe: die Fusion soll etwas zu
+        // wählen haben, sonst kann der Volltext-Zweig nichts beisteuern.
+        $pool = max($limit * 2, 24);
+
+        // Vektor 0 ist die aktuelle Frage und zaehlt voll; alles weitere sind
+        // aus dem Verlauf angereicherte Varianten und werden gedaempft.
+        $weights = [1.0];
+        for ($i = 1, $n = count($query_vectors); $i < $n; $i++) {
+            $weights[$i] = self::FOLLOWUP_QUERY_WEIGHT;
+        }
+        [$cosine, $ranked] = $this->rank_by_vector($query_vectors, $weights);
+        if (!$cosine && $keyword_query === '') {
+            return [];
+        }
+
+        // Small Talk erkennt man daran, dass kein einziger Abschnitt inhaltlich
+        // passt. Dann darf auch ein zufälliger Worttreffer nichts hochspülen.
+        $best_cosine = $cosine ? max($cosine) : 0.0;
+        $content_question = $best_cosine >= self::CONTEXT_MIN_SCORE;
+
+        // Themenfremdes gar nicht erst ranken. Sonst landet ein Abschnitt mit
+        // Cosinus 0.02 auf Platz 2 - nur weil sonst niemand da ist - und die
+        // Rangfusion behandelt ihn fast wie den Treffer auf Platz 1.
+        $vector_order = [];
+        foreach ($ranked as $id => $score) {
+            if (($cosine[$id] ?? 0.0) < self::CONTEXT_MIN_SCORE) {
+                continue;
+            }
+            $vector_order[] = $id;
+            if (count($vector_order) >= $pool) {
+                break;
+            }
+        }
+
+        $keyword_scores = $content_question ? $this->rank_by_keyword($keyword_query, $pool) : [];
+
+        // Reciprocal Rank Fusion: 1/(k+rang), k=60. Nur noch zwischen Vektor-
+        // und Volltext-Zweig - deren Scores sind nicht ineinander umrechenbar.
+        // Innerhalb des Vektor-Zweigs wurde bereits ueber die Cosinus-Werte
+        // gewichtet, weil die sehr wohl vergleichbar sind.
+        $rrf_k = 60;
+        $fused = [];
+        foreach ($vector_order as $rank => $id) {
+            $fused[$id] = ($fused[$id] ?? 0.0) + 1.0 / ($rrf_k + $rank + 1);
+        }
+        $rank = 0;
+        foreach ($keyword_scores as $id => $unused) {
+            $fused[$id] = ($fused[$id] ?? 0.0) + 1.0 / ($rrf_k + $rank + 1);
+            $rank++;
+        }
+        if (!$fused) {
+            return [];
+        }
+        arsort($fused);
+        $top_ids = array_slice(array_keys($fused), 0, $limit);
+
+        // Ein starker Worttreffer ohne Vektor-Nähe würde am Relevanzfilter
+        // scheitern. Bei einer inhaltlichen Frage heben wir ihn deshalb auf die
+        // Schwelle - genau dafür ist der Zweig da.
+        $keyword_floor = $keyword_scores ? 0.5 * (float) reset($keyword_scores) : 0.0;
+        $scores = [];
+        foreach ($top_ids as $id) {
+            $score = (float) ($cosine[$id] ?? 0.0);
+            if ($content_question
+                && isset($keyword_scores[$id])
+                && $keyword_scores[$id] >= $keyword_floor
+                && $score < self::CONTEXT_MIN_SCORE) {
+                $score = self::CONTEXT_MIN_SCORE;
+            }
+            $scores[$id] = $score;
+        }
+
+        // Bewusst NICHT nach Score umsortieren: die Reihenfolge kommt aus der
+        // Fusion und ist der eigentliche Punkt der Gewichtung. Der rohe Cosinus
+        // faehrt nur als Wert mit, damit die Relevanz- und Kartenschwellen
+        // weiter greifen. Wer hier nachsortiert, stellt das alte Thema wieder
+        // nach oben - und der Bot beantwortet die vorige Frage erneut.
+        return $this->hydrate_chunks($scores);
+    }
+
+    /**
+     * Kosinus-Ähnlichkeit über alle Abschnitte.
+     *
+     * Bei mehreren Query-Vektoren zählt der beste - aber die aus dem Verlauf
+     * angereicherte Variante wird gedämpft, bevor verglichen wird. Die Cosinus-
+     * Werte stammen vom selben Modell und sind direkt vergleichbar, deshalb
+     * wird hier gewichtet und nicht über Ränge fusioniert: ein Abschnitt mit
+     * 0.55 zur aktuellen Frage muss einen mit 0.22 klar schlagen, und eine
+     * Rangfusion würde daraus 1/61 gegen 1/62 machen.
+     *
+     * Bewusst ohne Textspalten: der Scan läuft über die gesamte Tabelle.
+     *
+     * @param array<int,float> $weights Gewicht je Query-Vektor (Standard 1.0).
+     * @return array{0: array<int,float>, 1: array<int,float>} [roher Cosinus, gewichtet]
+     */
+    private function rank_by_vector(array $query_vectors, array $weights = []): array {
+        global $wpdb;
+        $table = $wpdb->prefix . 'aicb_chunks';
+
+        // Einzelvektor auch akzeptieren, damit Aufrufer beides übergeben können.
+        $vectors = (isset($query_vectors[0]) && is_array($query_vectors[0])) ? $query_vectors : [$query_vectors];
+        // Query-Vektoren einmal normalisieren -> Kosinus wird zum Skalarprodukt.
+        $qnorm = [];
+        foreach ($vectors as $qv) {
+            $n = $this->normalize_vector((array) $qv);
+            if ($n) {
+                $qnorm[] = $n;
+            }
+        }
+        if (!$qnorm) {
+            return [[], []];
+        }
+
+        $cosine = [];
+        $ranked = [];
+
+        // Schneller Pfad: kompakt gepackte (bereits normalisierte) Embeddings.
+        $rows = $wpdb->get_results("SELECT id, embedding_packed FROM {$table} WHERE embedding_packed IS NOT NULL", ARRAY_A);
+        foreach ($rows ?: [] as $row) {
+            $vec = $this->unpack_embedding((string) $row['embedding_packed']);
+            if (!$vec) {
+                continue;
+            }
+            $this->score_row((int) $row['id'], $vec, $qnorm, $weights, $cosine, $ranked);
+        }
+        unset($rows);
+
+        // Fallback: alte JSON-Zeilen ohne gepacktes Embedding (bleiben nutzbar).
+        $legacy = $wpdb->get_results("SELECT id, embedding FROM {$table} WHERE embedding_packed IS NULL AND embedding IS NOT NULL", ARRAY_A);
+        foreach ($legacy ?: [] as $row) {
+            $vector = json_decode((string) $row['embedding'], true);
+            if (!is_array($vector)) {
+                continue;
+            }
+            $vn = $this->normalize_vector($vector);
+            if (!$vn) {
+                continue;
+            }
+            $this->score_row((int) $row['id'], $vn, $qnorm, $weights, $cosine, $ranked);
+        }
+        unset($legacy);
+
+        arsort($ranked);
+        return [$cosine, $ranked];
+    }
+
+    /**
+     * Einen Abschnitt gegen alle Query-Vektoren scoren.
+     *
+     * $cosine bekommt den rohen Bestwert - daran haengen die Relevanz- und
+     * Kartenschwellen, die ihre bisherige Bedeutung behalten sollen. $ranked
+     * bekommt den gewichteten Bestwert, der nur die Reihenfolge bestimmt.
+     */
+    private function score_row(int $id, array $vec, array $qnorm, array $weights, array &$cosine, array &$ranked): void {
+        $raw = 0.0;
+        $weighted = 0.0;
+        foreach ($qnorm as $idx => $q) {
+            $score = $this->dot_product($q, $vec);
+            if ($score > $raw) {
+                $raw = $score;
+            }
+            $score *= $weights[$idx] ?? 1.0;
+            if ($score > $weighted) {
+                $weighted = $score;
+            }
+        }
+        $cosine[$id] = $raw;
+        $ranked[$id] = $weighted;
+    }
+
+    /**
+     * Volltext-Rangliste (MySQL MATCH ... AGAINST). Ohne Volltext-Index oder
+     * ohne brauchbare Suchwörter bleibt der Zweig einfach leer - die
+     * Vektorsuche trägt das Ergebnis dann allein.
+     *
+     * @return array<int,float> [id => Relevanz], absteigend sortiert.
+     */
+    private function rank_by_keyword(string $query, int $pool): array {
+        global $wpdb;
+        if (!get_option(self::FULLTEXT_OPTION, false)) {
+            return [];
+        }
+        $terms = $this->keyword_terms($query);
+        if (!$terms) {
+            return [];
+        }
+        $table = $wpdb->prefix . 'aicb_chunks';
+        $needle = implode(' ', $terms);
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, MATCH(title, section, content) AGAINST (%s IN NATURAL LANGUAGE MODE) AS relevance
+             FROM {$table}
+             WHERE MATCH(title, section, content) AGAINST (%s IN NATURAL LANGUAGE MODE)
+             ORDER BY relevance DESC
+             LIMIT %d",
+            $needle,
+            $needle,
+            $pool
+        ), ARRAY_A);
+
+        $scores = [];
+        foreach ($rows ?: [] as $row) {
+            $scores[(int) $row['id']] = (float) $row['relevance'];
+        }
+        return $scores;
+    }
+
+    /**
+     * Suchwörter aus der Frage. Füllwörter fliegen raus, sonst dominieren
+     * "was", "wie" und "kostet" die Volltext-Relevanz; kurze Wörter ignoriert
+     * der Index ohnehin (innodb_ft_min_token_size).
+     *
+     * @return array<int,string>
+     */
+    private function keyword_terms(string $query): array {
+        $query = $this->str_lower(trim($query));
+        if ($query === '') {
+            return [];
+        }
+        // Alles ausser Buchstaben/Ziffern trennt Wörter. Bindestriche bleiben,
+        // damit "e-mail" oder Artikelnummern zusammenbleiben.
+        $parts = preg_split('/[^\p{L}\p{N}\-]+/u', $query) ?: [];
+        $stop = self::KEYWORD_STOPWORDS;
+        $terms = [];
+        foreach ($parts as $part) {
+            $part = trim($part, '-');
+            if ($this->str_len($part) < 3 || isset($stop[$part])) {
+                continue;
+            }
+            $terms[$part] = true;
+            if (count($terms) >= 16) {
+                break;
+            }
+        }
+        return array_keys($terms);
+    }
+
+    /**
+     * Lädt Titel und Text für die ausgewählten IDs - und gleich die direkt
+     * angrenzenden Abschnitte derselben Seite mit. Details stehen oft eine
+     * Zeile weiter: die Tabelle im einen Chunk, die Bedingungen im nächsten.
+     *
+     * @param array<int,float> $scores [id => score], absteigend sortiert.
+     */
+    /**
+     * @param array<int,float> $scores [id => score] in der gewuenschten
+     *                                 Ausgabereihenfolge. Sie wird beibehalten;
+     *                                 Nachbarn folgen direkt auf ihren Anker.
+     */
+    private function hydrate_chunks(array $scores, bool $with_neighbours = true): array {
+        global $wpdb;
+        if (!$scores) {
+            return [];
+        }
+        $table = $wpdb->prefix . 'aicb_chunks';
+
+        // Nachbar-IDs mitladen; ob sie zur selben Seite gehören, entscheidet
+        // sich unten anhand der source_id.
+        $wanted = [];
+        foreach (array_keys($scores) as $id) {
+            $wanted[(int) $id] = true;
+            if ($with_neighbours) {
+                $wanted[(int) $id - 1] = true;
+                $wanted[(int) $id + 1] = true;
+            }
+        }
+        $ids = array_values(array_filter(array_keys($wanted), fn($id) => $id > 0));
+        if (!$ids) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, source_id, source_url, title, section, content FROM {$table} WHERE id IN ({$placeholders})",
+            ...$ids
+        ), ARRAY_A);
+
+        $by_id = [];
+        foreach ($rows ?: [] as $row) {
+            $by_id[(int) $row['id']] = $row;
+        }
+
+        $anchors = [];
+        foreach ($scores as $id => $score) {
+            $id = (int) $id;
+            if (!isset($by_id[$id])) {
+                continue;
+            }
+            $row = $by_id[$id];
+            $row['score'] = (float) $score;
+            $anchors[$id] = $row;
+        }
+        if (!$with_neighbours) {
+            return array_values($anchors);
+        }
+
+        // Nachbarn direkt hinter ihren Anker, nicht irgendwo nach Score. Sie
+        // erben dessen Wert, damit sie nicht am Relevanzfilter haengenbleiben,
+        // waehrend der Abschnitt, zu dem sie gehoeren, durchkommt.
+        $cap = count($anchors) + 6;
+        $result = [];
+        $taken = [];
+        foreach ($anchors as $id => $row) {
+            if (isset($taken[$id])) {
+                continue;
+            }
+            $taken[$id] = true;
+            $result[] = $row;
+            foreach ([$id - 1, $id + 1] as $neighbour_id) {
+                if (count($taken) >= $cap || isset($taken[$neighbour_id]) || !isset($by_id[$neighbour_id])) {
+                    continue;
+                }
+                $neighbour = $by_id[$neighbour_id];
+                if ((string) $neighbour['source_id'] !== (string) $row['source_id']) {
+                    continue;
+                }
+                $neighbour['score'] = (float) $row['score'];
+                $taken[$neighbour_id] = true;
+                $result[] = $neighbour;
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * Legt den Volltext-Index an, wenn die Datenbank ihn kann. Schlägt das fehl
+     * (alte MySQL-Version, fehlende Rechte), läuft die Suche ohne Keyword-Zweig
+     * weiter - nur eben mit der alten Trefferqualität.
+     */
+    public function ensure_fulltext_index(bool $retry = false): void {
+        global $wpdb;
+        $state = get_option(self::FULLTEXT_OPTION, null);
+        if ((int) $state === 1) {
+            return;
+        }
+        // Einmal fehlgeschlagen (alte MySQL, fehlende Rechte): nicht bei jedem
+        // Aufruf erneut probieren. Ein Neu-Training versucht es wieder.
+        if ($state !== null && !$retry) {
+            return;
+        }
+        $table = $wpdb->prefix . 'aicb_chunks';
+        $existing = $wpdb->get_results("SHOW INDEX FROM {$table} WHERE Key_name = 'aicb_ft'", ARRAY_A);
+        if ($existing) {
+            update_option(self::FULLTEXT_OPTION, 1, false);
+            return;
+        }
+        $suppress = $wpdb->suppress_errors(true);
+        $ok = $wpdb->query("ALTER TABLE {$table} ADD FULLTEXT KEY aicb_ft (title, section, content)");
+        $wpdb->suppress_errors($suppress);
+        update_option(self::FULLTEXT_OPTION, $ok === false ? 0 : 1, false);
+    }
+
+    /** Einheitsvektor (L2). Leeres Array bei Nullvektor. */
+    private function normalize_vector(array $v): array {
+        $sum = 0.0;
+        foreach ($v as $x) {
+            $x = (float) $x;
+            $sum += $x * $x;
+        }
+        if ($sum <= 0.0) {
+            return [];
+        }
+        $inv = 1.0 / sqrt($sum);
+        $out = [];
+        foreach ($v as $x) {
+            $out[] = (float) $x * $inv;
+        }
+        return $out;
+    }
+
+    private function dot_product(array $a, array $b): float {
+        $n = min(count($a), count($b));
+        $sum = 0.0;
+        for ($i = 0; $i < $n; $i++) {
+            $sum += $a[$i] * $b[$i];
+        }
+        return $sum;
+    }
+
+    /** Vektor -> normalisiert -> float32 little-endian -> Base64 (kompakt, schnell). */
+    private function pack_embedding(array $vector): ?string {
+        $norm = $this->normalize_vector($vector);
+        if (!$norm) {
+            return null;
+        }
+        return base64_encode(pack('g*', ...$norm));
+    }
+
+    private function unpack_embedding(string $packed): array {
+        if ($packed === '') {
+            return [];
+        }
+        $bin = base64_decode($packed, true);
+        if ($bin === false || $bin === '') {
+            return [];
+        }
+        $vals = @unpack('g*', $bin);
+        return is_array($vals) ? array_values($vals) : [];
+    }
+
+    private function build_context(array $matches): string {
+        $max = max(3000, (int) $this->setting('max_context_chars', 30000));
+        $parts = [];
+        $chars = 0;
+        foreach ($matches as $idx => $row) {
+            $content = trim((string) $row['content']);
+            if ($content === '') {
+                continue;
+            }
+            if (strlen($content) > 3000) {
+                $content = substr($content, 0, 3000) . "\n...[gekürzt]";
+            }
+            $entry = '[' . ($idx + 1) . '] Quelle: ' . ($row['source_url'] ?: home_url('/')) . ' | Titel: ' . $row['title'] . ' | Abschnitt: ' . $row['section'] . "\n" . $content;
+            if ($chars + strlen($entry) > $max && $parts) {
+                break;
+            }
+            $parts[] = $entry;
+            $chars += strlen($entry);
+        }
+        return implode("\n\n", $parts);
+    }
+
+    private function sources_from_matches(array $matches): array {
+        $seen = [];
+        $sources = [];
+        foreach ($matches as $row) {
+            $url = esc_url_raw((string) ($row['source_url'] ?: home_url('/')));
+            if (!$url || isset($seen[$url])) {
+                continue;
+            }
+            $seen[$url] = true;
+            $sources[] = [
+                'title' => sanitize_text_field((string) $row['title']),
+                'section' => sanitize_text_field((string) $row['section']),
+                'url' => $url,
+                'score' => isset($row['score']) ? round((float) $row['score'], 4) : null,
+            ];
+        }
+        return array_slice($sources, 0, 5);
+    }
+
+    private function openai_chat(array $messages, array $overrides = []): array {
+        $payload = array_merge([
+            'model' => $this->setting('chat_model', 'gpt-4o-mini'),
+            'temperature' => 0,
+            'messages' => $messages,
+        ], $overrides);
+        $data = $this->openai_request('chat/completions', $payload);
+        return [
+            'answer' => $data['choices'][0]['message']['content'] ?? '',
+            'usage' => $data['usage'] ?? [],
+        ];
+    }
+
+    private function embed_text(string $text, int $dims = 0): array {
+        $vectors = $this->embed_texts([$text], $dims);
+        return $vectors[0] ?? [];
+    }
+
+    /**
+     * Dimensionszahl der gespeicherten Vektoren. Die Suchanfrage muss exakt
+     * dazu passen: ein auf 1024 gekürzter Query-Vektor gegen 3072er Einträge
+     * liefert systematisch zu niedrige Werte, und die Relevanzschwelle würde
+     * still reißen. So bleibt ein alter Index gültig, bis neu trainiert wird.
+     */
+    private function index_dimensions(): int {
+        global $wpdb;
+        $cached = (int) get_option(self::INDEX_DIMS_OPTION, 0);
+        if ($cached > 0) {
+            return $cached;
+        }
+        $table = $wpdb->prefix . 'aicb_chunks';
+        $packed = (string) $wpdb->get_var("SELECT embedding_packed FROM {$table} WHERE embedding_packed IS NOT NULL LIMIT 1");
+        if ($packed !== '') {
+            $bin = base64_decode($packed, true);
+            $dims = $bin === false ? 0 : intdiv(strlen($bin), 4);
+            if ($dims > 0) {
+                update_option(self::INDEX_DIMS_OPTION, $dims, false);
+                return $dims;
+            }
+        }
+        // Leerer Index: die Einstellung gilt, das naechste Training legt sie fest.
+        return (int) $this->setting('embedding_dims', 1024);
+    }
+
+    /**
+     * @param int $dims Gewuenschte Dimensionszahl, 0 = Einstellung verwenden.
+     *                  Die Suche gibt hier die Dimension des Index vor.
+     */
+    private function embed_texts(array $texts, int $dims = 0): array {
+        $texts = array_values(array_filter(array_map(fn($t) => trim((string) $t), $texts), fn($t) => $t !== ''));
+        if (!$texts) {
+            return [];
+        }
+        $model = (string) $this->setting('embedding_model', 'text-embedding-3-large');
+        $payload = ['model' => $model, 'input' => $texts];
+        $dims = $dims > 0 ? $dims : (int) $this->setting('embedding_dims', 1024);
+        // Nur die -3-Modelle koennen gekuerzte Vektoren ausliefern (Matryoshka).
+        if ($dims > 0 && strpos($model, 'text-embedding-3') === 0) {
+            $payload['dimensions'] = $dims;
+        }
+        $data = $this->openai_request('embeddings', $payload);
+        $vectors = [];
+        foreach (($data['data'] ?? []) as $item) {
+            $vectors[(int) $item['index']] = $item['embedding'];
+        }
+        ksort($vectors);
+        return array_values($vectors);
+    }
+
+    private function openai_request(string $path, array $payload): array {
+        $api_key = trim((string) $this->setting('openai_api_key', ''));
+        if ($api_key === '') {
+            throw new RuntimeException('OpenAI API Key fehlt. Bitte im Plugin speichern.');
+        }
+
+        $response = wp_remote_post('https://api.openai.com/v1/' . ltrim($path, '/'), [
+            'timeout' => 60,
+            'headers' => [
+                'Authorization' => 'Bearer ' . $api_key,
+                'Content-Type' => 'application/json',
+            ],
+            'body' => wp_json_encode($payload),
+        ]);
+
+        if (is_wp_error($response)) {
+            throw new RuntimeException($response->get_error_message());
+        }
+        $code = (int) wp_remote_retrieve_response_code($response);
+        $body = (string) wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+        if ($code < 200 || $code >= 300) {
+            $message = $data['error']['message'] ?? substr($body, 0, 300);
+            throw new RuntimeException('OpenAI Fehler ' . $code . ': ' . $message);
+        }
+        if (!is_array($data)) {
+            throw new RuntimeException('OpenAI Antwort konnte nicht gelesen werden.');
+        }
+        return $data;
+    }
+
+    private function create_session_payload(): array {
+        global $wpdb;
+        $token = wp_generate_password(48, false, false);
+        $hash = $this->hash_token($token);
+        $now = gmdate('Y-m-d H:i:s');
+        $expires = gmdate('Y-m-d H:i:s', time() + self::SESSION_TTL);
+        $wpdb->insert($wpdb->prefix . 'aicb_sessions', [
+            'token_hash' => $hash,
+            'expires_at' => $expires,
+            'created_at' => $now,
+            'last_seen_at' => $now,
+            'ip_hash' => $this->request_ip_hash(),
+            'user_agent' => substr(sanitize_text_field((string) ($_SERVER['HTTP_USER_AGENT'] ?? '')), 0, 255),
+            'messages' => 0,
+        ], ['%s', '%s', '%s', '%s', '%s', '%s', '%d']);
+        return [
+            'token' => $token,
+            'session_hash' => $hash,
+            'expires_at' => gmdate('c', time() + self::SESSION_TTL),
+        ];
+    }
+
+    private function ensure_session_payload(string $token): array {
+        global $wpdb;
+        $token = trim($token);
+        if ($token !== '') {
+            $hash = $this->hash_token($token);
+            $row = $wpdb->get_row($wpdb->prepare(
+                "SELECT token_hash, expires_at FROM {$wpdb->prefix}aicb_sessions WHERE token_hash = %s AND expires_at > %s",
+                $hash,
+                gmdate('Y-m-d H:i:s')
+            ), ARRAY_A);
+            if ($row) {
+                return [
+                    'token' => $token,
+                    'session_hash' => $hash,
+                    'expires_at' => gmdate('c', strtotime((string) $row['expires_at'])),
+                ];
+            }
+        }
+        return $this->create_session_payload();
+    }
+
+    private function touch_session(string $hash): void {
+        global $wpdb;
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$wpdb->prefix}aicb_sessions SET last_seen_at = %s, messages = messages + 1 WHERE token_hash = %s",
+            gmdate('Y-m-d H:i:s'),
+            $hash
+        ));
+    }
+
+    private function record_event(?string $session_hash, string $question, ?string $answer, string $status, ?string $error, array $usage): int {
+        global $wpdb;
+        $wpdb->insert($wpdb->prefix . 'aicb_events', [
+            'session_hash' => $session_hash,
+            'user_id' => get_current_user_id() ?: null,
+            'question' => $question,
+            'answer' => $answer,
+            'status' => $status,
+            'error' => $error,
+            'input_tokens' => (int) ($usage['prompt_tokens'] ?? 0),
+            'output_tokens' => (int) ($usage['completion_tokens'] ?? 0),
+            'model' => $this->setting('chat_model', 'gpt-4o-mini'),
+            'feedback' => 0,
+            'created_at' => gmdate('Y-m-d H:i:s'),
+        ], ['%s', '%d', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%d', '%s']);
+        return (int) $wpdb->insert_id;
+    }
+
+    /**
+     * Page-spezifische Einstiegsfragen für das Greeting-ähnliche Popup.
+     */
+    private const PAGE_SUGGESTIONS_SYSTEM = <<<'PROMPT'
+Du erzeugst kurze Einstiegsfragen für ein Chat-Popup auf genau der aktuellen Website-Unterseite.
+Regeln:
+- Erzeuge 2 bis 3 Fragen, die ein Besucher auf DIESER Seite wahrscheinlich stellen würde.
+- Die Fragen müssen konkret zum Seitentitel und Kontext passen.
+- Nutze nur Informationen aus dem Kontext. Erfinde keine Preise, Zahlen, Leistungen, Öffnungszeiten oder Orte.
+- Keine allgemeinen Fragen wie "Wie kann ich helfen?".
+- Keine Kontaktfrage, außer die aktuelle Seite handelt klar von Kontakt, Buchung, Beratung oder Anfrage.
+- Jede Frage ist ein vollständiger, natürlicher Satz in der vorgegebenen Sprache.
+- Maximal 95 Zeichen pro Frage.
+- Keine Emojis, keine Anführungszeichen, kein Markdown.
+Antworte ausschließlich mit JSON: {"questions":["...","...","..."]}
+PROMPT;
+
+    private function generate_page_suggestions(string $url, string $title, string $page_text, string $lang): array {
+        if (trim((string) $this->setting('openai_api_key', '')) === '') {
+            return [];
+        }
+
+        $context = $this->page_suggestion_context($url, $title, $page_text);
+        if (trim($context) === '') {
+            return [];
+        }
+
+        $chat = $this->openai_chat([
+            ['role' => 'system', 'content' => self::PAGE_SUGGESTIONS_SYSTEM],
+            ['role' => 'user', 'content' => implode("\n\n", [
+                'Sprache der Fragen: ' . $this->lang_display_name($lang),
+                'Aktuelle URL: ' . $url,
+                'Aktueller Seitentitel: ' . ($title !== '' ? $title : '(unbekannt)'),
+                "Kontext der aktuellen Seite:\n" . $context,
+            ])],
+        ], ['temperature' => 0.35, 'max_tokens' => 220]);
+
+        $payload = $this->decode_json_object((string) ($chat['answer'] ?? ''));
+        $raw_questions = is_array($payload['questions'] ?? null) ? $payload['questions'] : [];
+        $questions = [];
+        $seen = [];
+        foreach ($raw_questions as $item) {
+            $question = is_array($item) ? (string) ($item['question'] ?? $item['label'] ?? '') : (string) $item;
+            $question = trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags($question)), " \t\n\r\0\x0B\"'");
+            if ($question === '') {
+                continue;
+            }
+            $question = $this->limit_text($question, 110);
+            if ($this->is_blocked_page_suggestion($question, $url, $title, $context)) {
+                continue;
+            }
+            $key = $this->str_lower(trim($question, " ?!.\t\n\r\0\x0B"));
+            if ($key === '' || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $questions[] = ['question' => $question];
+            if (count($questions) >= 3) {
+                break;
+            }
+        }
+        return count($questions) >= 2 ? $questions : [];
+    }
+
+    private function is_blocked_page_suggestion(string $question, string $url, string $title, string $context): bool {
+        $text = $this->str_lower($question);
+        if ($text === '') {
+            return true;
+        }
+
+        $page_signal = $this->str_lower($url . ' ' . $title);
+        $contact_page = preg_match('/(kontakt|contact|anfrage|request|consultation|termin|appointment|booking|buchen|demo)/u', $page_signal) === 1;
+        $contact_intent = preg_match('/(kontakt|contact|erreichen|reach|sprechen|speak|reden|talk|telefon|phone|email|e-mail|mail|termin|appointment|meeting|consultation|anfrage|request|buchen|book)/u', $text) === 1;
+        if ($contact_intent && !$contact_page) {
+            return true;
+        }
+
+        $person_contact = preg_match('/(gruender\w*|gründer\w*|founder\w*|kund\w*|client\w*|customer\w*)/u', $text) === 1
+            && preg_match('/(sprechen|speak|reden|talk|kontakt|contact|erreichen|reach|treffen|meet|meeting)/u', $text) === 1;
+
+        return $person_contact && !$contact_page;
+    }
+
+    private function page_suggestion_context(string $url, string $title, string $page_text): string {
+        $parts = [];
+        if ($title !== '') {
+            $parts[] = 'Seitentitel: ' . $this->limit_text($title, 180);
+        }
+        if ($page_text !== '') {
+            $parts[] = "Sichtbare Seitensignale:\n" . $this->limit_text($page_text, 900);
+        }
+
+        foreach ($this->indexed_rows_for_url($url, $title) as $idx => $row) {
+            $content = trim((string) ($row['content'] ?? ''));
+            if ($content === '') {
+                continue;
+            }
+            $heading = trim((string) ($row['title'] ?? ''));
+            $section = trim((string) ($row['section'] ?? ''));
+            $parts[] = '[' . ($idx + 1) . '] ' . ($heading !== '' ? $heading : $url)
+                . ($section !== '' ? ' - ' . $section : '')
+                . "\n" . $this->limit_text($content, 900);
+            if (count($parts) >= 6) {
+                break;
+            }
+        }
+
+        return $this->limit_text(implode("\n\n", array_filter($parts)), 3600);
+    }
+
+    private function indexed_rows_for_url(string $url, string $title): array {
+        global $wpdb;
+        $table = $wpdb->prefix . 'aicb_chunks';
+        $url_no_query = strtok($url, '?') ?: $url;
+        $path = (string) wp_parse_url($url_no_query, PHP_URL_PATH);
+        $path = $path !== '' ? untrailingslashit($path) : '/';
+
+        if ($path === '' || $path === '/') {
+            $home = untrailingslashit(home_url('/'));
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT source_url, title, section, content FROM {$table}
+                 WHERE source_url = %s OR source_url = %s
+                 ORDER BY id ASC LIMIT 5",
+                $home,
+                trailingslashit($home)
+            ), ARRAY_A);
+        } else {
+            $like = '%' . $wpdb->esc_like($path) . '%';
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT source_url, title, section, content FROM {$table}
+                 WHERE source_url LIKE %s
+                 ORDER BY id ASC LIMIT 5",
+                $like
+            ), ARRAY_A);
+        }
+
+        if ((!$rows || !is_array($rows)) && $title !== '') {
+            $needle = '%' . $wpdb->esc_like($this->limit_text($title, 80)) . '%';
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT source_url, title, section, content FROM {$table}
+                 WHERE title LIKE %s
+                 ORDER BY updated_at DESC, id ASC LIMIT 4",
+                $needle
+            ), ARRAY_A);
+        }
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * Buttons unter der Antwort. Zuerst von der KI aus dem Gespräch erzeugt,
+     * bei Fehlern die statischen Texte.
+     */
+    private function build_actions(array $candidates, string $question, string $answer, array $history, string $lang, array $matches, array $offered = []): array {
+        try {
+            $result = $this->ai_quick_actions($candidates, $question, $answer, $history, $lang, $matches, $offered);
+            if (!empty($result['actions'])) {
+                return $result;
+            }
+            // Das Modell hat geurteilt (content/card), aber keine gültigen Buttons
+            // geliefert. Urteil behalten (verhindert die falsche Karten-Notlösung)
+            // und stattdessen relevante Fallback-Buttons anhängen.
+            if (($result['content'] ?? null) !== null) {
+                $result['actions'] = $this->fallback_actions($lang, $question, $offered);
+                return $result;
+            }
+        } catch (Throwable $e) {
+            error_log('AICB action generation failed: ' . $e->getMessage());
+        }
+        // Harter Ausfall (kein Key / Exception): relevante Fallback-Buttons, keine Karte.
+        return ['actions' => $this->fallback_actions($lang, $question, $offered), 'lang' => $lang, 'content' => null, 'card' => null];
+    }
+
+    /**
+     * Fallback-Buttons ohne KI: relevante Themen-Folgefragen (aus der Widget-
+     * Konfiguration) + ein Kontakt-Button, falls vorhanden. Bewusst KEINE
+     * generischen "Mehr Details"-Buttons mehr - lieber weniger, aber passend.
+     */
+    private function fallback_actions(string $lang, string $question, array $offered = []): array {
+        $settings = $this->settings();
+        $pack = $this->lang_pack($lang);
+        $actions = [];
+
+        if (!empty($settings['contact_url'])) {
+            $actions[] = [
+                'label' => $pack['action_contact'],
+                'type' => 'link',
+                'url' => esc_url_raw((string) $settings['contact_url']),
+            ];
+        } elseif (!empty($settings['contact_email'])) {
+            $actions[] = [
+                'label' => $pack['action_email'],
+                'type' => 'link',
+                'url' => 'mailto:' . sanitize_email((string) $settings['contact_email']),
+            ];
+        }
+
+        // Wortmengen der aktuellen Frage + schon gezeigter Buttons, um Wiederholung
+        // zu vermeiden.
+        $avoid = [$this->compare_tokens($question)];
+        foreach (array_slice(array_filter(array_map('trim', $offered)), -10) as $shown) {
+            $avoid[] = $this->compare_tokens($shown);
+        }
+
+        foreach ((array) ($this->public_widget_config()['topics'] ?? []) as $topic) {
+            if (count($actions) >= 3) {
+                break;
+            }
+            $label = $this->clean_action_label((string) ($topic['label'] ?? ''));
+            $topic_question = trim((string) ($topic['question'] ?? ''));
+            if ($label === '' || $topic_question === '') {
+                continue;
+            }
+            if ($this->is_repeat_action($topic_question, $avoid) || $this->is_repeat_action($label, $avoid)) {
+                continue;
+            }
+            $actions[] = [
+                'label' => $label,
+                'type' => 'question',
+                'question' => $this->limit_text($topic_question, 180),
+            ];
+        }
+
+        return array_slice($actions, 0, 3);
+    }
+
+    private const AI_ACTIONS_SYSTEM = <<<'PROMPT'
+WICHTIGSTE FORMREGEL: label ist eine Menü-Beschriftung aus ZWEI bis DREI Wörtern. Zähle die Wörter, bevor du antwortest. Vier oder mehr Wörter sind verboten, ebenso Fragen und ganze Sätze.
+
+Du erzeugst die Klick-Buttons, die unter der Antwort eines Chat-Assistenten auf einer Firmen-Website stehen.
+Regeln:
+- Zwei bis drei Buttons, die genau zu diesem Gespräch passen und den Nutzer einen Schritt weiterbringen.
+- Jeder Button öffnet ein NEUES Thema, das im bisherigen Gespräch noch nicht vorkam. Wiederhole nie die aktuelle Frage, eine frühere Frage oder den Inhalt der Antwort - auch nicht anders formuliert.
+- Die Buttons sollen neugierig machen: nenne Themen, die der Nutzer wahrscheinlich als nächstes interessant findet.
+- label: zwei bis drei Wörter, höchstens 24 Zeichen. Es ist eine Menü-Beschriftung, keine Frage und kein Satz. Gut: "Zimmer ansehen", "Preise & Pauschalen", "Anfahrt", "Termin anfragen". Schlecht: "Wo befindet sich die Zentrale?", "Ich möchte mehr wissen". Keine Emojis, kein Satzzeichen am Ende, niemals abgeschnittene Wortgruppen.
+- question: die Nachricht, die beim Klick als Nutzerfrage gesendet wird - ein vollständiger, eigenständig verständlicher Satz.
+- SPRACHE, wichtigste Regel: Schreibe ALLE Werte von label und question ausschließlich in der Sprache, die im Kontext unter "Sprache der Buttons" steht. Diese Anweisung ist auf Deutsch, das ändert daran nichts; auch ältere Nachrichten im Gespräch ändern daran nichts. Ist die Sprache Türkisch, heißt ein Anruf-Button "Ara" und nicht "Anrufen".
+- Erfinde nichts: keine Preise, Zahlen, Angebote, Telefonnummern oder URLs, die nicht im Kontext stehen.
+- Aktions-Buttons (type "link") nur mit einem target, das der Kontext unter "Verfügbare Aktionen" auflistet: "card", "contact", "phone" oder "email". Die Adresse setzt das System, du gibst nie eine URL oder Nummer aus. Bei type "link" kein question angeben.
+- Wenn "phone" verfügbar ist und Anrufen im Gespräch sinnvoll wäre (Beratung, Termin, dringende Rückfrage, Kontaktwunsch), setze einen Anruf-Button an die erste Stelle; das Label nennt das Anrufen.
+- Höchstens zwei Aktions-Buttons, jedes target nur einmal.
+- Mindestens ein Button muss type "question" sein und unter den Aktions-Buttons stehen.
+- Keine zwei Buttons mit gleicher Bedeutung.
+Gib zusätzlich an:
+- "card": Nummer der Seite aus "Verfügbare Seiten", die als Karte unter der Antwort erscheinen soll.
+  Wähle nur eine Seite, die genau das Thema der Antwort vertieft und dem Nutzer echten Mehrwert bringt.
+  Passt keine Seite wirklich zum Inhalt der Antwort, ist die Antwort allgemein, eine Begrüßung oder eine
+  Absage, gib 0 an. Bei kurzen Faktenantworten (z. B. UID/Steuernummer, Telefonnummer, Adresse, Datum,
+  Öffnungszeit, Ja/Nein) ist fast immer 0 richtig - verlinke NICHT ein zufälliges Projekt oder eine
+  Referenz, nur weil sie im Kontext auftaucht. Im Zweifel immer 0 - eine unpassende Karte ist schlechter als keine.
+- "lang": ISO-639-1-Code der Sprache, in der die Antwort des Assistenten geschrieben ist.
+- "content": true, wenn die Antwort eine inhaltliche Auskunft zu Website, Unternehmen, Produkten oder Leistungen gibt. false, wenn sie nur Begrüßung, Dank, Small Talk, Rückfrage oder die Aussage ist, dass keine Informationen vorliegen.
+Antworte ausschließlich mit JSON in dieser Form: {"card": 0, "lang": "de", "content": true, "actions": [{"label": "...", "type": "question", "question": "..."}]}
+PROMPT;
+
+    private function ai_quick_actions(array $candidates, string $question, string $answer, array $history, string $lang, array $matches, array $offered = []): array {
+        $settings = $this->settings();
+        if (trim((string) ($settings['openai_api_key'] ?? '')) === '') {
+            return ['actions' => [], 'lang' => '', 'content' => null, 'card' => null];
+        }
+
+        $sources = $this->sources_text($matches);
+        $contact_page = esc_url_raw((string) ($settings['contact_url'] ?? ''));
+        $configured_phone = $this->normalize_phone((string) ($settings['contact_phone'] ?? ''));
+        $configured_email = sanitize_email((string) ($settings['contact_email'] ?? ''));
+
+        // Nummer/Adresse aus der Antwort nur, wenn sie in den Quellen belegt ist -
+        // sonst wählt der Button eine erfundene Nummer.
+        $phone = $this->phone_from_text($answer);
+        if ($phone !== '' && !$this->phone_in_sources($phone, $sources)) {
+            $phone = '';
+        }
+        $email = $this->email_from_text($answer);
+        if ($email !== '' && stripos($sources, $email) === false) {
+            $email = '';
+        }
+        $phone = $phone !== '' ? $phone : $configured_phone;
+        $email = $email !== '' ? $email : $configured_email;
+
+        $targets = [
+            'card' => '',
+            'contact' => $contact_page,
+            'phone' => $phone !== '' ? 'tel:' . $phone : '',
+            'email' => $email !== '' ? 'mailto:' . $email : '',
+        ];
+
+        $available = array_filter([
+            $candidates ? 'card (öffnet die Seite, die du unter "card" auswählst)' : '',
+            $targets['contact'] !== '' ? 'contact (Kontaktseite des Unternehmens)' : '',
+            $phone !== '' ? 'phone (wählt ' . $phone . ' direkt auf dem Gerät)' : '',
+            $email !== '' ? 'email (öffnet eine Mail an ' . $email . ')' : '',
+        ]);
+
+        $history_lines = [];
+        foreach (array_slice($history, -4) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $role = strtolower((string) ($item['role'] ?? $item['sender'] ?? 'user'));
+            $content = trim((string) ($item['content'] ?? $item['text'] ?? ''));
+            if ($content === '') {
+                continue;
+            }
+            $speaker = in_array($role, ['assistant', 'ai', 'bot'], true) ? 'Assistent' : 'Nutzer';
+            $history_lines[] = $speaker . ': ' . $this->limit_text($content, 240);
+        }
+
+        $topics = [];
+        foreach ((array) ($this->public_widget_config()['topics'] ?? []) as $topic) {
+            $label = trim((string) ($topic['label'] ?? ''));
+            if ($label !== '') {
+                $topics[] = $label;
+            }
+        }
+
+        $context = ['Sprache der Buttons: ' . $this->lang_display_name($lang)];
+        $context[] = 'Verfügbare Aktionen (die Klammertexte sind nur Erklärungen, nie als Label '
+            . 'übernehmen): ' . ($available ? implode(', ', $available) : 'keine');
+        if ($history_lines) {
+            $context[] = "Bisheriges Gespräch:\n" . implode("\n", $history_lines);
+        }
+        if ($topics) {
+            $context[] = 'Themen des Unternehmens: ' . implode(', ', array_slice($topics, 0, 8));
+        }
+        if ($candidates) {
+            $lines = [];
+            foreach ($candidates as $idx => $row) {
+                $path = (string) wp_parse_url((string) $row['source_url'], PHP_URL_PATH);
+                $lines[] = ($idx + 1) . ') ' . trim((string) $row['title'])
+                    . (trim((string) ($row['section'] ?? '')) !== '' ? ' - Abschnitt: ' . $row['section'] : '')
+                    . ' - ' . ($path ?: $row['source_url']);
+            }
+            $context[] = "Verfügbare Seiten (für \"card\"):\n" . implode("\n", $lines);
+        } else {
+            $context[] = 'Verfügbare Seiten: keine - "card" muss 0 sein.';
+        }
+        $shown = array_slice(array_filter(array_map('trim', $offered)), -10);
+        if ($shown) {
+            $context[] = "Diese Buttons wurden im Gespräch schon angezeigt - biete keinen davon noch "
+                . "einmal an, auch nicht anders formuliert:\n- " . implode("\n- ", $shown);
+        }
+        $context[] = 'Aktuelle Frage des Nutzers: ' . $this->limit_text($question, 300);
+        $context[] = "Antwort des Assistenten:\n" . $this->limit_text($this->strip_sources_tail($answer), 900);
+
+        $chat = $this->openai_chat([
+            ['role' => 'system', 'content' => self::AI_ACTIONS_SYSTEM],
+            ['role' => 'user', 'content' => implode("\n\n", $context)],
+        ], ['temperature' => 0.4, 'max_tokens' => 400]);
+
+        $payload = $this->decode_json_object((string) ($chat['answer'] ?? ''));
+        if (!$payload || !is_array($payload['actions'] ?? null)) {
+            return ['actions' => [], 'lang' => '', 'content' => null, 'card' => null];
+        }
+        $detected = self::normalize_lang((string) ($payload['lang'] ?? ''));
+        $is_content = array_key_exists('content', $payload) ? (bool) $payload['content'] : null;
+
+        // Karte: nur die vom Modell gewählte Seite, sonst keine.
+        $choice = (int) ($payload['card'] ?? 0);
+        $chosen = ($choice >= 1 && $choice <= count($candidates)) ? $candidates[$choice - 1] : null;
+        if ($chosen) {
+            $targets['card'] = esc_url_raw((string) $chosen['source_url']);
+        }
+
+        // Aktionen stehen vor den Folgefragen - sie gehören optisch zur Karte.
+        $links = [];
+        $questions = [];
+        $used = [];
+        // Wortmengen der bisherigen Fragen und der schon gezeigten Buttons.
+        $asked_sets = [$this->compare_tokens($question)];
+        foreach (array_slice($history, -6) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $role = strtolower((string) ($item['role'] ?? $item['sender'] ?? 'user'));
+            if (in_array($role, ['assistant', 'ai', 'bot'], true)) {
+                continue;
+            }
+            $content = trim((string) ($item['content'] ?? $item['text'] ?? ''));
+            if ($content !== '') {
+                $asked_sets[] = $this->compare_tokens($content);
+            }
+        }
+        $shown_sets = [];
+        foreach ($shown as $label) {
+            $shown_sets[] = $this->compare_tokens($label);
+        }
+        foreach (array_slice($payload['actions'], 0, 6) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $label = $this->clean_action_label((string) ($item['label'] ?? ''));
+            if ($label === '') {
+                continue;
+            }
+            $type = strtolower(trim((string) ($item['type'] ?? 'question')));
+            $target = strtolower(trim((string) ($item['target'] ?? $item['url_ref'] ?? '')));
+            // Das Modell schreibt oft "type": "phone" statt type link + target phone.
+            if ($target === '' && array_key_exists($type, $targets)) {
+                $target = $type;
+                $type = 'link';
+            }
+            if ($type === 'link') {
+                $url = $targets[$target] ?? '';
+                // Modell-URLs werden nie übernommen - nur die bekannten Ziele.
+                if ($url === '' || isset($used[$target]) || count($links) >= 2) {
+                    continue;
+                }
+                $links[] = ['label' => $label, 'type' => 'link', 'url' => $url];
+                $used[$target] = true;
+                continue;
+            }
+            if (count($questions) >= 3) {
+                continue;
+            }
+            $follow_up = trim(preg_replace('/\s+/', ' ', (string) ($item['question'] ?? '')));
+            // Ohne Fragetext ist es ein missglückter Aktions-Button ("Anrufen").
+            if ($this->str_len($follow_up) < 6) {
+                continue;
+            }
+            // Kein Button, der wiederholt, was schon gefragt oder gezeigt wurde.
+            if ($this->is_repeat_action($follow_up, $asked_sets)
+                || $this->is_repeat_action($label, $shown_sets, 0.6, 1)) {
+                continue;
+            }
+            $questions[] = [
+                'label' => $label,
+                'type' => 'question',
+                'question' => $this->limit_text($follow_up, 180),
+            ];
+        }
+
+        $actions = array_merge($links, $questions);
+        $seen = [];
+        $unique = [];
+        foreach ($actions as $action) {
+            $key = $this->str_lower($action['label']);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $unique[] = $action;
+        }
+        return [
+            'actions' => array_slice($unique, 0, 3),
+            'lang' => $detected,
+            'content' => $is_content,
+            'card' => $chosen,
+        ];
+    }
+
+    /**
+     * mbstring ist nicht auf jedem Hoster installiert - ohne Fallback wäre ein
+     * Fatal Error im Chat die Folge.
+     */
+    private function str_len(string $value): int {
+        return function_exists('mb_strlen') ? mb_strlen($value) : strlen($value);
+    }
+
+    private function str_cut(string $value, int $start, ?int $length = null): string {
+        if (function_exists('mb_substr')) {
+            return mb_substr($value, $start, $length);
+        }
+        return $length === null ? substr($value, $start) : substr($value, $start, $length);
+    }
+
+    private function str_lower(string $value): string {
+        return function_exists('mb_strtolower') ? mb_strtolower($value) : strtolower($value);
+    }
+
+    private function str_rpos(string $value, string $needle) {
+        return function_exists('mb_strrpos') ? mb_strrpos($value, $needle) : strrpos($value, $needle);
+    }
+
+    private function sources_text(array $matches): string {
+        $parts = [];
+        foreach (array_slice($matches, 0, 6) as $row) {
+            foreach (['content', 'title', 'section', 'source_url'] as $key) {
+                $value = (string) ($row[$key] ?? '');
+                if ($value !== '') {
+                    $parts[] = $value;
+                }
+            }
+        }
+        return implode("\n", $parts);
+    }
+
+    private function normalize_phone(string $raw): string {
+        $cleaned = preg_replace('/[^\d+]/', '', $raw);
+        if (strpos($cleaned, '00') === 0) {
+            $cleaned = '+' . substr($cleaned, 2);
+        }
+        $digits = ltrim($cleaned, '+');
+        if ($digits === '' || !ctype_digit($digits) || strlen($digits) < 7 || strlen($digits) > 15) {
+            return '';
+        }
+        return $cleaned;
+    }
+
+    /**
+     * Erste plausible Telefonnummer. Akzeptiert wird eine Zahlenfolge nur mit
+     * Landesvorwahl, mit Hinweiswort davor oder als gegliederte Rufnummer -
+     * sonst landen Preise, Jahreszahlen und Uhrzeiten im Anruf-Button.
+     */
+    private function phone_from_text(string $text): string {
+        if (!preg_match_all('/\+?\d[\d\s().\-\/]{5,}\d/', $text, $found, PREG_OFFSET_CAPTURE)) {
+            return '';
+        }
+        $cue = '/(?:tel|telefon|telephone|fon|phone|mobil|handy|hotline|zentrale|durchwahl|festnetz|whatsapp|anruf|anrufen|rufen sie|ruf uns|erreichbar|erreichst|erreichen sie|erreichen|call us|call|nummer|number)[^0-9+]{0,20}$/i';
+        foreach ($found[0] as $match) {
+            $candidate = (string) $match[0];
+            $offset = (int) $match[1];
+            $number = $this->normalize_phone($candidate);
+            if ($number === '') {
+                continue;
+            }
+            $before = substr($text, max(0, $offset - 40), min(40, $offset));
+            $grouped = strpos($candidate, '/') !== false && strlen(ltrim($number, '+')) >= 9;
+            if (strpos($number, '+') === 0 || $grouped || preg_match($cue, $before)) {
+                return $number;
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Verglichen wird gegen echte Nummern-Kandidaten im Quelltext, nicht gegen
+     * alle Ziffern am Stück - sonst gilt eine erfundene Nummer als belegt.
+     */
+    private function phone_in_sources(string $number, string $sources): bool {
+        $digits = preg_replace('/\D/', '', $number);
+        if (strlen($digits) < 7) {
+            return false;
+        }
+        $tail = substr($digits, -7);
+        if (!preg_match_all('/\+?\d[\d\s().\-\/]{5,}\d/', $sources, $found)) {
+            return false;
+        }
+        foreach ($found[0] as $candidate) {
+            $clean = preg_replace('/\D/', '', $candidate);
+            if (strlen($clean) >= 7 && substr($clean, -7) === $tail) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function email_from_text(string $text): string {
+        if (preg_match('/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/', $text, $match)) {
+            return sanitize_email($match[0]);
+        }
+        return '';
+    }
+
+    // Wörter, mit denen ein Satz beginnt - als Beschriftung unbrauchbar.
+    private const LABEL_SENTENCE_STARTERS = [
+        'wo', 'wie', 'was', 'wann', 'warum', 'wer', 'welche', 'welcher', 'welches', 'ist', 'sind',
+        'gibt', 'kann', 'haben', 'habt', 'ich', 'du', 'sie', 'wir', 'möchte', 'möchte', 'how',
+        'what', 'where', 'when', 'why', 'who', 'which', 'can', 'do', 'does', 'is', 'are', 'i',
+        'you', 'we', 'nasıl', 'nasil', 'nerede', 'hangi', 'kim', 'quel', 'quelle', 'comment',
+        'donde', 'dónde', 'como', 'cómo', 'dove', 'quanto',
+    ];
+
+    // Füllwörter, mit denen ein Label nicht enden darf.
+    private const LABEL_TAIL_STOPWORDS = [
+        'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einen', 'einem', 'einer',
+        'und', 'oder', 'zu', 'zum', 'zur', 'in', 'im', 'an', 'am', 'auf', 'für', 'für', 'mit',
+        'von', 'bei', 'sich', 'wie', 'wo', 'was', 'ist', 'sind', 'the', 'a', 'an', 'and', 'or',
+        'to', 'for', 'with', 'of', 'on', 'at', 'is', 'are', 'how', 'what', 'where', 'my', 'your',
+        've', 'ile', 'için', 'icin', 'bir', 'de', 'la', 'le', 'les', 'des', 'el', 'il', 'et',
+    ];
+
+    /** Button-Beschriftung: kurze Menü-Bezeichnung, nie ein Satz oder Fragment. */
+    private function clean_action_label(string $value): string {
+        $label = trim(preg_replace('/\s+/u', ' ', $value), " \t\n\r\0\x0B\"'");
+        $label = trim(preg_replace('/[.!?;:,\-\x{2026}]+$/u', '', $label));
+        if ($label === '') {
+            return '';
+        }
+        $words = explode(' ', $label);
+        // Ein Satz lässt sich nicht zu einem guten Label kürzen.
+        if (count($words) > 5) {
+            return '';
+        }
+        $first = $this->str_lower(trim($words[0], '¿¡'));
+        if (count($words) > 1 && in_array($first, self::LABEL_SENTENCE_STARTERS, true)) {
+            return '';
+        }
+        if (count($words) > 3) {
+            $words = array_slice($words, 0, 3);
+        }
+        while ($words && $this->str_len(implode(' ', $words)) > 24) {
+            array_pop($words);
+        }
+        while (count($words) > 1 && in_array($this->str_lower(trim(end($words), '.,;:!?')), self::LABEL_TAIL_STOPWORDS, true)) {
+            array_pop($words);
+        }
+        if (count($words) === 1 && in_array($this->str_lower($words[0]), self::LABEL_TAIL_STOPWORDS, true)) {
+            return '';
+        }
+        return trim(preg_replace('/[.!?;:,\-]+$/u', '', implode(' ', $words)));
+    }
+
+    /** Wortmenge für den Ähnlichkeitsvergleich (ohne Füllwörter). */
+    private function compare_tokens(string $text): array {
+        preg_match_all('/[\p{L}\p{N}]{3,}/u', $this->str_lower($text), $found);
+        $tokens = array_unique($found[0] ?? []);
+        return array_values(array_diff($tokens, self::LABEL_TAIL_STOPWORDS));
+    }
+
+    /**
+     * True, wenn der Button wiederholt, was schon gefragt oder gezeigt wurde.
+     * Gegen die aktuelle Frage wird milder geprüft (viele sinnvolle Folgefragen
+     * teilen ein Wort mit ihr), gegen bereits gezeigte Buttons strenger.
+     */
+    private function is_repeat_action(string $text, array $token_sets, float $ratio = 0.75, int $min_overlap = 2): bool {
+        $tokens = $this->compare_tokens($text);
+        if (!$tokens) {
+            return false;
+        }
+        foreach ($token_sets as $known) {
+            if (!$known) {
+                continue;
+            }
+            $overlap = count(array_intersect($tokens, $known));
+            if ($overlap >= $min_overlap && $overlap / min(count($tokens), count($known)) >= $ratio) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function limit_text(string $text, int $limit): string {
+        $clean = trim(preg_replace('/\s+/', ' ', $text));
+        if ($this->str_len($clean) <= $limit) {
+            return $clean;
+        }
+        $cut = $this->str_cut($clean, 0, $limit + 1);
+        $space = $this->str_rpos($cut, ' ');
+        return ($space ? $this->str_cut($cut, 0, $space) : $this->str_cut($clean, 0, $limit)) . '...';
+    }
+
+    private function strip_sources_tail(string $answer): string {
+        $lines = preg_split('/\n/', $answer) ?: [];
+        for ($i = count($lines) - 1; $i >= 0; $i--) {
+            if (preg_match('/^\s*(Quellen|Quelle|Sources|Source)\s*:/i', $lines[$i])) {
+                return trim(implode("\n", array_slice($lines, 0, $i)));
+            }
+        }
+        return $answer;
+    }
+
+    private function decode_json_object(string $raw): ?array {
+        $text = trim($raw);
+        if ($text === '') {
+            return null;
+        }
+        $data = json_decode($text, true);
+        if (is_array($data)) {
+            return $data;
+        }
+        $start = strpos($text, '{');
+        $end = strrpos($text, '}');
+        if ($start === false || $end === false || $end <= $start) {
+            return null;
+        }
+        $data = json_decode(substr($text, $start, $end - $start + 1), true);
+        return is_array($data) ? $data : null;
+    }
+
+    private function available_post_types(): array {
+        $types = get_post_types(['public' => true], 'objects');
+        $items = [];
+        foreach ($types as $name => $type) {
+            if (in_array($name, ['attachment', 'revision', 'nav_menu_item'], true)) {
+                continue;
+            }
+            $items[] = [
+                'name' => $name,
+                'label' => $type->label,
+                'selected' => in_array($name, $this->enabled_post_type_names(), true),
+            ];
+        }
+        return $items;
+    }
+
+    private function enabled_post_type_names(): array {
+        $settings = $this->settings();
+        $enabled = array_filter(array_map('sanitize_key', (array) ($settings['enabled_post_types'] ?? [])));
+        if ($enabled) {
+            return $enabled;
+        }
+        return array_map(fn($item) => $item['name'], $this->available_post_types_without_selection());
+    }
+
+    private function available_post_types_without_selection(): array {
+        $types = get_post_types(['public' => true], 'objects');
+        $items = [];
+        foreach ($types as $name => $type) {
+            if (!in_array($name, ['attachment', 'revision', 'nav_menu_item'], true)) {
+                $items[] = ['name' => $name, 'label' => $type->label];
+            }
+        }
+        return $items;
+    }
+
+    private function settings(): array {
+        return wp_parse_args((array) get_option(self::OPTION_KEY, []), self::default_settings());
+    }
+
+    private function setting(string $key, mixed $default = null): mixed {
+        $settings = $this->settings();
+        return $settings[$key] ?? $default;
+    }
+
+    private function setting_bool(string $key, bool $default): bool {
+        return rest_sanitize_boolean($this->setting($key, $default));
+    }
+
+    private function settings_for_admin(): array {
+        global $wpdb;
+        $settings = $this->settings();
+        $settings['openai_api_key'] = '';
+        $settings['has_openai_api_key'] = trim((string) $this->setting('openai_api_key', '')) !== '';
+        $settings['post_types'] = $this->available_post_types();
+        $settings['index_count'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}aicb_chunks");
+        // Diagnose fuer die Suche: womit der Index tatsaechlich gebaut wurde
+        // und ob der Volltext-Zweig der Hybrid-Suche zur Verfuegung steht.
+        $settings['index_dims'] = $settings['index_count'] > 0 ? $this->index_dimensions() : 0;
+        $settings['fulltext_ready'] = (bool) get_option(self::FULLTEXT_OPTION, false);
+        return $settings;
+    }
+
+    private function sanitize_setting_value(string $key, mixed $value): mixed {
+        return match ($key) {
+            'retriever_k', 'max_context_chars', 'batch_size', 'embedding_dims' => absint($value),
+            'auto_index_on_save', 'widget_enabled', 'include_excerpts', 'include_taxonomies' => rest_sanitize_boolean($value),
+            'enabled_post_types' => array_values(array_filter(array_map('sanitize_key', (array) $value))),
+            'privacy_url', 'contact_url' => esc_url_raw((string) $value),
+            'contact_email' => sanitize_email((string) $value),
+            'system_prompt' => sanitize_textarea_field((string) $value),
+            default => sanitize_text_field((string) $value),
+        };
+    }
+
+    private function public_widget_config(): array {
+        $config = $this->sanitize_widget_config((array) get_option(self::WIDGET_OPTION_KEY, self::default_widget_config()));
+        $settings = $this->settings();
+        $lang = $this->site_lang();
+        $pack = $this->lang_pack($lang);
+
+        // Im Admin gesetzte Texte gewinnen, leere Felder kommen aus dem Sprachpaket.
+        foreach (['title', 'status', 'intro', 'topics_label', 'placeholder', 'disclaimer', 'privacy_label'] as $key) {
+            if (trim((string) ($config['copy'][$key] ?? '')) === '') {
+                $config['copy'][$key] = $pack[$key];
+            }
+        }
+        if (trim((string) ($config['greeting']['text'] ?? '')) === '') {
+            $config['greeting']['text'] = $pack['greeting'];
+        }
+
+        $config['lang'] = $lang;
+        $config['rtl'] = $this->is_rtl_lang($lang);
+        // Systemtexte des Widgets (Tipp-Indikator, Fehler, Labels) in Seitensprache.
+        $config['strings'] = [
+            'steps' => $pack['steps'],
+            'error' => $pack['error'],
+            'sources' => $pack['sources'],
+            'sources_labels' => $this->sources_labels(),
+            'feedback' => $this->feedback_labels($lang),
+            'close_confirm' => $this->close_confirm_labels($lang),
+        ];
+        $config['contact'] = [
+            'url' => esc_url_raw((string) ($settings['contact_url'] ?? '')),
+            'email' => sanitize_email((string) ($settings['contact_email'] ?? '')),
+            'phone' => sanitize_text_field((string) ($settings['contact_phone'] ?? '')),
+            'privacy_url' => esc_url_raw((string) ($settings['privacy_url'] ?? '')),
+        ];
+        return $config;
+    }
+
+    private function sanitize_widget_config(array $raw): array {
+        $defaults = self::default_widget_config();
+        $theme = [];
+        foreach (($defaults['theme'] ?? []) as $key => $default) {
+            $theme[$key] = sanitize_hex_color((string) ($raw['theme'][$key] ?? $default)) ?: $default;
+        }
+        $copy = [];
+        foreach (($defaults['copy'] ?? []) as $key => $default) {
+            $value = (string) ($raw['copy'][$key] ?? $default);
+            $copy[$key] = $key === 'icon' ? $this->sanitize_icon($value) : sanitize_text_field($value);
+        }
+        $greeting = [
+            'enabled' => rest_sanitize_boolean($raw['greeting']['enabled'] ?? $defaults['greeting']['enabled']),
+            'text' => sanitize_text_field((string) ($raw['greeting']['text'] ?? $defaults['greeting']['text'])),
+            'delay_ms' => max(0, absint($raw['greeting']['delay_ms'] ?? $defaults['greeting']['delay_ms'])),
+        ];
+        $page_suggestions = [
+            'enabled' => rest_sanitize_boolean($raw['page_suggestions']['enabled'] ?? $defaults['page_suggestions']['enabled']),
+            'show_on_route_change' => rest_sanitize_boolean($raw['page_suggestions']['show_on_route_change'] ?? $defaults['page_suggestions']['show_on_route_change']),
+        ];
+        $hero = [
+            'hide_in_hero' => rest_sanitize_boolean($raw['hero']['hide_in_hero'] ?? $defaults['hero']['hide_in_hero']),
+            'selector' => sanitize_text_field((string) ($raw['hero']['selector'] ?? $defaults['hero']['selector'])),
+        ];
+        $analytics = [
+            'track_opens' => rest_sanitize_boolean($raw['analytics']['track_opens'] ?? $defaults['analytics']['track_opens']),
+            'track_outcomes' => rest_sanitize_boolean($raw['analytics']['track_outcomes'] ?? $defaults['analytics']['track_outcomes']),
+            'conversion_selector' => sanitize_text_field((string) ($raw['analytics']['conversion_selector'] ?? $defaults['analytics']['conversion_selector'])),
+            'form_selector' => sanitize_text_field((string) ($raw['analytics']['form_selector'] ?? $defaults['analytics']['form_selector'])),
+        ];
+        $topics = [];
+        foreach ((array) ($raw['topics'] ?? $defaults['topics']) as $item) {
+            $label = sanitize_text_field((string) ($item['label'] ?? ''));
+            $question = sanitize_text_field((string) ($item['question'] ?? ''));
+            $url = esc_url_raw((string) ($item['url'] ?? ''));
+            // Ein Thema braucht entweder eine Frage oder eine Ziel-URL.
+            if ($label !== '' && ($question !== '' || $url !== '')) {
+                $topics[] = [
+                    'label' => $label,
+                    'question' => $question,
+                    'url' => $url,
+                    'highlight' => rest_sanitize_boolean($item['highlight'] ?? false),
+                ];
+            }
+        }
+        return ['theme' => $theme, 'copy' => $copy, 'greeting' => $greeting, 'page_suggestions' => $page_suggestions, 'hero' => $hero, 'analytics' => $analytics, 'topics' => $topics];
+    }
+
+    private function faqs(): array {
+        return (array) get_option(self::FAQ_OPTION_KEY, []);
+    }
+
+    /**
+     * HTML zu Text, aber mit Struktur. wp_strip_all_tags alleine macht aus
+     * Tabellen und Listen einen Fließtext-Brei - genau dort stehen aber die
+     * Details: Preise, Zeiten, Leistungen, Bedingungen.
+     */
+    private function clean_text(string $html): string {
+        $html = (string) $html;
+        $html = preg_replace('#<(script|style|noscript|template)[^>]*>.*?</\1>#is', ' ', $html);
+
+        // Überschriften als Markdown, damit die Abschnittslogik sie erkennt.
+        for ($level = 1; $level <= 6; $level++) {
+            $html = preg_replace('#<h' . $level . '[^>]*>(.*?)</h' . $level . '>#is', "\n\n" . str_repeat('#', $level) . ' $1' . "\n", $html);
+        }
+        // Listenpunkte behalten ihren Aufzählungscharakter.
+        $html = preg_replace('#<li[^>]*>#i', "\n- ", $html);
+        $html = preg_replace('#</li>#i', "\n", $html);
+        // Tabellen: Zellen mit | trennen, Zeilen umbrechen.
+        $html = preg_replace('#</t[dh]>\s*<t[dh][^>]*>#i', ' | ', $html);
+        $html = preg_replace('#<t[dh][^>]*>#i', '', $html);
+        $html = preg_replace('#</t[dh]>#i', '', $html);
+        $html = preg_replace('#</tr>#i', "\n", $html);
+        $html = preg_replace('#</(caption|table)>#i', "\n\n", $html);
+        // Definitionslisten und Absätze.
+        $html = preg_replace('#<dt[^>]*>#i', "\n- ", $html);
+        $html = preg_replace('#</dt>#i', ': ', $html);
+        $html = preg_replace('#<br\s*/?>#i', "\n", $html);
+        $html = preg_replace('#</(p|div|section|article|tr|dd|blockquote|figcaption)>#i', "\n\n", $html);
+
+        $text = wp_strip_all_tags($html, false);
+        $text = $this->normalize_text($text);
+        // Aufzählungen sauber halten: keine leeren Punkte, keine Doppelstriche.
+        $text = preg_replace('/\n-\s*\n/', "\n", $text);
+        $text = preg_replace('/^-\s*$/m', '', $text);
+        $text = preg_replace('/\n{2,}(?=- )/', "\n", $text);
+        return trim(preg_replace('/\n{3,}/', "\n\n", $text));
+    }
+
+    private function normalize_text(string $text): string {
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, get_bloginfo('charset') ?: 'UTF-8');
+        $text = str_replace(["\r\n", "\r", "\xc2\xa0"], ["\n", "\n", ' '], $text);
+        $text = preg_replace('/[ \t]+\n/', "\n", $text);
+        $text = preg_replace('/\n[ \t]+/', "\n", $text);
+        $text = preg_replace('/[ \t]{2,}/', ' ', $text);
+        $text = preg_replace('/\n{3,}/', "\n\n", $text);
+        return trim((string) $text);
+    }
+
+    private function estimate_tokens(string $text): int {
+        $len = strlen(trim($text));
+        return $len > 0 ? max(1, (int) ceil($len / 4)) : 0;
+    }
+
+    private function cosine_similarity(array $a, array $b): float {
+        $dot = 0.0;
+        $norm_a = 0.0;
+        $norm_b = 0.0;
+        $n = min(count($a), count($b));
+        for ($i = 0; $i < $n; $i++) {
+            $av = (float) $a[$i];
+            $bv = (float) $b[$i];
+            $dot += $av * $bv;
+            $norm_a += $av * $av;
+            $norm_b += $bv * $bv;
+        }
+        if ($norm_a <= 0 || $norm_b <= 0) {
+            return 0.0;
+        }
+        return $dot / (sqrt($norm_a) * sqrt($norm_b));
+    }
+
+    private function clear_chunks(): void {
+        global $wpdb;
+        $wpdb->query("TRUNCATE TABLE {$wpdb->prefix}aicb_chunks");
+        // Der neue Index bekommt die aktuell eingestellte Dimension.
+        update_option(self::INDEX_DIMS_OPTION, (int) $this->setting('embedding_dims', 1024), false);
+        // Die Tabelle ist jetzt leer - der guenstigste Moment fuer das ALTER,
+        // falls der Index noch fehlt oder beim ersten Versuch scheiterte.
+        $this->ensure_fulltext_index(true);
+    }
+
+    private function delete_source_chunks(string $source_id): void {
+        global $wpdb;
+        $wpdb->delete($wpdb->prefix . 'aicb_chunks', ['source_id' => $source_id], ['%s']);
+    }
+
+    private function delete_source_chunks_by_type(string $type): void {
+        global $wpdb;
+        $wpdb->delete($wpdb->prefix . 'aicb_chunks', ['source_type' => $type], ['%s']);
+    }
+
+    private function job_key(string $job_id): string {
+        return 'aicb_train_' . sanitize_key($job_id);
+    }
+
+    private function public_job(array $job): array {
+        $copy = $job;
+        unset($copy['ids'], $copy['queue']);
+        return $copy;
+    }
+
+    private function hash_token(string $token): string {
+        return hash('sha256', $token . wp_salt('auth'));
+    }
+
+    private function request_ip_hash(): string {
+        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+        return hash('sha256', $ip . wp_salt('nonce'));
+    }
+}
+
+register_activation_hook(__FILE__, ['AICB_Plugin', 'activate']);
+register_deactivation_hook(__FILE__, ['AICB_Plugin', 'deactivate']);
+AICB_Plugin::instance();
