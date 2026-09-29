@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 9.3.4
+ * Version: 10.1.0
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -13,13 +13,19 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+$local_config = __DIR__ . '/aicb-config.php';
+if (is_readable($local_config)) {
+    require_once $local_config;
+}
+require_once __DIR__ . '/includes/class-aicb-external-db.php';
+
 final class AICB_Plugin {
     private const OPTION_KEY = 'aicb_settings';
     private const FAQ_OPTION_KEY = 'aicb_faqs';
     private const WIDGET_OPTION_KEY = 'aicb_widget_config';
     private const VERSION_OPTION = 'aicb_version';
     private const ADMIN_ACCESS_CAP = 'edit_posts';
-    private const ADMIN_SENSITIVE_CAP = 'aicb_manage_sensitive';
+    private const ADMIN_SENSITIVE_CAP = 'manage_options';
     // Feingranulare Inhaltsauswahl für das Training.
     private const INDEX_MODE_OPTION = 'aicb_index_mode';        // 'all' | 'selected'
     private const SELECTED_POSTS_OPTION = 'aicb_selected_posts'; // array<int> Post-IDs (nur publish)
@@ -34,7 +40,7 @@ final class AICB_Plugin {
     private const OLD_DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="12" r="1.65" fill="currentColor"/><circle cx="12" cy="12" r="1.65" fill="currentColor"/><circle cx="16" cy="12" r="1.65" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '9.3.4';
+    private const ASSET_VERSION = '10.1.0';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -89,6 +95,10 @@ final class AICB_Plugin {
     ];
 
     private static ?AICB_Plugin $instance = null;
+    private static ?AICB_External_DB $external_db = null;
+    private static string $database_error = '';
+    private static bool $uses_automatic_prefix = false;
+    private array $pending_reindexes = [];
 
     public static function instance(): AICB_Plugin {
         if (self::$instance === null) {
@@ -98,6 +108,13 @@ final class AICB_Plugin {
     }
 
     private function __construct() {
+        try {
+            self::database();
+        } catch (Throwable $e) {
+            self::$database_error = $e->getMessage();
+            add_action('admin_notices', [$this, 'render_database_admin_notice']);
+            return;
+        }
         add_action('init', [$this, 'maybe_upgrade'], 5);
         add_action('init', [$this, 'register_shortcodes']);
         add_action('admin_menu', [$this, 'register_admin_menu']);
@@ -110,19 +127,26 @@ final class AICB_Plugin {
         add_action('wp_footer', [$this, 'render_footer_widget']);
         add_action('rest_api_init', [$this, 'register_rest_routes']);
         add_action('save_post', [$this, 'schedule_post_reindex'], 20, 3);
-        add_action('aicb_reindex_single_post', [$this, 'cron_reindex_single_post']);
+        add_action('shutdown', [$this, 'run_pending_reindexes']);
+    }
+
+    public function render_database_admin_notice(): void {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+        echo '<div class="notice notice-error"><p><strong>AI Content Chatbot:</strong> '
+            . esc_html(self::$database_error)
+            . ' Bitte die AICB_DB_* Werte in wp-config.php pruefen.</p></div>';
     }
 
     public static function activate(): void {
-        global $wpdb;
-        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-
+        $wpdb = self::database();
         $charset = $wpdb->get_charset_collate();
         $chunks = $wpdb->prefix . 'aicb_chunks';
         $sessions = $wpdb->prefix . 'aicb_sessions';
         $events = $wpdb->prefix . 'aicb_events';
 
-        dbDelta("CREATE TABLE {$chunks} (
+        $wpdb->query("CREATE TABLE IF NOT EXISTS {$chunks} (
             id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
             source_id varchar(191) NOT NULL,
             source_type varchar(64) NOT NULL,
@@ -138,10 +162,11 @@ final class AICB_Plugin {
             PRIMARY KEY  (id),
             KEY source_id (source_id),
             KEY source_type (source_type),
-            KEY content_hash (content_hash)
-        ) {$charset};");
+            KEY content_hash (content_hash),
+            FULLTEXT KEY aicb_ft (title, section, content)
+        ) {$charset}");
 
-        dbDelta("CREATE TABLE {$sessions} (
+        $wpdb->query("CREATE TABLE IF NOT EXISTS {$sessions} (
             id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
             token_hash char(64) NOT NULL,
             expires_at datetime NOT NULL,
@@ -153,9 +178,9 @@ final class AICB_Plugin {
             PRIMARY KEY  (id),
             UNIQUE KEY token_hash (token_hash),
             KEY expires_at (expires_at)
-        ) {$charset};");
+        ) {$charset}");
 
-        dbDelta("CREATE TABLE {$events} (
+        $wpdb->query("CREATE TABLE IF NOT EXISTS {$events} (
             id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
             session_hash char(64) NULL,
             user_id bigint(20) unsigned NULL,
@@ -173,40 +198,38 @@ final class AICB_Plugin {
             KEY status (status),
             KEY user_id (user_id),
             KEY feedback (feedback)
-        ) {$charset};");
+        ) {$charset}");
 
         self::create_metrics_table();
+        self::create_storage_tables();
+        self::migrate_legacy_storage();
 
-        if (!get_option(self::OPTION_KEY)) {
-            add_option(self::OPTION_KEY, self::default_settings());
+        if (self::option_get(self::OPTION_KEY, null) === null) {
+            self::option_set(self::OPTION_KEY, self::default_settings());
         }
-        if (!get_option(self::FAQ_OPTION_KEY)) {
-            add_option(self::FAQ_OPTION_KEY, []);
+        if (self::option_get(self::FAQ_OPTION_KEY, null) === null) {
+            self::option_set(self::FAQ_OPTION_KEY, []);
         }
-        if (!get_option(self::WIDGET_OPTION_KEY)) {
-            add_option(self::WIDGET_OPTION_KEY, self::default_widget_config());
+        if (self::option_get(self::WIDGET_OPTION_KEY, null) === null) {
+            self::option_set(self::WIDGET_OPTION_KEY, self::default_widget_config());
         }
-        self::sync_role_caps();
     }
 
     public static function deactivate(): void {
-        wp_clear_scheduled_hook('aicb_reindex_single_post');
+        // Kein WordPress-Cron-State: Reindex-Auftraege leben nur im Request.
     }
 
     /**
      * Leichtes Ereignis-Table fuer Nutzungs-Kennzahlen (Chat-Oeffnungen und
      * Outcomes/Conversions nach dem Chat). Bewusst getrennt vom Q&A-Table
-     * aicb_events, damit dessen Auswertungen sauber bleiben. Idempotent (dbDelta),
-     * wird bei Aktivierung UND bei Versions-Upgrade sichergestellt.
+     * aicb_events, damit dessen Auswertungen sauber bleiben. Die Anlage ist
+     * idempotent und wird bei Aktivierung sowie beim Versions-Upgrade sichergestellt.
      */
     private static function create_metrics_table(): void {
-        global $wpdb;
-        if (!function_exists('dbDelta')) {
-            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-        }
+        $wpdb = self::database();
         $charset = $wpdb->get_charset_collate();
         $metrics = $wpdb->prefix . 'aicb_metrics';
-        dbDelta("CREATE TABLE {$metrics} (
+        $wpdb->query("CREATE TABLE IF NOT EXISTS {$metrics} (
             id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
             type varchar(32) NOT NULL,
             label varchar(191) NULL,
@@ -216,14 +239,172 @@ final class AICB_Plugin {
             PRIMARY KEY  (id),
             KEY type (type),
             KEY created_at (created_at)
-        ) {$charset};");
+        ) {$charset}");
     }
 
-    private static function sync_role_caps(): void {
-        $admin = get_role('administrator');
-        if ($admin && !$admin->has_cap(self::ADMIN_SENSITIVE_CAP)) {
-            $admin->add_cap(self::ADMIN_SENSITIVE_CAP);
+    private static function create_storage_tables(): void {
+        $wpdb = self::database();
+        $charset = $wpdb->get_charset_collate();
+        $options = $wpdb->prefix . 'aicb_options';
+        $cache = $wpdb->prefix . 'aicb_cache';
+        $wpdb->query("CREATE TABLE IF NOT EXISTS {$options} (
+            option_key varchar(191) NOT NULL,
+            option_value longtext NULL,
+            updated_at datetime NOT NULL,
+            PRIMARY KEY (option_key)
+        ) {$charset}");
+        $wpdb->query("CREATE TABLE IF NOT EXISTS {$cache} (
+            cache_key varchar(191) NOT NULL,
+            cache_value longtext NULL,
+            expires_at datetime NOT NULL,
+            updated_at datetime NOT NULL,
+            PRIMARY KEY (cache_key),
+            KEY expires_at (expires_at)
+        ) {$charset}");
+    }
+
+    private static function database(): AICB_External_DB {
+        if (self::$external_db !== null) {
+            return self::$external_db;
         }
+        $value = static function (string $constant, string $environment, mixed $default = ''): mixed {
+            if (defined($constant)) {
+                return constant($constant);
+            }
+            $env = getenv($environment);
+            return $env === false || $env === '' ? $default : $env;
+        };
+        $configured_prefix = null;
+        if (defined('AICB_DB_PREFIX')) {
+            $configured_prefix = (string) constant('AICB_DB_PREFIX');
+        } else {
+            $environment_prefix = getenv('AICB_DB_PREFIX');
+            if ($environment_prefix !== false) {
+                $configured_prefix = (string) $environment_prefix;
+            }
+        }
+        self::$uses_automatic_prefix = $configured_prefix === null;
+        self::$external_db = new AICB_External_DB([
+            'host' => $value('AICB_DB_HOST', 'AICB_DB_HOST'),
+            'port' => $value('AICB_DB_PORT', 'AICB_DB_PORT', 3306),
+            'name' => $value('AICB_DB_NAME', 'AICB_DB_NAME'),
+            'user' => $value('AICB_DB_USER', 'AICB_DB_USER'),
+            'password' => $value('AICB_DB_PASSWORD', 'AICB_DB_PASSWORD'),
+            'ssl_ca' => $value('AICB_DB_SSL_CA', 'AICB_DB_SSL_CA', __DIR__ . '/certs/aiven-ca.pem'),
+            'prefix' => $configured_prefix ?? self::automatic_db_prefix(),
+        ]);
+        return self::$external_db;
+    }
+
+    private static function site_identity(): string {
+        $url = function_exists('home_url') ? (string) home_url('/') : '';
+        if ($url === '') {
+            $url = defined('ABSPATH') ? (string) ABSPATH : __DIR__;
+        }
+        return strtolower(rtrim($url, '/'));
+    }
+
+    private static function automatic_db_prefix(): string {
+        $url = self::site_identity();
+        $host = (string) (parse_url($url, PHP_URL_HOST) ?: 'website');
+        $source = (string) preg_replace('/^www\./i', '', $host);
+        if (function_exists('sanitize_title')) {
+            $slug = (string) sanitize_title((string) $source);
+        } else {
+            $slug = strtolower((string) preg_replace('/[^A-Za-z0-9]+/', '-', (string) $source));
+        }
+        $slug = trim((string) preg_replace('/[^a-z0-9]+/', '_', strtolower($slug)), '_');
+        $slug = substr($slug !== '' ? $slug : 'website', 0, 20);
+        return $slug . '_' . substr(hash('sha256', $url), 0, 10) . '_';
+    }
+
+    /**
+     * Uebernimmt beim ersten automatischen Site-Prefix einmalig die bisherigen
+     * unprefixed Tabellen. Ein Claim verhindert, dass spaetere Websites dieselben
+     * Legacy-Daten ebenfalls importieren.
+     */
+    private static function migrate_legacy_storage(): void {
+        $wpdb = self::database();
+        if (!self::$uses_automatic_prefix || $wpdb->prefix === '') {
+            return;
+        }
+        $identity = self::site_identity();
+        $new_options = $wpdb->prefix . 'aicb_options';
+        $existing_identity = $wpdb->get_var($wpdb->prepare(
+            "SELECT option_value FROM {$new_options} WHERE option_key = %s",
+            'aicb_site_identity'
+        ));
+        if ($existing_identity !== null) {
+            return;
+        }
+
+        $legacy_options = 'aicb_options';
+        $legacy_exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $legacy_options));
+        if ($legacy_exists) {
+            $now = gmdate('Y-m-d H:i:s');
+            $wpdb->query($wpdb->prepare(
+                "INSERT IGNORE INTO {$legacy_options} (option_key, option_value, updated_at) VALUES (%s, %s, %s)",
+                'aicb_legacy_claimed_by',
+                maybe_serialize($identity),
+                $now
+            ));
+            $claim = $wpdb->get_var($wpdb->prepare(
+                "SELECT option_value FROM {$legacy_options} WHERE option_key = %s",
+                'aicb_legacy_claimed_by'
+            ));
+            if ($claim !== null && maybe_unserialize($claim) === $identity) {
+                foreach (['chunks', 'sessions', 'events', 'metrics', 'options', 'cache'] as $suffix) {
+                    $legacy_table = 'aicb_' . $suffix;
+                    $new_table = $wpdb->prefix . 'aicb_' . $suffix;
+                    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $legacy_table))) {
+                        $wpdb->query("INSERT IGNORE INTO {$new_table} SELECT * FROM {$legacy_table}");
+                    }
+                }
+            }
+        }
+        self::option_set('aicb_site_identity', $identity);
+    }
+
+    private static function option_get(string $key, mixed $default = false): mixed {
+        $wpdb = self::database();
+        $table = $wpdb->prefix . 'aicb_options';
+        $value = $wpdb->get_var($wpdb->prepare("SELECT option_value FROM {$table} WHERE option_key = %s", $key));
+        return $value === null ? $default : maybe_unserialize($value);
+    }
+
+    private static function option_set(string $key, mixed $value): void {
+        $wpdb = self::database();
+        $wpdb->replace($wpdb->prefix . 'aicb_options', [
+            'option_key' => $key,
+            'option_value' => maybe_serialize($value),
+            'updated_at' => gmdate('Y-m-d H:i:s'),
+        ]);
+    }
+
+    private static function cache_get(string $key, mixed $default = false): mixed {
+        $wpdb = self::database();
+        $table = $wpdb->prefix . 'aicb_cache';
+        $value = $wpdb->get_var($wpdb->prepare(
+            "SELECT cache_value FROM {$table} WHERE cache_key = %s AND expires_at > %s",
+            $key,
+            gmdate('Y-m-d H:i:s')
+        ));
+        if ($value === null) {
+            $wpdb->delete($table, ['cache_key' => $key]);
+            return $default;
+        }
+        return maybe_unserialize($value);
+    }
+
+    private static function cache_set(string $key, mixed $value, int $ttl): void {
+        $wpdb = self::database();
+        $now = time();
+        $wpdb->replace($wpdb->prefix . 'aicb_cache', [
+            'cache_key' => $key,
+            'cache_value' => maybe_serialize($value),
+            'expires_at' => gmdate('Y-m-d H:i:s', $now + max(1, $ttl)),
+            'updated_at' => gmdate('Y-m-d H:i:s', $now),
+        ]);
     }
 
     public static function default_settings(): array {
@@ -775,8 +956,12 @@ final class AICB_Plugin {
      * unverändert dem alten Standard entspricht - eigene Texte bleiben.
      */
     public function maybe_upgrade(): void {
-        self::sync_role_caps();
-        $installed_version = (string) get_option(self::VERSION_OPTION, '');
+        $wpdb = self::database();
+        $options_table = $wpdb->prefix . 'aicb_options';
+        if (!$wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $options_table))) {
+            self::activate();
+        }
+        $installed_version = (string) self::option_get(self::VERSION_OPTION, '');
         if ($installed_version === self::ASSET_VERSION) {
             return;
         }
@@ -834,7 +1019,7 @@ final class AICB_Plugin {
             $settings_changed = true;
         }
         if ($settings_changed) {
-            update_option(self::OPTION_KEY, $settings, false);
+            self::option_set(self::OPTION_KEY, $settings);
         }
 
         $legacy_copy = [
@@ -846,7 +1031,7 @@ final class AICB_Plugin {
             'disclaimer' => ['Der Assistent kann Fehler machen. Bitte prüfe wichtige Informationen.'],
             'privacy_label' => ['Datenschutz'],
         ];
-        $widget = get_option(self::WIDGET_OPTION_KEY, null);
+        $widget = self::option_get(self::WIDGET_OPTION_KEY, null);
         if (is_array($widget)) {
             $changed = false;
             foreach ($legacy_copy as $key => $values) {
@@ -896,12 +1081,12 @@ final class AICB_Plugin {
                 $changed = true;
             }
             if ($changed) {
-                update_option(self::WIDGET_OPTION_KEY, $widget, false);
+                self::option_set(self::WIDGET_OPTION_KEY, $widget);
             }
         }
 
         // Migration: feedback-Spalte für 👍/👎 nachziehen (idempotent).
-        global $wpdb;
+        $wpdb = self::database();
         $events = $wpdb->prefix . 'aicb_events';
         $has_feedback = $wpdb->get_var($wpdb->prepare(
             "SHOW COLUMNS FROM {$events} LIKE %s",
@@ -924,7 +1109,7 @@ final class AICB_Plugin {
         // Kennzahlen-Table (Chat-Oeffnungen + Outcomes) auch beim Update anlegen.
         self::create_metrics_table();
 
-        update_option(self::VERSION_OPTION, self::ASSET_VERSION, false);
+        self::option_set(self::VERSION_OPTION, self::ASSET_VERSION);
     }
 
     public function register_shortcodes(): void {
@@ -1359,7 +1544,7 @@ final class AICB_Plugin {
         }
 
         $cache_key = 'aicb_suggest_' . md5(untrailingslashit($url) . '|' . $lang . '|' . $title);
-        $cached = get_transient($cache_key);
+        $cached = self::cache_get($cache_key);
         if (is_array($cached)) {
             return rest_ensure_response(['questions' => $cached, 'cached' => true]);
         }
@@ -1367,7 +1552,7 @@ final class AICB_Plugin {
         try {
             $questions = $this->generate_page_suggestions($url, $title, $page_text, $lang);
             if ($questions) {
-                set_transient($cache_key, $questions, 12 * HOUR_IN_SECONDS);
+                self::cache_set($cache_key, $questions, 12 * HOUR_IN_SECONDS);
             }
             return rest_ensure_response(['questions' => $questions, 'cached' => false]);
         } catch (Throwable $e) {
@@ -1395,7 +1580,7 @@ final class AICB_Plugin {
             $this->touch_session($session_hash);
             // Alles, was der nachgelagerte /actions-Aufruf braucht. Nur IDs und
             // Scores - die Texte holt er sich frisch aus der Tabelle.
-            set_transient($this->action_ticket_key($session_hash, $event_id), [
+            self::cache_set($this->action_ticket_key($session_hash, $event_id), [
                 'question' => $question,
                 'answer' => $answer_payload['answer'],
                 'lang' => $answer_payload['lang'],
@@ -1447,7 +1632,7 @@ final class AICB_Plugin {
         // Der Ticket-Key enthält den Session-Hash: eine fremde Session findet
         // das Ticket nicht und bekommt schlicht nichts.
         $session_payload = $this->ensure_session_payload((string) ($params['session_token'] ?? ''));
-        $ticket = get_transient($this->action_ticket_key($session_payload['session_hash'], $event_id));
+        $ticket = self::cache_get($this->action_ticket_key($session_payload['session_hash'], $event_id));
         if (!is_array($ticket)) {
             return rest_ensure_response($empty);
         }
@@ -1520,7 +1705,7 @@ final class AICB_Plugin {
      * Session (passender session_token) darf sein eigenes Event bewerten.
      */
     public function rest_feedback(WP_REST_Request $request): WP_REST_Response {
-        global $wpdb;
+        $wpdb = self::database();
         $params = $request->get_json_params();
         $event_id = (int) ($params['event_id'] ?? 0);
         $raw_value = (int) ($params['value'] ?? 0);
@@ -1557,7 +1742,7 @@ final class AICB_Plugin {
      * zurueckgegeben, damit Folge-Events dieselbe Session nutzen.
      */
     public function rest_metric(WP_REST_Request $request): WP_REST_Response {
-        global $wpdb;
+        $wpdb = self::database();
         $params = $request->get_json_params();
         $type = sanitize_key((string) ($params['type'] ?? ''));
         if (!in_array($type, ['open', 'outcome'], true)) {
@@ -1565,7 +1750,7 @@ final class AICB_Plugin {
         }
 
         // Respektiere die im Widget gewaehlten Analytics-Optionen.
-        $cfg = (array) get_option(self::WIDGET_OPTION_KEY, self::default_widget_config());
+        $cfg = (array) self::option_get(self::WIDGET_OPTION_KEY, self::default_widget_config());
         $analytics = (array) ($cfg['analytics'] ?? []);
         if ($type === 'open' && ($analytics['track_opens'] ?? true) === false) {
             return rest_ensure_response(['status' => 'skipped']);
@@ -1618,17 +1803,17 @@ final class AICB_Plugin {
             }
         }
 
-        update_option(self::OPTION_KEY, $settings, false);
+        self::option_set(self::OPTION_KEY, $settings);
         return rest_ensure_response($this->settings_for_admin());
     }
 
     public function rest_admin_widget(WP_REST_Request $request): WP_REST_Response {
         if ($request->get_method() === 'GET') {
-            return rest_ensure_response($this->sanitize_widget_config((array) get_option(self::WIDGET_OPTION_KEY, self::default_widget_config())));
+            return rest_ensure_response($this->sanitize_widget_config((array) self::option_get(self::WIDGET_OPTION_KEY, self::default_widget_config())));
         }
         $payload = $request->get_json_params();
         $config = $this->sanitize_widget_config(is_array($payload) ? $payload : []);
-        update_option(self::WIDGET_OPTION_KEY, $config, false);
+        self::option_set(self::WIDGET_OPTION_KEY, $config);
         return rest_ensure_response($config);
     }
 
@@ -1645,7 +1830,7 @@ final class AICB_Plugin {
                 $faqs[] = ['question' => $q, 'answer' => $a];
             }
         }
-        update_option(self::FAQ_OPTION_KEY, $faqs, false);
+        self::option_set(self::FAQ_OPTION_KEY, $faqs);
         return rest_ensure_response(['status' => 'ok', 'faqs' => $faqs]);
     }
 
@@ -1665,9 +1850,9 @@ final class AICB_Plugin {
             $post_ids = array_values(array_unique(array_filter(array_map('intval', (array) ($payload['post_ids'] ?? [])))));
             $pdf_ids = array_values(array_unique(array_filter(array_map('intval', (array) ($payload['pdf_ids'] ?? [])))));
 
-            update_option(self::INDEX_MODE_OPTION, $mode, false);
-            update_option(self::SELECTED_POSTS_OPTION, $post_ids, false);
-            update_option(self::SELECTED_PDFS_OPTION, $pdf_ids, false);
+            self::option_set(self::INDEX_MODE_OPTION, $mode);
+            self::option_set(self::SELECTED_POSTS_OPTION, $post_ids);
+            self::option_set(self::SELECTED_PDFS_OPTION, $pdf_ids);
         }
 
         $search = trim((string) $request->get_param('q'));
@@ -1675,7 +1860,7 @@ final class AICB_Plugin {
     }
 
     private function content_overview(string $search = ''): array {
-        $selected_posts = array_flip(array_map('intval', (array) get_option(self::SELECTED_POSTS_OPTION, [])));
+        $selected_posts = array_flip(array_map('intval', (array) self::option_get(self::SELECTED_POSTS_OPTION, [])));
         $per_type_cap = 300;
 
         $groups = [];
@@ -1757,12 +1942,12 @@ final class AICB_Plugin {
 
     public function rest_train_status(WP_REST_Request $request): WP_REST_Response {
         $job_id = sanitize_key((string) $request->get_param('job_id'));
-        $job = $job_id ? get_transient($this->job_key($job_id)) : get_option('aicb_last_training_job');
+        $job = $job_id ? self::cache_get($this->job_key($job_id)) : self::option_get('aicb_last_training_job');
         return rest_ensure_response($job ?: ['status' => 'idle']);
     }
 
     public function rest_admin_memory(WP_REST_Request $request): WP_REST_Response {
-        global $wpdb;
+        $wpdb = self::database();
         $table = $wpdb->prefix . 'aicb_chunks';
 
         if ($request->get_method() === 'GET') {
@@ -1824,7 +2009,7 @@ final class AICB_Plugin {
     }
 
     public function rest_admin_stats(): WP_REST_Response {
-        global $wpdb;
+        $wpdb = self::database();
         $events = $wpdb->prefix . 'aicb_events';
         $chunks = $wpdb->prefix . 'aicb_chunks';
         $sessions = $wpdb->prefix . 'aicb_sessions';
@@ -2013,9 +2198,14 @@ final class AICB_Plugin {
         } elseif (!in_array($post->post_type, $this->enabled_post_type_names(), true)) {
             return;
         }
-        if (!wp_next_scheduled('aicb_reindex_single_post', [$post_id])) {
-            wp_schedule_single_event(time() + 60, 'aicb_reindex_single_post', [$post_id]);
+        $this->pending_reindexes[$post_id] = true;
+    }
+
+    public function run_pending_reindexes(): void {
+        foreach (array_keys($this->pending_reindexes) as $post_id) {
+            $this->cron_reindex_single_post((int) $post_id);
         }
+        $this->pending_reindexes = [];
     }
 
     public function cron_reindex_single_post(int $post_id): void {
@@ -2064,13 +2254,13 @@ final class AICB_Plugin {
             'started_at' => gmdate('c'),
             'finished_at' => null,
         ];
-        set_transient($this->job_key($job['job_id']), $job, DAY_IN_SECONDS);
-        update_option('aicb_last_training_job', $this->public_job($job), false);
+        self::cache_set($this->job_key($job['job_id']), $job, DAY_IN_SECONDS);
+        self::option_set('aicb_last_training_job', $this->public_job($job));
         return $this->public_job($job);
     }
 
     private function run_training_step(string $job_id): array {
-        $job = get_transient($this->job_key($job_id));
+        $job = self::cache_get($this->job_key($job_id));
         if (!$job || !is_array($job)) {
             throw new RuntimeException('Training-Job nicht gefunden oder abgelaufen.');
         }
@@ -2129,8 +2319,8 @@ final class AICB_Plugin {
         }
 
         $job['logs'] = array_slice($job['logs'], -80);
-        set_transient($this->job_key($job_id), $job, DAY_IN_SECONDS);
-        update_option('aicb_last_training_job', $this->public_job($job), false);
+        self::cache_set($this->job_key($job_id), $job, DAY_IN_SECONDS);
+        self::option_set('aicb_last_training_job', $this->public_job($job));
         return $this->public_job($job);
     }
 
@@ -2163,11 +2353,11 @@ final class AICB_Plugin {
      * -------------------------------------------------------------------- */
 
     private function index_mode(): string {
-        return get_option(self::INDEX_MODE_OPTION, 'all') === 'selected' ? 'selected' : 'all';
+        return self::option_get(self::INDEX_MODE_OPTION, 'all') === 'selected' ? 'selected' : 'all';
     }
 
     private function selected_post_ids_raw(): array {
-        return array_values(array_filter(array_map('intval', (array) get_option(self::SELECTED_POSTS_OPTION, []))));
+        return array_values(array_filter(array_map('intval', (array) self::option_get(self::SELECTED_POSTS_OPTION, []))));
     }
 
     /** Post-IDs für das Training: nur ausgewählte (Selektiv) bzw. alle veröffentlichten (Alle). */
@@ -2198,7 +2388,7 @@ final class AICB_Plugin {
     /** Gültige, ausgewählte PDF-Attachments. */
     private function selected_pdf_ids(): array {
         $ids = [];
-        foreach (array_map('intval', (array) get_option(self::SELECTED_PDFS_OPTION, [])) as $id) {
+        foreach (array_map('intval', (array) self::option_get(self::SELECTED_PDFS_OPTION, [])) as $id) {
             if ($id <= 0) {
                 continue;
             }
@@ -2850,7 +3040,7 @@ final class AICB_Plugin {
     }
 
     private function insert_document_chunks(string $source_id, string $source_type, string $url, string $title, string $content): int {
-        global $wpdb;
+        $wpdb = self::database();
         $table = $wpdb->prefix . 'aicb_chunks';
         $chunks = $this->chunk_text($content, $title);
         if (!$chunks) {
@@ -3023,7 +3213,7 @@ final class AICB_Plugin {
     }
 
     private function answer_question(string $question, array $history, string $lang): array {
-        global $wpdb;
+        $wpdb = self::database();
         $chunks_table = $wpdb->prefix . 'aicb_chunks';
         $count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$chunks_table}");
         $pack = $this->lang_pack($lang);
@@ -3620,7 +3810,7 @@ final class AICB_Plugin {
      * @return array{0: array<int,float>, 1: array<int,float>} [roher Cosinus, gewichtet]
      */
     private function rank_by_vector(array $query_vectors, array $weights = []): array {
-        global $wpdb;
+        $wpdb = self::database();
         $table = $wpdb->prefix . 'aicb_chunks';
 
         // Einzelvektor auch akzeptieren, damit Aufrufer beides übergeben können.
@@ -3702,8 +3892,8 @@ final class AICB_Plugin {
      * @return array<int,float> [id => Relevanz], absteigend sortiert.
      */
     private function rank_by_keyword(string $query, int $pool): array {
-        global $wpdb;
-        if (!get_option(self::FULLTEXT_OPTION, false)) {
+        $wpdb = self::database();
+        if (!self::option_get(self::FULLTEXT_OPTION, false)) {
             return [];
         }
         $terms = $this->keyword_terms($query);
@@ -3773,7 +3963,7 @@ final class AICB_Plugin {
      *                                 Nachbarn folgen direkt auf ihren Anker.
      */
     private function hydrate_chunks(array $scores, bool $with_neighbours = true): array {
-        global $wpdb;
+        $wpdb = self::database();
         if (!$scores) {
             return [];
         }
@@ -3852,8 +4042,8 @@ final class AICB_Plugin {
      * weiter - nur eben mit der alten Trefferqualität.
      */
     public function ensure_fulltext_index(bool $retry = false): void {
-        global $wpdb;
-        $state = get_option(self::FULLTEXT_OPTION, null);
+        $wpdb = self::database();
+        $state = self::option_get(self::FULLTEXT_OPTION, null);
         if ((int) $state === 1) {
             return;
         }
@@ -3865,13 +4055,13 @@ final class AICB_Plugin {
         $table = $wpdb->prefix . 'aicb_chunks';
         $existing = $wpdb->get_results("SHOW INDEX FROM {$table} WHERE Key_name = 'aicb_ft'", ARRAY_A);
         if ($existing) {
-            update_option(self::FULLTEXT_OPTION, 1, false);
+            self::option_set(self::FULLTEXT_OPTION, 1);
             return;
         }
         $suppress = $wpdb->suppress_errors(true);
         $ok = $wpdb->query("ALTER TABLE {$table} ADD FULLTEXT KEY aicb_ft (title, section, content)");
         $wpdb->suppress_errors($suppress);
-        update_option(self::FULLTEXT_OPTION, $ok === false ? 0 : 1, false);
+        self::option_set(self::FULLTEXT_OPTION, $ok === false ? 0 : 1);
     }
 
     /** Einheitsvektor (L2). Leeres Array bei Nullvektor. */
@@ -3988,8 +4178,8 @@ final class AICB_Plugin {
      * still reißen. So bleibt ein alter Index gültig, bis neu trainiert wird.
      */
     private function index_dimensions(): int {
-        global $wpdb;
-        $cached = (int) get_option(self::INDEX_DIMS_OPTION, 0);
+        $wpdb = self::database();
+        $cached = (int) self::option_get(self::INDEX_DIMS_OPTION, 0);
         if ($cached > 0) {
             return $cached;
         }
@@ -3999,7 +4189,7 @@ final class AICB_Plugin {
             $bin = base64_decode($packed, true);
             $dims = $bin === false ? 0 : intdiv(strlen($bin), 4);
             if ($dims > 0) {
-                update_option(self::INDEX_DIMS_OPTION, $dims, false);
+                self::option_set(self::INDEX_DIMS_OPTION, $dims);
                 return $dims;
             }
         }
@@ -4064,7 +4254,7 @@ final class AICB_Plugin {
     }
 
     private function create_session_payload(): array {
-        global $wpdb;
+        $wpdb = self::database();
         $token = wp_generate_password(48, false, false);
         $hash = $this->hash_token($token);
         $now = gmdate('Y-m-d H:i:s');
@@ -4086,7 +4276,7 @@ final class AICB_Plugin {
     }
 
     private function ensure_session_payload(string $token): array {
-        global $wpdb;
+        $wpdb = self::database();
         $token = trim($token);
         if ($token !== '') {
             $hash = $this->hash_token($token);
@@ -4107,7 +4297,7 @@ final class AICB_Plugin {
     }
 
     private function touch_session(string $hash): void {
-        global $wpdb;
+        $wpdb = self::database();
         $wpdb->query($wpdb->prepare(
             "UPDATE {$wpdb->prefix}aicb_sessions SET last_seen_at = %s, messages = messages + 1 WHERE token_hash = %s",
             gmdate('Y-m-d H:i:s'),
@@ -4116,7 +4306,7 @@ final class AICB_Plugin {
     }
 
     private function record_event(?string $session_hash, string $question, ?string $answer, string $status, ?string $error, array $usage): int {
-        global $wpdb;
+        $wpdb = self::database();
         $wpdb->insert($wpdb->prefix . 'aicb_events', [
             'session_hash' => $session_hash,
             'user_id' => get_current_user_id() ?: null,
@@ -4244,7 +4434,7 @@ PROMPT;
     }
 
     private function indexed_rows_for_url(string $url, string $title): array {
-        global $wpdb;
+        $wpdb = self::database();
         $table = $wpdb->prefix . 'aicb_chunks';
         $url_no_query = strtok($url, '?') ?: $url;
         $path = (string) wp_parse_url($url_no_query, PHP_URL_PATH);
@@ -4839,7 +5029,7 @@ PROMPT;
     }
 
     private function settings(): array {
-        return wp_parse_args((array) get_option(self::OPTION_KEY, []), self::default_settings());
+        return wp_parse_args((array) self::option_get(self::OPTION_KEY, []), self::default_settings());
     }
 
     private function setting(string $key, mixed $default = null): mixed {
@@ -4852,7 +5042,7 @@ PROMPT;
     }
 
     private function settings_for_admin(): array {
-        global $wpdb;
+        $wpdb = self::database();
         $settings = $this->settings();
         $settings['openai_api_key'] = '';
         $settings['has_openai_api_key'] = trim((string) $this->setting('openai_api_key', '')) !== '';
@@ -4861,7 +5051,7 @@ PROMPT;
         // Diagnose fuer die Suche: womit der Index tatsaechlich gebaut wurde
         // und ob der Volltext-Zweig der Hybrid-Suche zur Verfuegung steht.
         $settings['index_dims'] = $settings['index_count'] > 0 ? $this->index_dimensions() : 0;
-        $settings['fulltext_ready'] = (bool) get_option(self::FULLTEXT_OPTION, false);
+        $settings['fulltext_ready'] = (bool) self::option_get(self::FULLTEXT_OPTION, false);
         return $settings;
     }
 
@@ -4878,7 +5068,7 @@ PROMPT;
     }
 
     private function public_widget_config(): array {
-        $config = $this->sanitize_widget_config((array) get_option(self::WIDGET_OPTION_KEY, self::default_widget_config()));
+        $config = $this->sanitize_widget_config((array) self::option_get(self::WIDGET_OPTION_KEY, self::default_widget_config()));
         $settings = $this->settings();
         $lang = $this->site_lang();
         $pack = $this->lang_pack($lang);
@@ -4962,7 +5152,7 @@ PROMPT;
     }
 
     private function faqs(): array {
-        return (array) get_option(self::FAQ_OPTION_KEY, []);
+        return (array) self::option_get(self::FAQ_OPTION_KEY, []);
     }
 
     /**
@@ -5036,22 +5226,22 @@ PROMPT;
     }
 
     private function clear_chunks(): void {
-        global $wpdb;
+        $wpdb = self::database();
         $wpdb->query("TRUNCATE TABLE {$wpdb->prefix}aicb_chunks");
         // Der neue Index bekommt die aktuell eingestellte Dimension.
-        update_option(self::INDEX_DIMS_OPTION, (int) $this->setting('embedding_dims', 1024), false);
+        self::option_set(self::INDEX_DIMS_OPTION, (int) $this->setting('embedding_dims', 1024));
         // Die Tabelle ist jetzt leer - der guenstigste Moment fuer das ALTER,
         // falls der Index noch fehlt oder beim ersten Versuch scheiterte.
         $this->ensure_fulltext_index(true);
     }
 
     private function delete_source_chunks(string $source_id): void {
-        global $wpdb;
+        $wpdb = self::database();
         $wpdb->delete($wpdb->prefix . 'aicb_chunks', ['source_id' => $source_id], ['%s']);
     }
 
     private function delete_source_chunks_by_type(string $type): void {
-        global $wpdb;
+        $wpdb = self::database();
         $wpdb->delete($wpdb->prefix . 'aicb_chunks', ['source_type' => $type], ['%s']);
     }
 

@@ -5,6 +5,9 @@
 app/.env
 *.pem
 *.key
+!wordpress-plugin/ai-content-chatbot/certs/aiven-ca.pem
+wordpress-plugin/ai-content-chatbot/aicb-config.php
+wordpress-plugin/ai-content-chatbot/certs/aiven-ca.pem
 
 # Kundendaten (Prompts, gescrapte Inhalte, FAISS-Indizes, Uploads)
 app/kunden/

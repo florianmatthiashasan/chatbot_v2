@@ -3,21 +3,21 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 9.3.1
+Stable tag: 10.1.0
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
 
 == Description ==
 
-AI Content Chatbot adds a floating chat widget and an admin dashboard directly inside WordPress. It does not crawl a sitemap. Training reads the selected public post types, chunks the content, creates OpenAI embeddings, stores them in local WordPress database tables, and answers questions using retrieval augmented generation.
+AI Content Chatbot adds a floating chat widget and an admin dashboard directly inside WordPress. It does not crawl a sitemap. Training reads the selected public post types, chunks the content, creates OpenAI embeddings, stores all plugin-owned data in a separately configured TLS-secured MySQL database, and answers questions using retrieval augmented generation.
 
 Main features:
 
 * Training from pages, posts and public custom post types
 * Automatic session token creation and renewal for visitors
 * Server-side OpenAI API calls only
-* Local WordPress tables for chunks, sessions and chat events
+* Dedicated external MySQL tables for chunks, sessions, chat events, settings and runtime state
 * Admin settings for models, prompt, post types and contact details
 * Widget theme and quick-topic editor with live preview of the real chat window
 * FAQ manager
@@ -37,19 +37,37 @@ Main features:
 == Installation ==
 
 1. Upload the ai-content-chatbot folder to wp-content/plugins/.
-2. Activate the plugin in WordPress.
-3. Open AI Chatbot in the admin menu.
-4. Save an OpenAI API key.
-5. Select post types and start training.
+2. Copy the AICB_DB_* definitions from aicb-config.example.php into wp-config.php and set the database password.
+3. Activate the plugin in WordPress. The external schema is created automatically.
+4. Open AI Chatbot in the admin menu.
+5. Save an OpenAI API key.
+6. Select post types and start training.
 
 == Notes ==
 
-The plugin stores embeddings in the WordPress database as JSON vectors. This keeps the plugin standalone and easy to install. For very large sites, a dedicated vector database can be added later.
+The plugin reads published WordPress content but does not store its index, settings, sessions, events or training state in WordPress tables. These records are stored in the configured external MySQL database. The included Aiven CA certificate is used to verify the TLS connection; database credentials remain in wp-config.php or server environment variables.
 
 Die PDF-Textextraktion nutzt die mitgelieferte Bibliothek Smalot/PdfParser (MIT-Lizenz) samt symfony/polyfill-mbstring (MIT). Beide liegen unter vendor/ und benötigen kein Composer beim Nutzer.
 
 
 == Changelog ==
+
+= 10.1.0 =
+* Automatische Mandantentrennung: Jede WordPress-Installation erhaelt aus Domain und URL-Hash einen stabilen eigenen Tabellen-Prefix.
+* Bestehende unprefixed Aiven-Daten werden beim ersten Upgrade einmalig und gegen Mehrfachuebernahme geschuetzt in den Site-spezifischen Tabellenbestand kopiert.
+* Manuelles AICB_DB_PREFIX bleibt als optionaler Override moeglich.
+
+= 10.0.2 =
+* Optionale lokale Plugin-Konfiguration `aicb-config.php`: Der Chatbot kann Aiven verwenden, ohne die WordPress-Datenbankdefinitionen in `wp-config.php` zu veraendern.
+
+= 10.0.1 =
+* Kritische Fehlerseite verhindert: Bei fehlender oder fehlerhafter externer DB-Konfiguration bleibt WordPress erreichbar und zeigt Administratoren stattdessen einen konkreten Hinweis.
+* PDO-Abhaengigkeit entfernt. Die Aiven-Verbindung nutzt jetzt die von WordPress standardmaessig verwendete mysqli-Erweiterung inklusive TLS-CA-Pruefung.
+
+= 10.0.0 =
+* Persistenz auf eine separate, TLS-verifizierte MySQL-Datenbank umgestellt.
+* Index, Einstellungen, Widget-Konfiguration, FAQs, Sessions, Events, Metriken, Cache und Trainingsstatus liegen nicht mehr in WordPress-Tabellen bzw. WordPress-Options.
+* Externe Tabellen werden bei Aktivierung automatisch und idempotent angelegt.
 
 = 9.3.1 =
 * Fix: Der Bot beantwortete die vorherige Frage noch einmal. Ursache war die in 9.3.0 eingefuehrte Anreicherung kurzer Fragen aus dem Verlauf - sie lief auf jede kurze Frage, auch auf eine mit eigenem Thema ("was ist die Telefonnummer?"), und das alte Thema stellte dann die Mehrheit der Woerter im Suchtext. Vier Gegenmassnahmen: die Anreicherung greift nur noch bei echten Rueckbezuegen (Anschlusswort, Pro-Form oder gar kein eigenes Inhaltswort); der Volltext-Zweig sieht immer nur die unveraenderte Frage; die angereicherte Variante wird beim Ranking gedaempft; und der Prompt verlangt ausdruecklich die Antwort auf die aktuelle Nachricht.

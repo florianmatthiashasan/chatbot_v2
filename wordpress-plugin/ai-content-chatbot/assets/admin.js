@@ -645,7 +645,7 @@
     return `
       <section class="aicb-panel">
         <div class="aicb-panel-head">
-          <div><h2>Memory bearbeiten</h2><p>${Number(state.memory.total || 0)} Chunks im lokalen WordPress-Index.</p></div>
+          <div><h2>Memory bearbeiten</h2><p>${Number(state.memory.total || 0)} Chunks im externen MySQL-Index.</p></div>
           <form id="aicb-memory-search" class="aicb-inline"><input name="q" placeholder="Suchen" value="${escapeHtml(state.memory.q || "")}"><button class="button">Suchen</button></form>
         </div>
         <div class="aicb-memory-list">${items.map((item) => `
