@@ -1049,9 +1049,10 @@
 }
 
 .aicb-widget-shell .aicb-composer textarea:focus {
-  border: 0;
-  outline: none;
-  box-shadow: none;
+  /* Theme focus styles often use !important; the rounded composer owns focus. */
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .aicb-widget-shell .aicb-composer textarea::placeholder {

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 9.3.5
+ * Version: 9.3.11
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -34,7 +34,7 @@ final class AICB_Plugin {
     private const OLD_DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="12" r="1.65" fill="currentColor"/><circle cx="12" cy="12" r="1.65" fill="currentColor"/><circle cx="16" cy="12" r="1.65" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '9.3.5';
+    private const ASSET_VERSION = '9.3.11';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
@@ -92,6 +92,7 @@ final class AICB_Plugin {
     ];
 
     private static ?AICB_Plugin $instance = null;
+    private string $public_content_status = '';
 
     public static function instance(): AICB_Plugin {
         if (self::$instance === null) {
@@ -1459,6 +1460,7 @@ final class AICB_Plugin {
             $answer = (string) ($ticket['answer'] ?? '');
             $lang = (string) ($ticket['lang'] ?? 'de');
             $matches = $this->hydrate_chunks((array) ($ticket['scores'] ?? []), false);
+            $matches = $this->cited_matches($matches, $answer);
             $candidates = $this->card_candidates($matches, $answer);
             $actions = $this->build_actions(
                 $candidates,
@@ -2114,6 +2116,9 @@ final class AICB_Plugin {
             }
             $chars = 0;
             $count = $this->index_post($post, $chars);
+            if ($post->post_type === 'page' && $chars < 200 && $this->public_content_status !== '') {
+                $job['logs'][] = 'Frontend-Hinweis #' . $post->ID . ': ' . $this->public_content_status;
+            }
             $job['chunks'] += $count;
             $job['processed']++;
             // Die Zeichenzahl steht bewusst im Log: eine Seite, die im Frontend
@@ -2901,12 +2906,18 @@ final class AICB_Plugin {
         $parts = [];
         $title = wp_strip_all_tags(get_the_title($post));
         $parts[] = '# ' . $title;
+        if (in_array($post->post_type, ['post', 'news'], true)) {
+            $parts[] = 'Veröffentlicht: ' . get_the_date('Y-m-d', $post);
+        }
 
         if ($this->setting_bool('include_excerpts', true) && trim((string) $post->post_excerpt) !== '') {
             $parts[] = "Auszug:\n" . $this->clean_text($post->post_excerpt);
         }
 
-        $body = $this->clean_text($this->render_post_content($post));
+        // Template-built pages can be empty in the_content and in ACF alike.
+        // Prefer the public main content, exactly as a visitor receives it.
+        $public_html = $this->public_post_html($post);
+        $body = $this->clean_text($public_html !== '' ? $public_html : $this->render_post_content($post));
         if ($body !== '') {
             $parts[] = $body;
         }
@@ -2914,7 +2925,7 @@ final class AICB_Plugin {
         // Seiten, die aus Feldgruppen gebaut sind, tragen ihre Details im
         // Postmeta und nicht in post_content. Ohne diesen Zweig fehlen genau
         // die Angaben, nach denen gefragt wird: Zeiten, Preise, Kontakte.
-        $fields = $this->post_fields_text($post, $body);
+        $fields = $public_html === '' ? $this->post_fields_text($post, $body) : '';
         if ($fields !== '') {
             $parts[] = $fields;
         }
@@ -2933,6 +2944,83 @@ final class AICB_Plugin {
             'url' => get_permalink($post),
             'content' => trim(implode("\n\n", array_filter($parts))),
         ];
+    }
+
+    /** Hall AG's flexible blocks are native postmeta, not ACF or post_content. */
+    private function has_theme_repeater(WP_Post $post): bool {
+        $blocks = get_post_meta($post->ID, 'block_type', true);
+        return is_array($blocks) && $blocks && locate_template('repeater.php') !== '';
+    }
+
+    /** Fetch only the selected, published post; never crawl links or send admin cookies. */
+    private function public_post_html(WP_Post $post): string {
+        $this->public_content_status = '';
+        if ($this->has_theme_repeater($post)) {
+            return '';
+        }
+        if ($post->post_status !== 'publish' || $post->post_password !== ''
+            || !is_post_type_viewable($post->post_type)) {
+            return '';
+        }
+        $url = get_permalink($post);
+        if (!$url || wp_parse_url($url, PHP_URL_HOST) !== wp_parse_url(home_url('/'), PHP_URL_HOST)) {
+            return '';
+        }
+        $response = wp_safe_remote_get($url, [
+            'timeout' => 12,
+            'redirection' => 0,
+            'limit_response_size' => 2 * MB_IN_BYTES,
+            'headers' => ['Cache-Control' => 'no-cache'],
+        ]);
+        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+            $this->public_content_status = is_wp_error($response)
+                ? $response->get_error_message()
+                : 'HTTP ' . wp_remote_retrieve_response_code($response);
+            return '';
+        }
+        $html = $this->extract_public_main(wp_remote_retrieve_body($response));
+        if ($html === '') {
+            $this->public_content_status = 'Kein Hauptinhalt im Frontend gefunden';
+        }
+        return $html;
+    }
+
+    /** Keep the article/main region; navigation, footer and the chatbot are not knowledge. */
+    private function extract_public_main(string $html): string {
+        if ($html === '' || !class_exists('DOMDocument')) {
+            return '';
+        }
+        $previous = libxml_use_internal_errors(true);
+        $dom = new DOMDocument();
+        try {
+            $loaded = $dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+        if (!$loaded) {
+            return '';
+        }
+        $xpath = new DOMXPath($dom);
+        $main = null;
+        foreach (["//*[@id='main-content']", '//main', "//*[@role='main']", "//*[@id='main']", '//article'] as $selector) {
+            $nodes = $xpath->query($selector);
+            if ($nodes && $nodes->length > 0) {
+                $main = $nodes->item(0);
+                break;
+            }
+        }
+        // Never fall back to the entire body: global menus would contaminate every topic.
+        if (!$main) {
+            return '';
+        }
+        $remove = $xpath->query(".//script | .//style | .//noscript | .//template | .//nav | .//footer | .//form | .//*[@hidden] | .//*[@aria-hidden='true'] | .//*[contains(concat(' ', normalize-space(@class), ' '), ' aicb-widget-shell ')]", $main);
+        foreach ($remove ?: [] as $node) {
+            if ($node->parentNode) {
+                $node->parentNode->removeChild($node);
+            }
+        }
+        return (string) $dom->saveHTML($main);
     }
 
     /**
@@ -2974,7 +3062,22 @@ final class AICB_Plugin {
         try {
             // Shortcodes laufen innerhalb von the_content mit. Sie vorher zu
             // entfernen löschte ihren Inhalt, statt ihn zu rendern.
-            $html = (string) apply_filters('the_content', $post->post_content);
+            if ($this->has_theme_repeater($post)) {
+                // Render the same visible blocks as the frontend, including hidden-block
+                // rules and table formatting. No HTTP login or stored credentials needed.
+                $buffer_level = ob_get_level();
+                ob_start();
+                try {
+                    get_template_part('repeater');
+                    $html = (string) ob_get_contents();
+                } finally {
+                    while (ob_get_level() > $buffer_level) {
+                        ob_end_clean();
+                    }
+                }
+            } else {
+                $html = (string) apply_filters('the_content', $post->post_content);
+            }
         } catch (Throwable $e) {
             $html = (string) $post->post_content;
         }
@@ -3288,10 +3391,10 @@ final class AICB_Plugin {
             }
             $vectors = array_values(array_filter($this->embed_texts($queries, $this->index_dimensions())));
             if ($vectors) {
-                // Der Volltext-Zweig bekommt immer nur die unveraenderte Frage.
-                // Sonst suchte er nach den Woertern des alten Themas mit - und
-                // die sind bei einer kurzen Frage schnell in der Ueberzahl.
-                $matches = $this->search_chunks($vectors, $question);
+                // Explicit questions stay unchanged. True follow-ups also need
+                // their topic in keyword retrieval ("und die Preise?").
+                $matches = $this->search_chunks($vectors, $expanded);
+                $matches = $this->prioritize_topic_page($matches, $question, $expanded);
             }
         }
 
@@ -3306,11 +3409,10 @@ final class AICB_Plugin {
         $target_lang = $this->detect_message_lang($question) ?: $lang;
         $context = $relevant ? $this->build_context($relevant) : '';
         $messages = $this->build_chat_messages($question, $history, $context, $target_lang, $count > 0);
-        // Etwas Temperatur laesst die Antwort natuerlicher klingen (statt roboterhaft);
-        // die strikte Kontext-Bindung im Prompt verhindert weiterhin Halluzinationen.
+        // Low temperature keeps numeric/category answers stable and source-bound.
         // 900 Tokens reichen fuer eine vollstaendige Auskunft; der Prompt haelt die
         // Antwort faktendicht statt wortreich, das spart mehrere Sekunden Ausgabe.
-        $chat = $this->openai_chat($messages, ['temperature' => 0.4, 'max_tokens' => 900]);
+        $chat = $this->openai_chat($messages, ['temperature' => 0.1, 'max_tokens' => 900]);
         $answer = trim((string) ($chat['answer'] ?? ''));
         if ($answer === '') {
             $answer = $count > 0 ? $pack['error'] : $pack['no_index'];
@@ -3325,6 +3427,68 @@ final class AICB_Plugin {
             'lang' => $target_lang,
             'scores' => $this->match_scores($relevant),
         ];
+    }
+
+    /** Put an explicitly named detail page ahead of generic price/news matches.
+     * Include its other sections so closure notices and tariff conditions stay available.
+     */
+    private function prioritize_topic_page(array $matches, string $question, string $expanded): array {
+        global $wpdb;
+        $table = $wpdb->prefix . 'aicb_chunks';
+        $pages = $wpdb->get_results("SELECT DISTINCT source_id, title, source_url FROM {$table} WHERE source_type = 'page'", ARRAY_A);
+        $find = function (string $query) use ($pages): array {
+            $found = [];
+            foreach ($pages ?: [] as $page) {
+                $title = trim($this->str_lower((string) $page['title']));
+                if ($this->str_len($title) < 4 || $this->is_boilerplate_page($title, (string) $page['source_url'])) {
+                    continue;
+                }
+                if (preg_match('/(?<![\p{L}\p{N}])' . preg_quote($title, '/') . '(?![\p{L}\p{N}])/u', $this->str_lower($query))) {
+                    $found[] = (string) $page['source_id'];
+                }
+            }
+            return array_values(array_unique($found));
+        };
+        $sources = $find($question);
+        if (!$sources && $expanded !== $question) {
+            $sources = $find($expanded);
+        }
+        if (!$sources || count($sources) > 3) {
+            return $matches;
+        }
+        $placeholders = implode(',', array_fill(0, count($sources), '%s'));
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, source_id, source_url, title, section, content FROM {$table} WHERE source_id IN ({$placeholders}) ORDER BY id ASC LIMIT 48",
+            ...$sources
+        ), ARRAY_A);
+        $result = [];
+        // Preserve semantic order within the named pages before adding missing sections.
+        foreach ($matches as $row) {
+            if (in_array((string) $row['source_id'], $sources, true)) {
+                $result[(int) $row['id']] = $row;
+            }
+        }
+        foreach ($rows ?: [] as $row) {
+            $row['score'] = self::CARD_MIN_SCORE;
+            $result[(int) $row['id']] = $result[(int) $row['id']] ?? $row;
+        }
+        foreach ($matches as $row) {
+            $result[(int) $row['id']] = $result[(int) $row['id']] ?? $row;
+        }
+        return array_values($result);
+    }
+
+    /** Only sources actually cited in the answer may produce source chips/cards. */
+    private function cited_matches(array $matches, string $answer): array {
+        preg_match_all('~https?://[^\s<>"\[\]]+~u', $answer, $urls);
+        $cited = [];
+        foreach ($urls[0] ?? [] as $url) {
+            $url = rtrim($url, ").,;!?");
+            $cited[explode('#', $url, 2)[0]] = true;
+        }
+        return array_values(array_filter($matches, function (array $row) use ($cited): bool {
+            return isset($cited[explode('#', (string) $row['source_url'], 2)[0]]);
+        }));
     }
 
     /** [id => score] aus den Treffern - reicht, um sie spaeter neu zu laden. */
@@ -3485,6 +3649,22 @@ final class AICB_Plugin {
         if (!$matches || $this->looks_unanswered($answer)) {
             return [];
         }
+        // Prefer a substantive section that actually supports the answer,
+        // rather than a breadcrumb or a two-word news teaser on the same URL.
+        $terms = $this->keyword_terms($this->strip_sources_tail($answer));
+        $rank = function (array $row) use ($terms): float {
+            $score = (float) ($row['score'] ?? 0);
+            foreach ($terms as $term) {
+                if (stripos((string) $row['section'], $term) !== false) {
+                    $score += 3;
+                }
+                if (stripos((string) $row['content'], $term) !== false) {
+                    $score += 1;
+                }
+            }
+            return $score;
+        };
+        usort($matches, fn($a, $b) => $rank($b) <=> $rank($a));
         $candidates = [];
         $seen = [];
         foreach ($matches as $row) {
@@ -3501,7 +3681,8 @@ final class AICB_Plugin {
             if ($url === '' || $title === '' || isset($seen[$url])) {
                 continue;
             }
-            if ($this->is_boilerplate_page($title, $url)) {
+            if ($this->is_boilerplate_page($title, $url)
+                || $this->str_len($this->card_teaser((string) $row['content'], $title, (string) $row['section'])) < 40) {
                 continue;
             }
             $seen[$url] = true;
@@ -3647,14 +3828,25 @@ final class AICB_Plugin {
             . "in diesem Fall nicht, es gebe keinen Kontext.\n"
             . "- Nennst du Fakten aus dem Kontext, gib die ein bis zwei wichtigsten Quellen als "
             . "direkte URL an - nicht jede Quelle zu jedem Satz.\n"
+            . "- Bei aktuellen Preisen und Öffnungszeiten hat die passende Leistungsseite Vorrang vor "
+            . "alten Nachrichten. Nenne eine aktuelle Schließung oder Saisonpause zuerst; reguläre "
+            . "Saisonzeiten bedeuten nicht, dass heute geöffnet ist. Leite kein Ereignisjahr aus "
+            . "dem heutigen Datum oder einer anderen Meldung ab.\n"
+            . "- Links und Empfehlungen müssen genau zum erfragten Angebot gehören. Verweise "
+            . "bei Schwimmbadpreisen niemals auf Stromtarife oder andere sachfremde Preise.\n"
             . "- Nenne konkrete Details aus dem Kontext: Zahlen, Preise, Uhrzeiten, Dauer, Namen, "
             . "Bedingungen, Ausstattung. Fasse nicht vage zusammen, wenn genaue Angaben dastehen.\n"
             . "- Stehen mehrere Varianten im Kontext (z. B. mehrere Zimmer, Tarife oder Pakete), "
             . "nenne sie einzeln mit ihren jeweiligen Angaben statt nur einer Sammelaussage.\n"
             . "- Antworte faktendicht statt wortreich. Jeder Satz muss eine Information tragen: "
             . "keine Einleitungsfloskel, keine Wiederholung der Frage, keine Zusammenfassung am "
-            . "Ende. Ziel sind rund 120 bis 150 Wörter; nur wenn du mehrere Varianten aufzählen "
-            . "musst, darfst du länger werden.\n"
+            . "Ende. Eine einfache Frage beantwortest du in zwei bis vier Sätzen oder einer kurzen Liste. "
+            . "Nur bei einer ausdrücklich gewünschten Übersicht zählst du alle Varianten auf.\n"
+            . "- Bei allgemeinen Preisfragen nenne zuerst den Standardpreis und die wesentlichen "
+            . "Ermäßigungen. Weitere Ticketarten, Pfand und Extras nur, wenn danach gefragt wird.\n"
+            . "- Übernimm Tabellenzeilen, Kategorien und Jahrgänge exakt. Verbinde keine getrennten "
+            . "Alters- oder Jahrgangsgruppen zu einer neuen Gruppe; kostenloser und ermäßigter Eintritt "
+            . "sind getrennte Kategorien.\n"
             . "- Gliedere Aufzählungen als kurze Liste: ein Punkt pro Variante mit ihren konkreten "
             . "Angaben. Fließtext nur für zusammenhängende Erklärungen.\n"
             . "- Beantworte die gestellte Frage und höre dann auf. Zähle nicht von dir aus weitere "
@@ -3764,8 +3956,7 @@ final class AICB_Plugin {
      *                               Verlauf angereicherte Varianten und zaehlen
      *                               nur halb, damit sie die Frage ergaenzen und
      *                               nicht ueberstimmen.
-     * @param string $keyword_query  Rohtext für den Volltext-Zweig ('' = aus).
-     *                               Immer die unveraenderte aktuelle Frage.
+     * @param string $keyword_query  Aktuelle Frage, bei echten Folgefragen mit Thema ('' = aus).
      */
     private function search_chunks(array $query_vectors, string $keyword_query = ''): array {
         $limit = max(1, min(32, (int) $this->setting('retriever_k', 14)));
@@ -4179,7 +4370,7 @@ final class AICB_Plugin {
             if (strlen($content) > 3000) {
                 $content = substr($content, 0, 3000) . "\n...[gekürzt]";
             }
-            $entry = '[' . ($idx + 1) . '] Quelle: ' . ($row['source_url'] ?: home_url('/')) . ' | Titel: ' . $row['title'] . ' | Abschnitt: ' . $row['section'] . "\n" . $content;
+            $entry = '[' . ($idx + 1) . '] Quelle: ' . ($row['source_url'] ?: home_url('/')) . ' | Titel: ' . $row['title'] . ' | Inhaltstyp: ' . (str_starts_with((string) $row['source_id'], 'post:') ? get_post_type((int) substr($row['source_id'], 5)) : 'Dokument') . ' | Abschnitt: ' . $row['section'] . "\n" . $content;
             if ($chars + strlen($entry) > $max && $parts) {
                 break;
             }
@@ -4214,6 +4405,13 @@ final class AICB_Plugin {
             'temperature' => 0,
             'messages' => $messages,
         ], $overrides);
+        // GPT-5.4 mini and GPT-6 Luna use the current token limit. Keep legacy
+        // model payloads unchanged and avoid incompatible sampling parameters.
+        if (preg_match('/^(?:gpt-5\.4-mini|gpt-6-luna)(?:-|$)/', (string) $payload['model'])) {
+            $payload['reasoning_effort'] = 'none';
+            $payload['max_completion_tokens'] = (int) ($payload['max_tokens'] ?? 1200);
+            unset($payload['max_tokens'], $payload['temperature']);
+        }
         $data = $this->openai_request('chat/completions', $payload);
         return [
             'answer' => $data['choices'][0]['message']['content'] ?? '',
@@ -5219,10 +5417,12 @@ PROMPT;
         $html = (string) $html;
         $html = preg_replace('#<(script|style|noscript|template)[^>]*>.*?</\1>#is', ' ', $html);
 
-        // Überschriften als Markdown, damit die Abschnittslogik sie erkennt.
-        for ($level = 1; $level <= 6; $level++) {
-            $html = preg_replace('#<h' . $level . '[^>]*>(.*?)</h' . $level . '>#is', "\n\n" . str_repeat('#', $level) . ' $1' . "\n", $html);
-        }
+        // Theme headings contain indentation/newlines inside their tags.
+        // Keep the heading text on the marker line so section splitting works.
+        $html = preg_replace_callback('#<h([1-6])\b[^>]*>(.*?)</h\1>#is', function (array $match): string {
+            $heading = trim((string) preg_replace('/\s+/u', ' ', wp_strip_all_tags($match[2])));
+            return $heading === '' ? "\n\n" : "\n\n" . str_repeat('#', (int) $match[1]) . ' ' . $heading . "\n\n";
+        }, $html);
         // Listenpunkte behalten ihren Aufzählungscharakter.
         $html = preg_replace('#<li[^>]*>#i', "\n- ", $html);
         $html = preg_replace('#</li>#i', "\n", $html);

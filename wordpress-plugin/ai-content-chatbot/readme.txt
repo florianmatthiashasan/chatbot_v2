@@ -3,7 +3,7 @@ Contributors: local
 Tags: chatbot, ai, openai, rag, custom post types
 Requires at least: 6.2
 Requires PHP: 8.0
-Stable tag: 9.3.1
+Stable tag: 9.3.11
 License: GPLv2 or later
 
 Standalone WordPress chatbot that trains from published pages, posts and public custom post types.
@@ -50,6 +50,27 @@ Die PDF-Textextraktion nutzt die mitgelieferte Bibliothek Smalot/PdfParser (MIT-
 
 
 == Changelog ==
+
+= 9.3.11 =
+* Unterstützung für GPT-6 Luna: kompatible Chat-Completions-Parameter mit festem Ausgabelimit und reasoning_effort=none für kurze, kostengünstige Antworten. Das Antwortmodell wird weiterhin über die Einstellungen gewählt.
+
+= 9.3.10 =
+* Hall-AG-Theme: Eigene Flexible Blocks werden direkt mit dem Theme-Renderer indexiert, einschließlich Preistabellen, Sichtbarkeitsregeln und Öffnungszeiten. Funktioniert auch hinter HTTP-Anmeldung und beim automatischen Nachindexieren ohne gespeicherte Zugangsdaten.
+* Indexiert den sichtbaren Hauptinhalt veröffentlichter Seiten, auch wenn ein Theme seine Inhalte außerhalb von the_content und ACF rendert. Menüs, Footer und Chat-Widget werden ausgeschlossen; bei Abruffehlern bleibt der bisherige Renderer verfügbar.
+* Mehrzeilige Theme-Überschriften werden korrekt in getrennte Wissensabschnitte überführt. Antworten bleiben der Frage angemessen kurz und halten Altersgruppen sowie Tabellenkategorien auseinander.
+* Unterstützt GPT-5.4 mini mit passendem Tokenparameter und kurzen Antworten ohne zusätzlichen Reasoning-Schritt. Bestehende Modellkonfigurationen bleiben erhalten.
+* Antwortkarten nutzen aussagekräftige, zur Antwort passende Abschnitte statt kurzer Breadcrumbs oder News-Verweise.
+* Explizit genannte Leistungsseiten und ihre ergänzenden Abschnitte erhalten Vorrang vor generischen Preis- und Nachrichten-Treffern. Folgefragen nutzen ihr Thema auch in der Volltextsuche.
+* Quellen und Antwortkarten stammen ausschließlich aus den tatsächlich in der Antwort zitierten Treffern. Aktuelle Schließhinweise haben Vorrang vor regulären Saisonzeiten und alten Nachrichten.
+* Behebt den rechteckigen blauen Theme-Fokus im Eingabefeld; der sichtbare Fokus bleibt am abgerundeten Composer.
+* Nach dem Update vollständig neu trainieren.
+
+= 9.3.5 =
+* Fix: Seiten, die aus dynamischen Bloecken oder ACF-Bloecken gebaut sind, landeten praktisch leer im Index - im Frontend war die Seite voll, der Bot kannte nur Titel und Breadcrumb. Ursache war der fehlende Post-Kontext beim Training: die Schleife rendert the_content, ohne den globalen $post zu setzen, und ein Block, der seine Werte ueber get_the_ID() holt, liefert dann leeres Markup. Das Rendern laeuft jetzt in einer echten Post-Schleife (eigene WP_Query, $wp_query und $wp_the_query gesetzt, danach wiederhergestellt), damit auch is_main_query() stimmt.
+* Fix: strip_shortcodes() lief vor the_content und loeschte damit den Inhalt von Shortcodes, statt ihn zu rendern. Shortcodes laufen jetzt in the_content mit; erst danach werden unregistrierte Reste entfernt.
+* Neu: Inhalte aus Custom Fields (ACF) werden mitindexiert - rekursiv ueber Flexible Content, Repeater und Gruppen. Seiten ohne post_content, deren Angaben komplett im Postmeta liegen, waren dem Bot vorher nicht zugaenglich. Zusammengehoerige Werte einer Zeile bleiben auf einer Zeile, sonst verliert "Mo-Fr" seine Uhrzeit. Farbwerte, Attachment-IDs, Bildpfade und Feldkeys werden als Rauschen aussortiert, Bildfelder steuern nur ihre Beschriftung bei, und was schon im gerenderten Text steht, wird nicht doppelt abgelegt.
+* Das Trainings-Log nennt jetzt die Zeichenzahl pro Seite und benennt Seiten ohne Textinhalt ausdruecklich. Eine Seite, die im Frontend voll ist und hier mit ein paar hundert Zeichen auftaucht, faellt damit sofort auf.
+* Hinweis: Die Korrekturen greifen erst nach einem vollstaendigen Neu-Training - bestehende Chunks werden nicht automatisch neu gebaut.
 
 = 9.3.1 =
 * Fix: Der Bot beantwortete die vorherige Frage noch einmal. Ursache war die in 9.3.0 eingefuehrte Anreicherung kurzer Fragen aus dem Verlauf - sie lief auf jede kurze Frage, auch auf eine mit eigenem Thema ("was ist die Telefonnummer?"), und das alte Thema stellte dann die Mehrheit der Woerter im Suchtext. Vier Gegenmassnahmen: die Anreicherung greift nur noch bei echten Rueckbezuegen (Anschlusswort, Pro-Form oder gar kein eigenes Inhaltswort); der Volltext-Zweig sieht immer nur die unveraenderte Frage; die angereicherte Variante wird beim Ranking gedaempft; und der Prompt verlangt ausdruecklich die Antwort auf die aktuelle Nachricht.
