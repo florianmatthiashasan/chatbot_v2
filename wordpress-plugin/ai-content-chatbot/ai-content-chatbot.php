@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI Content Chatbot
  * Description: Standalone RAG chatbot for WordPress content. Trains from pages, posts and public custom post types without sitemap crawling.
- * Version: 9.3.4
+ * Version: 9.3.5
  * Author: Local
  * Requires at least: 6.2
  * Requires PHP: 8.0
@@ -34,10 +34,13 @@ final class AICB_Plugin {
     private const OLD_DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3.75c-4.56 0-8.25 3.08-8.25 6.88 0 2.03 1.06 3.86 2.75 5.12l-.5 3.07 3.18-1.67c.88.23 1.83.36 2.82.36 4.56 0 8.25-3.08 8.25-6.88S16.56 3.75 12 3.75z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 10.9h.01M12 10.9h.01M15.4 10.9h.01" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M17.9 5.15l.45-1.15.45 1.15L20 5.6l-1.2.45-.45 1.15-.45-1.15-1.2-.45 1.2-.45z" fill="currentColor"/></svg>';
     private const DEFAULT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="12" r="1.65" fill="currentColor"/><circle cx="12" cy="12" r="1.65" fill="currentColor"/><circle cx="16" cy="12" r="1.65" fill="currentColor"/></svg>';
     private const REST_NS = 'ai-content-chatbot/v1';
-    private const ASSET_VERSION = '9.3.4';
+    private const ASSET_VERSION = '9.3.5';
     // Cosinus-Ähnlichkeit: darunter gilt ein Treffer als themenfremd.
     private const CONTEXT_MIN_SCORE = 0.18;
     private const CARD_MIN_SCORE = 0.28;
+    // Custom Fields: Grenzen gegen ausufernde Feldbäume.
+    private const FIELD_MAX_LINES = 400;
+    private const FIELD_MAX_DEPTH = 8;
     // Kleinere Chunks finden Details präziser, die Überlappung hält
     // Zusammenhänge über die Grenze hinweg zusammen.
     private const CHUNK_TARGET_TOKENS = 380;
@@ -2109,10 +2112,16 @@ final class AICB_Plugin {
                 $job['logs'][] = "Übersprungen: Post {$id}";
                 continue;
             }
-            $count = $this->index_post($post);
+            $chars = 0;
+            $count = $this->index_post($post, $chars);
             $job['chunks'] += $count;
             $job['processed']++;
-            $job['logs'][] = sprintf('Indexiert: #%d %s (%d Chunks)', $post->ID, get_the_title($post), $count);
+            // Die Zeichenzahl steht bewusst im Log: eine Seite, die im Frontend
+            // voll ist und hier mit ein paar hundert Zeichen auftaucht, liefert
+            // ihren Inhalt nicht aus - das sieht man sonst nirgends.
+            $job['logs'][] = $count > 0
+                ? sprintf('Indexiert: #%d %s (%d Chunks, %d Zeichen)', $post->ID, get_the_title($post), $count, $chars)
+                : sprintf('Ohne Textinhalt übersprungen: #%d %s', $post->ID, get_the_title($post));
         }
 
         if ($job['cursor'] >= $job['total'] && empty($job['faq_indexed'])) {
@@ -2134,14 +2143,16 @@ final class AICB_Plugin {
         return $this->public_job($job);
     }
 
-    private function index_post(WP_Post $post): int {
+    private function index_post(WP_Post $post, ?int &$chars = null): int {
         $source_id = 'post:' . $post->ID;
         $this->delete_source_chunks($source_id);
         $document = $this->post_to_document($post);
-        if (trim($document['content']) === '') {
+        $content = trim($document['content']);
+        $chars = $this->str_len($content);
+        if ($content === '') {
             return 0;
         }
-        return $this->insert_document_chunks($source_id, $post->post_type, $document['url'], $document['title'], $document['content']);
+        return $this->insert_document_chunks($source_id, $post->post_type, $document['url'], $document['title'], $content);
     }
 
     private function index_faqs(): int {
@@ -2895,10 +2906,18 @@ final class AICB_Plugin {
             $parts[] = "Auszug:\n" . $this->clean_text($post->post_excerpt);
         }
 
-        $content = $post->post_content;
-        $content = strip_shortcodes($content);
-        $content = apply_filters('the_content', $content);
-        $parts[] = $this->clean_text($content);
+        $body = $this->clean_text($this->render_post_content($post));
+        if ($body !== '') {
+            $parts[] = $body;
+        }
+
+        // Seiten, die aus Feldgruppen gebaut sind, tragen ihre Details im
+        // Postmeta und nicht in post_content. Ohne diesen Zweig fehlen genau
+        // die Angaben, nach denen gefragt wird: Zeiten, Preise, Kontakte.
+        $fields = $this->post_fields_text($post, $body);
+        if ($fields !== '') {
+            $parts[] = $fields;
+        }
 
         if ($this->setting_bool('include_taxonomies', true)) {
             $terms = $this->post_terms_text($post);
@@ -2914,6 +2933,232 @@ final class AICB_Plugin {
             'url' => get_permalink($post),
             'content' => trim(implode("\n\n", array_filter($parts))),
         ];
+    }
+
+    /**
+     * post_content so rendern, wie der Besucher die Seite sieht.
+     *
+     * Entscheidend ist der Post-Kontext. Dynamische Blöcke und Feldgruppen
+     * holen ihre Werte über get_the_ID() beziehungsweise den globalen $post.
+     * Beim Training läuft die Schleife ohne diesen Kontext, die Blöcke rendern
+     * dann leeres Markup - die Seite landet fast inhaltslos im Index, obwohl
+     * sie im Frontend voll ist.
+     */
+    private function render_post_content(WP_Post $post): string {
+        global $wp_query, $wp_the_query;
+
+        $previous_post = $GLOBALS['post'] ?? null;
+        $previous_query = $wp_query;
+        $previous_main_query = $wp_the_query;
+
+        $query = new WP_Query([
+            'p' => $post->ID,
+            'post_type' => $post->post_type,
+            'posts_per_page' => 1,
+            'no_found_rows' => true,
+            'ignore_sticky_posts' => true,
+        ]);
+
+        // Auch $wp_the_query, damit is_main_query() stimmt: Blöcke, die darüber
+        // entscheiden, ob sie überhaupt rendern, würden sonst aussteigen.
+        $wp_query = $query;
+        $wp_the_query = $query;
+
+        if ($query->have_posts()) {
+            $query->the_post();
+        } else {
+            $GLOBALS['post'] = $post;
+            setup_postdata($post);
+        }
+
+        try {
+            // Shortcodes laufen innerhalb von the_content mit. Sie vorher zu
+            // entfernen löschte ihren Inhalt, statt ihn zu rendern.
+            $html = (string) apply_filters('the_content', $post->post_content);
+        } catch (Throwable $e) {
+            $html = (string) $post->post_content;
+        }
+
+        $wp_query = $previous_query;
+        $wp_the_query = $previous_main_query;
+        $GLOBALS['post'] = $previous_post;
+        if ($previous_post instanceof WP_Post) {
+            setup_postdata($previous_post);
+        } else {
+            wp_reset_postdata();
+        }
+
+        // Was jetzt noch wie ein Shortcode aussieht, ist nicht registriert.
+        return strip_shortcodes($html);
+    }
+
+    /**
+     * Inhalte aus Custom Fields (ACF) als Text.
+     *
+     * Flexible Content, Repeater und Gruppen liegen im Postmeta und tauchen in
+     * the_content nicht auf. Für Seiten, die komplett aus Feldgruppen bestehen,
+     * ist das der einzige Weg zu Öffnungszeiten, Preisen und Kontaktdaten.
+     * Was schon im gerenderten Text steht, wird weggelassen.
+     */
+    private function post_fields_text(WP_Post $post, string $body): string {
+        if (!function_exists('get_fields')) {
+            return '';
+        }
+
+        $fields = get_fields($post->ID);
+        if (!is_array($fields) || !$fields) {
+            return '';
+        }
+
+        $lines = [];
+        $this->flatten_field_value($fields, $lines, 0, '');
+        if (!$lines) {
+            return '';
+        }
+
+        $haystack = $this->fold_for_compare($body);
+        $kept = [];
+        foreach (array_unique($lines) as $line) {
+            // Nur der Wert wird verglichen, nicht das Label: das Label ist ein
+            // Feldname und steht im gerenderten Text ohnehin nie so da.
+            $separator = strpos($line, ': ');
+            $value = $this->fold_for_compare($separator === false ? $line : substr($line, $separator + 2));
+            if ($value !== '' && $haystack !== '' && strpos($haystack, $value) !== false) {
+                continue;
+            }
+            $kept[] = $line;
+        }
+
+        return $kept ? "Weitere Angaben:\n" . implode("\n", $kept) : '';
+    }
+
+    /** Verschachtelte Feldwerte zu "Label: Wert"-Zeilen abflachen. */
+    private function flatten_field_value($value, array &$lines, int $depth, string $label): void {
+        if ($depth > self::FIELD_MAX_DEPTH || count($lines) >= self::FIELD_MAX_LINES) {
+            return;
+        }
+
+        if ($value instanceof WP_Post) {
+            $this->append_field_line($lines, $label, wp_strip_all_tags(get_the_title($value)));
+            return;
+        }
+
+        if ($value instanceof WP_Term) {
+            $this->append_field_line($lines, $label, (string) $value->name);
+            return;
+        }
+
+        if (is_array($value)) {
+            // Bild- und Dateifelder liefern ein ganzes Metadaten-Paket. Davon
+            // ist nur die Beschriftung Inhalt, der Rest sind Pfade und Maße.
+            if (isset($value['url']) && (isset($value['mime_type']) || isset($value['sizes']))) {
+                foreach (['title', 'alt', 'caption', 'description'] as $key) {
+                    if (!empty($value[$key]) && is_string($value[$key])) {
+                        $this->append_field_line($lines, $label, $value[$key]);
+                    }
+                }
+                return;
+            }
+
+            // Der Layout-Name eines Flexible-Content-Blocks ist ein Bezeichner,
+            // kein Inhalt. Die Feldnamen darin benennen die Angaben ohnehin.
+            unset($value['acf_fc_layout']);
+
+            // Eine Zeile aus Tabelle oder Repeater bleibt eine Zeile. Getrennt
+            // abgelegt verliert "Mo-Fr" seine Uhrzeit und wird unbrauchbar.
+            $row = $this->field_row_line($value);
+            if ($row !== '') {
+                $this->append_field_line($lines, $label, $row);
+                return;
+            }
+
+            foreach ($value as $key => $item) {
+                $child_label = is_string($key) ? $this->humanize_field_key($key) : $label;
+                $this->flatten_field_value($item, $lines, $depth + 1, $child_label);
+            }
+            return;
+        }
+
+        if (is_bool($value) || $value === null) {
+            return;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            // Blanke Zahlen sind fast immer Post- oder Attachment-IDs.
+            return;
+        }
+
+        if (is_string($value)) {
+            $this->append_field_line($lines, $label, $value);
+        }
+    }
+
+    /**
+     * Eine flache Feldgruppe als eine Zeile - oder '' , wenn sie dafür nicht
+     * taugt. Zusammengehörige Angaben (Tag/Uhrzeit, Name/Funktion, Posten/Preis)
+     * stehen damit auch im Index nebeneinander.
+     */
+    private function field_row_line(array $row): string {
+        if (count($row) < 2 || count($row) > 8) {
+            return '';
+        }
+
+        $parts = [];
+        foreach ($row as $key => $item) {
+            if (!is_string($key) || (!is_string($item) && !is_int($item) && !is_float($item))) {
+                return '';
+            }
+            $text = $this->clean_text((string) $item);
+            if ($text === '' || $this->is_noise_field_value($text)) {
+                continue;
+            }
+            // Mehrzeiliges gehört nicht in eine Zeile gepresst.
+            if (strpos($text, "\n") !== false || $this->str_len($text) > 160) {
+                return '';
+            }
+            $name = $this->humanize_field_key($key);
+            $parts[] = $name === '' ? $text : $name . ': ' . $text;
+        }
+
+        return count($parts) >= 2 ? implode(' | ', $parts) : '';
+    }
+
+    private function append_field_line(array &$lines, string $label, string $value): void {
+        if (count($lines) >= self::FIELD_MAX_LINES) {
+            return;
+        }
+        $text = $this->clean_text($value);
+        if ($text === '' || $this->is_noise_field_value($text)) {
+            return;
+        }
+        // Mehrzeilige Feldwerte bleiben mehrzeilig, nur das Label führt.
+        $lines[] = $label !== '' ? $label . ': ' . $text : $text;
+    }
+
+    /** Werte, die nur Technik transportieren und den Index verwässern. */
+    private function is_noise_field_value(string $text): bool {
+        if (preg_match('/^#[0-9a-f]{3,8}$/i', $text)) {
+            return true;
+        }
+        if (preg_match('/^\d+$/', $text)) {
+            return true;
+        }
+        if (preg_match('/^https?:\/\/\S+\.(jpe?g|png|gif|webp|svg|avif|ico)$/i', $text)) {
+            return true;
+        }
+        // Feldkeys und Layout-Namen von ACF.
+        return (bool) preg_match('/^(field_[0-9a-f]{6,}|acf-[a-z0-9_-]+)$/i', $text);
+    }
+
+    private function humanize_field_key(string $key): string {
+        $key = (string) preg_replace('/^(field_|acf_|_)/', '', $key);
+        $key = str_replace(['_', '-'], ' ', $key);
+        $key = trim((string) preg_replace('/\s+/', ' ', $key));
+        return $key === '' ? '' : ucfirst($key);
+    }
+
+    private function fold_for_compare(string $text): string {
+        return trim((string) preg_replace('/\s+/u', ' ', $this->str_lower($text)));
     }
 
     private function post_terms_text(WP_Post $post): string {
